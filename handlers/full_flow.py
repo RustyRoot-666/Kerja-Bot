@@ -22,6 +22,7 @@ from utils.telegram_format import pre_block
     NEW_PHOTO,
     NEW_SN_CONFIRM,
     NEW_SN_MANUAL,
+    TYPE_ONT_MANUAL,
     STO,
     VALINS_ID,
     RESULT,
@@ -29,7 +30,7 @@ from utils.telegram_format import pre_block
     CUSTOMER_NAME,
     ADDRESS,
     CUSTOMER_PHONE,
-) = range(400, 416)
+) = range(400, 417)
 
 
 async def start_full(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -141,6 +142,9 @@ async def new_sn_direct(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     if not update.message or not update.message.text:
         return NEW_PHOTO
     context.user_data["full"]["new_sn"] = update.message.text.strip().upper()
+    if not context.user_data["full"].get("ont_type"):
+        await update.message.reply_text("TYPE ONT:")
+        return TYPE_ONT_MANUAL
     await update.message.reply_text("STO:")
     return STO
 
@@ -151,6 +155,9 @@ async def new_sn_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     text = update.message.text.strip()
     if text != "-":
         context.user_data["full"]["new_sn"] = text.upper()
+    if not context.user_data["full"].get("ont_type"):
+        await update.message.reply_text("TYPE ONT:")
+        return TYPE_ONT_MANUAL
     await update.message.reply_text("STO:")
     return STO
 
@@ -159,6 +166,17 @@ async def new_sn_manual(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     if not update.message or not update.message.text:
         return NEW_SN_MANUAL
     context.user_data["full"]["new_sn"] = update.message.text.strip().upper()
+    if not context.user_data["full"].get("ont_type"):
+        await update.message.reply_text("TYPE ONT:")
+        return TYPE_ONT_MANUAL
+    await update.message.reply_text("STO:")
+    return STO
+
+
+async def type_ont_manual(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.message or not update.message.text:
+        return TYPE_ONT_MANUAL
+    context.user_data["full"]["ont_type"] = update.message.text.strip().upper()
     await update.message.reply_text("STO:")
     return STO
 
@@ -237,6 +255,7 @@ def build_full_conversation() -> ConversationHandler:
             ],
             NEW_SN_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, new_sn_confirm)],
             NEW_SN_MANUAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, new_sn_manual)],
+            TYPE_ONT_MANUAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, type_ont_manual)],
             STO: [MessageHandler(filters.TEXT & ~filters.COMMAND, sto)],
             VALINS_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, valins_id)],
             RESULT: [MessageHandler(filters.TEXT & ~filters.COMMAND, result)],
