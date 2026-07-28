@@ -23,7 +23,11 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not technician or not update.effective_chat:
         return
     await update.effective_chat.send_message(
-        f"👤 Profile\n\nNIK: {technician.nik}\nNama: {technician.name}\nTelegram ID: {technician.telegram_id}",
+        f"👤 Profile\n\n"
+        f"NIK: {technician.nik}\n"
+        f"Nama: {technician.name}\n"
+        f"STO: {technician.sto or '-'}\n"
+        f"Telegram ID: {technician.telegram_id}",
         reply_markup=main_menu_keyboard(),
     )
 
