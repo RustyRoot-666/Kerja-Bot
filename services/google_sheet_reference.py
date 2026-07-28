@@ -17,33 +17,60 @@ DEFAULT_SHEET_GID = "0"
 CACHE_TTL_SECONDS = 180
 CLOSED_STATUSES = {"CLOSE", "CLOSED", "DONE", "SELESAI", "COMPLETED"}
 
-TICKET_HEADERS = {
-    "TIKET", "TICKET", "TICKET ID", "TIKET ID", "INC", "NO TIKET",
-    "NO. TIKET", "NOMOR TIKET", "TICKET EXTERNAL", "TIKET EXTERNAL",
-    "EXTERNAL TICKET", "INCIDENT", "INCIDENT ID", "NO INCIDENT",
-}
-INSERA_TICKET_HEADERS = {
-    "INSERA TODAY", "TIKET INSERA", "TICKET INSERA", "INSERA",
-    "INSERA TICKET", "INSERA TODAY TICKET",
-}
-SERVICE_HEADERS = {
-    "NO INET", "NO INTERNET", "NO SERVICE", "SERVICE NUMBER",
-    "INTERNET NUMBER", "INET",
-}
-STATUS_HEADERS = {"STATUS", "RESULT", "HASIL", "STATUS ORDER", "STATUS HASIL"}
-NEW_SN_HEADERS = {
-    "SN ONT NEW", "SN ONT BARU", "SN NEW", "NEW SN", "SN BARU",
-    "SERIAL NUMBER BARU", "SN ONT NEW ",
+HEADER_ALIASES: dict[str, set[str]] = {
+    "ticket": {"TIKET", "TICKET", "TICKET ID", "TIKET ID", "INC", "NO TIKET", "NO. TIKET", "NOMOR TIKET"},
+    "insera_ticket": {"INSERA TODAY", "TIKET INSERA", "TICKET INSERA", "INSERA", "INSERA TICKET"},
+    "service_number": {"NO INET", "NO INTERNET", "NO SERVICE", "SERVICE NUMBER", "INTERNET NUMBER", "INET"},
+    "status": {"STATUS", "RESULT", "HASIL", "STATUS ORDER", "STATUS HASIL"},
+    "voip_number": {"NO VOIP", "VOIP", "VOICE", "NO VOICE"},
+    "customer_name": {"NAMA PELANGGAN", "CUSTOMER NAME", "NAMA CUSTOMER", "NAMA"},
+    "address": {"ALAMAT", "ADDRESS", "ALAMAT PELANGGAN"},
+    "customer_phone": {"CP", "NO HP", "NO. HP", "NOMOR HP", "CP / NO HP", "CONTACT PERSON", "PHONE"},
+    "old_sn": {"SN ONT LAMA", "SN LAMA", "OLD SN", "SN OLD", "SERIAL NUMBER LAMA"},
+    "new_sn": {"SN ONT NEW", "SN ONT BARU", "SN NEW", "NEW SN", "SN BARU", "SERIAL NUMBER BARU"},
+    "ont_type": {"TYPE ONT", "TIPE ONT", "MODEL ONT", "MODEL ONT BARU", "TYPE ONT BARU", "TIPE ONT BARU"},
+    "sto": {"STO", "KODE STO"},
+    "valins_id": {"VALINS ID", "ID VALINS", "VALINS"},
+    "config_description": {"KETERANGAN CONFIG", "KETERANGAN KONFIG", "DESKRIPSI CONFIG", "KET CONFIG"},
+    "report_description": {"KETERANGAN REPORT/STO", "KETERANGAN REPORT", "KETERANGAN STO", "KET REPORT/STO", "KET REPORT"},
 }
 
 
 @dataclass(frozen=True)
 class ReferenceStatus:
-    status: str
+    status: str = ""
     new_sn: str = ""
     ticket_id: str = ""
     service_number: str = ""
+    voip_number: str = ""
+    customer_name: str = ""
+    address: str = ""
+    customer_phone: str = ""
+    old_sn: str = ""
+    ont_type: str = ""
+    sto: str = ""
+    valins_id: str = ""
+    config_description: str = ""
+    report_description: str = ""
     source: str = "Google Sheets"
+
+    def order_fields(self) -> dict[str, str]:
+        return {
+            "ticket_id": self.ticket_id,
+            "service_number": self.service_number,
+            "voip_number": self.voip_number,
+            "customer_name": self.customer_name,
+            "address": self.address,
+            "customer_phone": self.customer_phone,
+            "old_sn": self.old_sn,
+            "new_sn": self.new_sn,
+            "ont_type": self.ont_type,
+            "sto": self.sto,
+            "valins_id": self.valins_id,
+            "result": self.status,
+            "config_description": self.config_description,
+            "report_description": self.report_description,
+        }
 
 
 _spreadsheet_id = DEFAULT_SPREADSHEET_ID
@@ -54,8 +81,7 @@ _cache_lock = asyncio.Lock()
 
 
 def normalize(value: object) -> str:
-    text = str(value or "").strip().upper()
-    return re.sub(r"\s+", " ", text)
+    return re.sub(r"\s+", " ", str(value or "").strip().upper())
 
 
 def normalize_key(value: object) -> str:
@@ -64,11 +90,7 @@ def normalize_key(value: object) -> str:
 
 def normalize_ticket(value: object) -> str:
     ticket = normalize(value)
-    # Nilai seperti MANUAL bukan nomor tiket. Nomor tiket aktual diprioritaskan
-    # dari kolom INSERA TODAY jika tersedia.
-    if ticket in {"", "-", "MANUAL", "N/A", "NA", "NONE"}:
-        return ""
-    return ticket
+    return "" if ticket in {"", "-", "MANUAL", "N/A", "NA", "NONE"} else ticket
 
 
 def current_sheet_url() -> str:
@@ -76,56 +98,36 @@ def current_sheet_url() -> str:
 
 
 def current_csv_url() -> str:
-    return (
-        f"https://docs.google.com/spreadsheets/d/{_spreadsheet_id}/"
-        f"export?format=csv&gid={_sheet_gid}"
-    )
+    return f"https://docs.google.com/spreadsheets/d/{_spreadsheet_id}/export?format=csv&gid={_sheet_gid}"
 
 
 def parse_sheet_url(url: str) -> tuple[str, str]:
     match = re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)", url)
     if not match:
         raise ValueError("Link Google Sheets tidak valid.")
-    spreadsheet_id = match.group(1)
     parsed = urlparse(url)
-    query = parse_qs(parsed.query)
-    gid = query.get("gid", [""])[0]
+    gid = parse_qs(parsed.query).get("gid", [""])[0]
     if not gid and parsed.fragment.startswith("gid="):
         gid = parsed.fragment.split("=", 1)[1]
-    return spreadsheet_id, gid or "0"
+    return match.group(1), gid or "0"
 
 
 def _ensure_config_table(database_path: Path) -> None:
     with sqlite3.connect(database_path) as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS bot_settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            )
-            """
-        )
-        conn.commit()
+        conn.execute("CREATE TABLE IF NOT EXISTS bot_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
 
 
 def _load_config(database_path: Path) -> tuple[str, str]:
     _ensure_config_table(database_path)
     with sqlite3.connect(database_path) as conn:
         rows = dict(conn.execute("SELECT key, value FROM bot_settings"))
-    return (
-        rows.get("google_sheet_id", DEFAULT_SPREADSHEET_ID),
-        rows.get("google_sheet_gid", DEFAULT_SHEET_GID),
-    )
+    return rows.get("google_sheet_id", DEFAULT_SPREADSHEET_ID), rows.get("google_sheet_gid", DEFAULT_SHEET_GID)
 
 
 def _save_config(database_path: Path, spreadsheet_id: str, gid: str) -> None:
     _ensure_config_table(database_path)
     with sqlite3.connect(database_path) as conn:
-        conn.executemany(
-            "INSERT OR REPLACE INTO bot_settings(key, value) VALUES (?, ?)",
-            [("google_sheet_id", spreadsheet_id), ("google_sheet_gid", gid)],
-        )
-        conn.commit()
+        conn.executemany("INSERT OR REPLACE INTO bot_settings(key, value) VALUES (?, ?)", [("google_sheet_id", spreadsheet_id), ("google_sheet_gid", gid)])
 
 
 async def initialize_sheet_config(database_path: Path) -> None:
@@ -136,145 +138,97 @@ async def initialize_sheet_config(database_path: Path) -> None:
 async def configure_sheet(database_path: Path, url: str) -> tuple[str, str]:
     global _spreadsheet_id, _sheet_gid, _cache, _cache_time
     spreadsheet_id, gid = parse_sheet_url(url)
-    old_id, old_gid = _spreadsheet_id, _sheet_gid
-    _spreadsheet_id, _sheet_gid = spreadsheet_id, gid
-    _cache = {}
-    _cache_time = 0.0
+    old = (_spreadsheet_id, _sheet_gid)
+    _spreadsheet_id, _sheet_gid, _cache, _cache_time = spreadsheet_id, gid, {}, 0.0
     try:
         await get_reference_statuses(force=True, raise_errors=True)
     except Exception:
-        _spreadsheet_id, _sheet_gid = old_id, old_gid
-        _cache = {}
-        _cache_time = 0.0
+        _spreadsheet_id, _sheet_gid = old
+        _cache, _cache_time = {}, 0.0
         raise
     await asyncio.to_thread(_save_config, database_path, spreadsheet_id, gid)
     return spreadsheet_id, gid
 
 
 def find_column(headers: list[str], aliases: set[str]) -> int | None:
-    normalized_aliases = {normalize(alias) for alias in aliases}
-    for index, header in enumerate(headers):
-        if normalize(header) in normalized_aliases:
-            return index
-    return None
+    wanted = {normalize(alias) for alias in aliases}
+    return next((i for i, header in enumerate(headers) if normalize(header) in wanted), None)
 
 
 def cell(row: list[str], column: int | None) -> str:
-    if column is None or column >= len(row):
-        return ""
-    return str(row[column] or "").strip()
+    return "" if column is None or column >= len(row) else str(row[column] or "").strip()
 
 
 def download_statuses() -> dict[str, ReferenceStatus]:
     request = Request(current_csv_url(), headers={"User-Agent": "Kerja-Bot/1.0"})
     with urlopen(request, timeout=20) as response:
-        raw = response.read()
-    text = raw.decode("utf-8-sig", errors="replace")
-    rows = list(csv.reader(io.StringIO(text)))
+        rows = list(csv.reader(io.StringIO(response.read().decode("utf-8-sig", errors="replace"))))
     if not rows:
         raise ValueError("Google Sheets kosong atau tidak dapat dibaca.")
 
-    columns: tuple[int | None, int | None, int | None, int | None, int | None] = (
-        None, None, None, None, None
-    )
-    header_index = 0
+    header_index = -1
+    columns: dict[str, int | None] = {}
     for index, row in enumerate(rows[:20]):
-        ticket_col = find_column(row, TICKET_HEADERS)
-        insera_ticket_col = find_column(row, INSERA_TICKET_HEADERS)
-        service_col = find_column(row, SERVICE_HEADERS)
-        status_col = find_column(row, STATUS_HEADERS)
-        new_sn_col = find_column(row, NEW_SN_HEADERS)
-        if status_col is not None and (
-            ticket_col is not None
-            or insera_ticket_col is not None
-            or service_col is not None
-        ):
-            header_index = index
-            columns = (
-                ticket_col,
-                insera_ticket_col,
-                service_col,
-                status_col,
-                new_sn_col,
-            )
+        candidate = {key: find_column(row, aliases) for key, aliases in HEADER_ALIASES.items()}
+        if candidate["service_number"] is not None and candidate["status"] is not None:
+            header_index, columns = index, candidate
             break
-
-    ticket_col, insera_ticket_col, service_col, status_col, new_sn_col = columns
-    if status_col is None or (
-        ticket_col is None and insera_ticket_col is None and service_col is None
-    ):
-        raise ValueError("Kolom tiket/no internet/status Google Sheets tidak ditemukan.")
+    if header_index < 0:
+        raise ValueError("Kolom INET/NO SERVICE dan STATUS Google Sheets tidak ditemukan.")
 
     result: dict[str, ReferenceStatus] = {}
     for row in rows[header_index + 1:]:
-        status = normalize(cell(row, status_col))
-        if not status:
+        service_number = cell(row, columns["service_number"])
+        primary_ticket = normalize_ticket(cell(row, columns["ticket"]))
+        insera_ticket = normalize_ticket(cell(row, columns["insera_ticket"]))
+        ticket_id = primary_ticket or insera_ticket
+        if not service_number and not ticket_id:
             continue
 
-        primary_ticket = normalize_ticket(cell(row, ticket_col))
-        insera_ticket = normalize_ticket(cell(row, insera_ticket_col))
-        # TIKET dipakai jika benar-benar berisi nomor tiket. Jika kosong/MANUAL,
-        # gunakan tiket aktual pada kolom INSERA TODAY.
-        ticket_id = primary_ticket or insera_ticket
-        service_number = cell(row, service_col)
-        new_sn = normalize(cell(row, new_sn_col))
-
+        values = {key: cell(row, column) for key, column in columns.items()}
         reference = ReferenceStatus(
-            status=status,
-            new_sn=new_sn,
-            ticket_id=ticket_id,
-            service_number=service_number,
+            status=normalize(values["status"]), ticket_id=ticket_id,
+            service_number=service_number, voip_number=values["voip_number"],
+            customer_name=values["customer_name"], address=values["address"],
+            customer_phone=values["customer_phone"], old_sn=normalize(values["old_sn"]),
+            new_sn=normalize(values["new_sn"]), ont_type=normalize(values["ont_type"]),
+            sto=normalize(values["sto"]), valins_id=values["valins_id"],
+            config_description=values["config_description"], report_description=values["report_description"],
         )
-
-        # Simpan kedua nomor tiket sebagai key agar pencocokan tetap berhasil
-        # bila database memiliki salah satu di antaranya.
         for candidate in {primary_ticket, insera_ticket, ticket_id}:
-            ticket_key = normalize_key(candidate)
-            if ticket_key:
-                result[f"ticket:{ticket_key}"] = reference
-
-        service_key = normalize_key(service_number)
-        if service_key:
-            result[f"service:{service_key}"] = reference
+            key = normalize_key(candidate)
+            if key:
+                result[f"ticket:{key}"] = reference
+        key = normalize_key(service_number)
+        if key:
+            result[f"service:{key}"] = reference
     return result
 
 
-async def get_reference_statuses(
-    force: bool = False,
-    raise_errors: bool = False,
-) -> dict[str, ReferenceStatus]:
+async def get_reference_statuses(force: bool = False, raise_errors: bool = False) -> dict[str, ReferenceStatus]:
     global _cache, _cache_time
     now = time.monotonic()
     if not force and _cache and now - _cache_time < CACHE_TTL_SECONDS:
         return _cache
     async with _cache_lock:
-        now = time.monotonic()
-        if not force and _cache and now - _cache_time < CACHE_TTL_SECONDS:
+        if not force and _cache and time.monotonic() - _cache_time < CACHE_TTL_SECONDS:
             return _cache
         try:
-            downloaded = await asyncio.to_thread(download_statuses)
+            _cache = await asyncio.to_thread(download_statuses)
+            _cache_time = time.monotonic()
         except Exception:
-            logging.exception("Gagal membaca referensi status Google Sheets")
+            logging.exception("Gagal membaca referensi Google Sheets")
             if raise_errors:
                 raise
-            return _cache
-        _cache = downloaded
-        _cache_time = time.monotonic()
         return _cache
 
 
-def status_for_order(
-    statuses: dict[str, ReferenceStatus], ticket_id: str, service_number: str
-) -> ReferenceStatus | None:
+def status_for_order(statuses: dict[str, ReferenceStatus], ticket_id: str, service_number: str) -> ReferenceStatus | None:
     ticket_key = normalize_key(ticket_id)
-    if ticket_key:
-        found = statuses.get(f"ticket:{ticket_key}")
-        if found is not None:
-            return found
+    if ticket_key and (found := statuses.get(f"ticket:{ticket_key}")) is not None:
+        return found
     service_key = normalize_key(service_number)
-    if service_key:
-        return statuses.get(f"service:{service_key}")
-    return None
+    return statuses.get(f"service:{service_key}") if service_key else None
 
 
 def is_reference_closed(reference: ReferenceStatus | None) -> bool:
