@@ -25,7 +25,7 @@ from handlers.common import (
 )
 from handlers.excel_status import build_excel_status_handlers
 from handlers.login import build_login_conversation, start
-from handlers.my_orders import build_my_orders_handlers
+from handlers.my_orders import build_my_orders_handlers, orderanku
 from handlers.order_flow import build_order_conversation
 from services.auto_close import install_auto_close
 from services.order_repository import OrderRepository
@@ -96,6 +96,12 @@ def build_application() -> Application:
     for handler in build_admin_handlers():
         app.add_handler(handler)
 
+    app.add_handler(
+        MessageHandler(
+            filters.Regex(f"^({MAIN_MENU['orders']})$"),
+            orderanku,
+        )
+    )
     app.add_handler(
         MessageHandler(
             filters.Regex(f"^({MAIN_MENU['profile']})$"),
