@@ -25,6 +25,7 @@ from handlers.common import (
 )
 from handlers.excel_status import build_excel_status_handlers
 from handlers.login import build_login_conversation, start
+from handlers.my_orders import build_my_orders_handlers
 from handlers.order_flow import build_order_conversation
 from services.auto_close import install_auto_close
 from services.order_repository import OrderRepository
@@ -87,6 +88,9 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("settings", settings_menu))
 
     for handler in build_excel_status_handlers():
+        app.add_handler(handler)
+
+    for handler in build_my_orders_handlers():
         app.add_handler(handler)
 
     for handler in build_admin_handlers():
