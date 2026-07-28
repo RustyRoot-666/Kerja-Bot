@@ -23,11 +23,16 @@ SERVICE_HEADERS = {
     "INTERNET NUMBER", "INET",
 }
 STATUS_HEADERS = {"STATUS", "RESULT", "HASIL", "STATUS ORDER", "STATUS HASIL"}
+NEW_SN_HEADERS = {
+    "SN ONT NEW", "SN ONT BARU", "SN NEW", "NEW SN", "SN BARU",
+    "SERIAL NUMBER BARU", "SN ONT NEW ",
+}
 
 
 @dataclass(frozen=True)
 class ReferenceStatus:
     status: str
+    new_sn: str = ""
     source: str = "Google Sheets"
 
 
@@ -144,18 +149,21 @@ def download_statuses() -> dict[str, ReferenceStatus]:
     if not rows:
         raise ValueError("Google Sheets kosong atau tidak dapat dibaca.")
 
-    columns: tuple[int | None, int | None, int | None] = (None, None, None)
+    columns: tuple[int | None, int | None, int | None, int | None] = (
+        None, None, None, None
+    )
     header_index = 0
     for index, row in enumerate(rows[:20]):
         ticket_col = find_column(row, TICKET_HEADERS)
         service_col = find_column(row, SERVICE_HEADERS)
         status_col = find_column(row, STATUS_HEADERS)
+        new_sn_col = find_column(row, NEW_SN_HEADERS)
         if status_col is not None and (ticket_col is not None or service_col is not None):
             header_index = index
-            columns = (ticket_col, service_col, status_col)
+            columns = (ticket_col, service_col, status_col, new_sn_col)
             break
 
-    ticket_col, service_col, status_col = columns
+    ticket_col, service_col, status_col, new_sn_col = columns
     if status_col is None or (ticket_col is None and service_col is None):
         raise ValueError("Kolom tiket/no internet/status Google Sheets tidak ditemukan.")
 
@@ -164,7 +172,10 @@ def download_statuses() -> dict[str, ReferenceStatus]:
         status = normalize(row[status_col] if status_col < len(row) else "")
         if not status:
             continue
-        reference = ReferenceStatus(status=status)
+        new_sn = ""
+        if new_sn_col is not None and new_sn_col < len(row):
+            new_sn = str(row[new_sn_col] or "").strip().upper()
+        reference = ReferenceStatus(status=status, new_sn=new_sn)
         if ticket_col is not None and ticket_col < len(row):
             key = normalize_key(row[ticket_col])
             if key:
