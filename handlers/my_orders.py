@@ -8,6 +8,7 @@ from services.google_sheet_reference import (
     ReferenceStatus,
     get_reference_statuses,
     is_reference_closed,
+    normalize_ticket,
     status_for_order,
 )
 from services.order_repository import Order, OrderRepository
@@ -28,47 +29,77 @@ def is_effectively_closed(order: Order, reference: ReferenceStatus | None) -> bo
     return is_database_closed(order) or is_reference_closed(reference)
 
 
+def displayed_ticket(order: Order, reference: ReferenceStatus | None) -> str:
+    """Prioritas tiket: TIKET valid, lalu INSERA TODAY dari referensi, lalu MANUAL."""
+    database_ticket = normalize_ticket(order.ticket_id)
+    reference_ticket = normalize_ticket(reference.ticket_id if reference else "")
+    return database_ticket or reference_ticket or "MANUAL"
+
+
+def displayed_service(order: Order, reference: ReferenceStatus | None) -> str:
+    return order.service_number or (reference.service_number if reference else "") or "-"
+
+
+def displayed_new_sn(order: Order, reference: ReferenceStatus | None) -> str:
+    return order.new_sn or (reference.new_sn if reference else "") or "-"
+
+
+def displayed_value(order_value: str, reference_value: str = "") -> str:
+    return order_value.strip() or reference_value.strip() or "-"
+
+
 def format_order(
     order: Order,
     index: int,
     reference: ReferenceStatus | None,
+    category: str,
 ) -> str:
-    if is_reference_closed(reference):
-        status_label = f"✅ {reference.status} (Google Sheets)"
-    elif is_database_closed(order):
-        status_label = f"✅ {order.result.strip().upper() or 'CLOSE'}"
-    else:
-        status_label = "🟢 OPEN"
-
-    displayed_ticket = order.ticket_id or (reference.ticket_id if reference else "") or "-"
-    ticket_source = (
-        " (Google Sheets)"
-        if not order.ticket_id and reference and reference.ticket_id
-        else ""
+    ticket = displayed_ticket(order, reference)
+    service = displayed_service(order, reference)
+    name = displayed_value(
+        order.customer_name,
+        reference.customer_name if reference else "",
     )
 
-    displayed_service = (
-        order.service_number or (reference.service_number if reference else "") or "-"
-    )
-    service_source = (
-        " (Google Sheets)"
-        if not order.service_number and reference and reference.service_number
-        else ""
-    )
+    if category == "open":
+        phone = displayed_value(
+            order.customer_phone,
+            reference.customer_phone if reference else "",
+        )
+        address = displayed_value(
+            order.address,
+            reference.address if reference else "",
+        )
+        return (
+            f"{index}.\n"
+            f"Tiket  : {ticket}\n"
+            f"INET   : {service}\n"
+            f"CP     : {phone}\n"
+            f"Nama   : {name}\n"
+            f"Alamat : {address}"
+        )
 
-    displayed_new_sn = order.new_sn or (reference.new_sn if reference else "") or "-"
-    sn_source = (
-        " (Google Sheets)"
-        if not order.new_sn and reference and reference.new_sn
-        else ""
-    )
+    if category == "close":
+        return (
+            f"{index}.\n"
+            f"Tiket : {ticket}\n"
+            f"INET  : {service}\n"
+            f"Nama  : {name}\n"
+            f"SN New: {displayed_new_sn(order, reference)}"
+        )
 
+    status_label = (
+        reference.status
+        if is_reference_closed(reference)
+        else order.result.strip().upper() if is_database_closed(order)
+        else "OPEN"
+    )
     return (
         f"{index}. {status_label}\n"
-        f"   Tiket : {displayed_ticket}{ticket_source}\n"
-        f"   INET  : {displayed_service}{service_source}\n"
-        f"   Nama  : {order.customer_name or '-'}\n"
-        f"   SN New: {displayed_new_sn}{sn_source}"
+        f"Tiket : {ticket}\n"
+        f"INET  : {service}\n"
+        f"Nama  : {name}\n"
+        f"SN New: {displayed_new_sn(order, reference)}"
     )
 
 
@@ -117,7 +148,7 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"📋 ORDER {technician.name.upper()}\n\n"
             f"Total    : {total_count}\n"
             f"🟢 OPEN  : {open_count}\n"
-            f"✅ CLOSE : {closed_count}\n"
+            f"🔴 CLOSE : {closed_count}\n"
             f"Progress : {progress:.1f}%\n\n"
             "Status, tiket, dan SN ONT NEW juga dibaca dari referensi Google Sheets. "
             "Bot tidak mengubah Google Sheets maupun database dari data tersebut.\n\n"
@@ -165,20 +196,20 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     orders = orders[:50]
     title = {
         "open": "🟢 ORDER OPEN",
-        "close": "✅ ORDER CLOSE/DONE",
+        "close": "🔴 ORDER CLOSE/DONE",
         "all": "📋 SEMUA ORDER",
     }[status]
 
     if not orders:
         await update.effective_message.reply_text(
-            f"{title}\n\nTidak ada order pada kategori ini."
+            f"{title} — {technician.name.upper()}\n\nTidak ada order pada kategori ini."
         )
         return
 
     chunks: list[str] = []
     current = f"{title} — {technician.name.upper()}\n\n"
     for index, order in enumerate(orders, start=1):
-        item = format_order(order, index, references.get(order.id)) + "\n\n"
+        item = format_order(order, index, references.get(order.id), status) + "\n\n"
         if len(current) + len(item) > 3800:
             chunks.append(current.rstrip())
             current = item
