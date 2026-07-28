@@ -14,6 +14,13 @@ from handlers.common import cancel
 from services.auth import require_technician
 from services.excel_orders import import_workbook
 from services.formatters import generate_config, generate_report, generate_sto
+from services.google_sheet_reference import (
+    CLOSED_STATUSES,
+    get_reference_statuses,
+    is_reference_closed,
+    normalize,
+    status_for_order,
+)
 from services.order_repository import Order, OrderRepository
 from utils.keyboards import MAIN_MENU, cancel_keyboard, main_menu_keyboard
 from utils.telegram_format import pre_block
@@ -207,6 +214,36 @@ async def continue_order(
     order: Order,
 ) -> int:
     action = context.user_data["order_action"]
+
+    # Google Sheets hanya dibaca sebagai referensi. Untuk order yang sudah
+    # CLOSE/DONE, lengkapi field referensi yang tersedia lalu langsung cetak
+    # output yang diminta tanpa meminta teknisi mengisi ulang.
+    statuses = await get_reference_statuses()
+    reference = status_for_order(statuses, order.ticket_id, order.service_number)
+
+    updates: dict[str, str] = {}
+    if reference is not None:
+        current_ticket = normalize(order.ticket_id)
+        if reference.ticket_id and current_ticket in {"", "-", "MANUAL"}:
+            updates["ticket_id"] = reference.ticket_id
+        if reference.new_sn and not order.new_sn.strip():
+            updates["new_sn"] = reference.new_sn
+        if is_reference_closed(reference):
+            updates["result"] = reference.status or "CLOSE"
+
+    if updates:
+        order = await repository(context).update_fields(order.id, updates)
+
+    database_closed = normalize(order.result) in CLOSED_STATUSES
+    reference_closed = is_reference_closed(reference)
+    if database_closed or reference_closed:
+        await send_outputs(update, context, order, action)
+        context.user_data.pop("active_order_id", None)
+        context.user_data.pop("missing_fields", None)
+        context.user_data.pop("order_choices", None)
+        context.user_data.pop("order_action", None)
+        return ConversationHandler.END
+
     missing = missing_fields(order, action)
 
     if not missing:
