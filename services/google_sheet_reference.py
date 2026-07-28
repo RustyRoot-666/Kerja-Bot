@@ -17,7 +17,11 @@ DEFAULT_SHEET_GID = "0"
 CACHE_TTL_SECONDS = 180
 CLOSED_STATUSES = {"CLOSE", "CLOSED", "DONE", "SELESAI", "COMPLETED"}
 
-TICKET_HEADERS = {"TIKET", "TICKET", "TICKET ID", "TIKET ID", "INC", "NO TIKET"}
+TICKET_HEADERS = {
+    "TIKET", "TICKET", "TICKET ID", "TIKET ID", "INC", "NO TIKET",
+    "NO. TIKET", "NOMOR TIKET", "TICKET EXTERNAL", "TIKET EXTERNAL",
+    "EXTERNAL TICKET", "INCIDENT", "INCIDENT ID", "NO INCIDENT",
+}
 SERVICE_HEADERS = {
     "NO INET", "NO INTERNET", "NO SERVICE", "SERVICE NUMBER",
     "INTERNET NUMBER", "INET",
@@ -33,6 +37,8 @@ NEW_SN_HEADERS = {
 class ReferenceStatus:
     status: str
     new_sn: str = ""
+    ticket_id: str = ""
+    service_number: str = ""
     source: str = "Google Sheets"
 
 
@@ -172,18 +178,31 @@ def download_statuses() -> dict[str, ReferenceStatus]:
         status = normalize(row[status_col] if status_col < len(row) else "")
         if not status:
             continue
+
+        ticket_id = ""
+        if ticket_col is not None and ticket_col < len(row):
+            ticket_id = str(row[ticket_col] or "").strip().upper()
+
+        service_number = ""
+        if service_col is not None and service_col < len(row):
+            service_number = str(row[service_col] or "").strip()
+
         new_sn = ""
         if new_sn_col is not None and new_sn_col < len(row):
             new_sn = str(row[new_sn_col] or "").strip().upper()
-        reference = ReferenceStatus(status=status, new_sn=new_sn)
-        if ticket_col is not None and ticket_col < len(row):
-            key = normalize_key(row[ticket_col])
-            if key:
-                result[f"ticket:{key}"] = reference
-        if service_col is not None and service_col < len(row):
-            key = normalize_key(row[service_col])
-            if key:
-                result[f"service:{key}"] = reference
+
+        reference = ReferenceStatus(
+            status=status,
+            new_sn=new_sn,
+            ticket_id=ticket_id,
+            service_number=service_number,
+        )
+        ticket_key = normalize_key(ticket_id)
+        if ticket_key:
+            result[f"ticket:{ticket_key}"] = reference
+        service_key = normalize_key(service_number)
+        if service_key:
+            result[f"service:{service_key}"] = reference
     return result
 
 
