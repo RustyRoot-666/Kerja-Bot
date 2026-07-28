@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 
+import handlers.order_flow as order_flow_module
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -25,6 +26,7 @@ from handlers.common import (
 from handlers.excel_status import build_excel_status_handlers
 from handlers.login import build_login_conversation, start
 from handlers.order_flow import build_order_conversation
+from services.auto_close import install_auto_close
 from services.order_repository import OrderRepository
 from utils.keyboards import MAIN_MENU
 from utils.logging import setup_logging
@@ -65,6 +67,8 @@ def build_application() -> Application:
     app.bot_data["db"] = db
     app.bot_data["orders"] = orders
     app.bot_data["settings"] = settings
+
+    install_auto_close(order_flow_module)
 
     login_conv = build_login_conversation()
     order_conv = build_order_conversation()
