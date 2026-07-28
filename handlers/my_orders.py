@@ -40,15 +40,33 @@ def format_order(
     else:
         status_label = "🟢 OPEN"
 
-    # Database tetap menjadi sumber utama. Jika SN belum tersimpan di database,
-    # tampilkan SN ONT NEW dari Google Sheets sebagai referensi read-only.
+    displayed_ticket = order.ticket_id or (reference.ticket_id if reference else "") or "-"
+    ticket_source = (
+        " (Google Sheets)"
+        if not order.ticket_id and reference and reference.ticket_id
+        else ""
+    )
+
+    displayed_service = (
+        order.service_number or (reference.service_number if reference else "") or "-"
+    )
+    service_source = (
+        " (Google Sheets)"
+        if not order.service_number and reference and reference.service_number
+        else ""
+    )
+
     displayed_new_sn = order.new_sn or (reference.new_sn if reference else "") or "-"
-    sn_source = " (Google Sheets)" if not order.new_sn and reference and reference.new_sn else ""
+    sn_source = (
+        " (Google Sheets)"
+        if not order.new_sn and reference and reference.new_sn
+        else ""
+    )
 
     return (
         f"{index}. {status_label}\n"
-        f"   Tiket : {order.ticket_id or '-'}\n"
-        f"   INET  : {order.service_number or '-'}\n"
+        f"   Tiket : {displayed_ticket}{ticket_source}\n"
+        f"   INET  : {displayed_service}{service_source}\n"
         f"   Nama  : {order.customer_name or '-'}\n"
         f"   SN New: {displayed_new_sn}{sn_source}"
     )
@@ -101,7 +119,7 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"🟢 OPEN  : {open_count}\n"
             f"✅ CLOSE : {closed_count}\n"
             f"Progress : {progress:.1f}%\n\n"
-            "Status dan SN ONT NEW juga dibaca dari referensi Google Sheets. "
+            "Status, tiket, dan SN ONT NEW juga dibaca dari referensi Google Sheets. "
             "Bot tidak mengubah Google Sheets maupun database dari data tersebut.\n\n"
             "Perintah:\n"
             "/orderanku open\n"
