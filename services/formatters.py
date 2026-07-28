@@ -10,6 +10,10 @@ def value(data: dict, key: str) -> str:
     return str(data.get(key) or "-").strip()
 
 
+def technician_sto(technician: Technician, data: dict) -> str:
+    return (technician.sto or value(data, "sto")).strip().upper() or "-"
+
+
 def line(label: str, text: str, width: int = 17) -> str:
     return f"{label:<{width}}: {text}"
 
@@ -28,7 +32,7 @@ def generate_config(technician: Technician, data: dict) -> str:
         line("SN ONT LAMA", value(data, "old_sn")),
         line("SN ONT BARU", value(data, "new_sn")),
         line("TYPE ONT", value(data, "ont_type")),
-        line("STO", value(data, "sto")),
+        line("STO", technician_sto(technician, data)),
         line("KETERANGAN", value(data, "config_description")),
     ]
     return "\n".join(rows)
@@ -60,7 +64,7 @@ def generate_report(technician: Technician, data: dict, timezone: str) -> str:
 
 
 def generate_sto(technician: Technician, data: dict) -> str:
-    sto = value(data, "sto")
+    sto = technician_sto(technician, data)
     rows = [
         f"/STO : {sto}",
         f"TIKET : {value(data, 'ticket_id')}",
