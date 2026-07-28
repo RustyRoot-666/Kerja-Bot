@@ -103,11 +103,9 @@ class OrderRepository:
 
                     CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_ticket_service
                     ON orders(ticket_id, service_number);
-
                     CREATE INDEX IF NOT EXISTS idx_orders_service ON orders(service_number);
                     CREATE INDEX IF NOT EXISTS idx_orders_ticket ON orders(ticket_id);
                     CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_name);
-                    CREATE INDEX IF NOT EXISTS idx_orders_assigned ON orders(assigned_technician);
                     """
                 )
                 columns = {
@@ -118,9 +116,9 @@ class OrderRepository:
                     conn.execute(
                         "ALTER TABLE orders ADD COLUMN assigned_technician TEXT NOT NULL DEFAULT ''"
                     )
-                    conn.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_orders_assigned ON orders(assigned_technician)"
-                    )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_orders_assigned ON orders(assigned_technician)"
+                )
 
     @staticmethod
     def _row_to_order(row: sqlite3.Row | None) -> Order | None:
