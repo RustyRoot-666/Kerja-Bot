@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
-from contextlib import contextmanager
 
 
 def utc_now() -> str:
@@ -30,6 +30,7 @@ class Order:
     result: str
     config_description: str
     report_description: str
+    assigned_technician: str
     source_file: str
     created_at: str
     updated_at: str
@@ -53,6 +54,7 @@ class Order:
             "result": self.result,
             "config_description": self.config_description,
             "report_description": self.report_description,
+            "assigned_technician": self.assigned_technician,
         }
 
 
@@ -93,6 +95,7 @@ class OrderRepository:
                         result TEXT NOT NULL DEFAULT '',
                         config_description TEXT NOT NULL DEFAULT '',
                         report_description TEXT NOT NULL DEFAULT '',
+                        assigned_technician TEXT NOT NULL DEFAULT '',
                         source_file TEXT NOT NULL DEFAULT '',
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL
@@ -101,16 +104,23 @@ class OrderRepository:
                     CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_ticket_service
                     ON orders(ticket_id, service_number);
 
-                    CREATE INDEX IF NOT EXISTS idx_orders_service
-                    ON orders(service_number);
-
-                    CREATE INDEX IF NOT EXISTS idx_orders_ticket
-                    ON orders(ticket_id);
-
-                    CREATE INDEX IF NOT EXISTS idx_orders_customer
-                    ON orders(customer_name);
+                    CREATE INDEX IF NOT EXISTS idx_orders_service ON orders(service_number);
+                    CREATE INDEX IF NOT EXISTS idx_orders_ticket ON orders(ticket_id);
+                    CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_name);
+                    CREATE INDEX IF NOT EXISTS idx_orders_assigned ON orders(assigned_technician);
                     """
                 )
+                columns = {
+                    row["name"]
+                    for row in conn.execute("PRAGMA table_info(orders)").fetchall()
+                }
+                if "assigned_technician" not in columns:
+                    conn.execute(
+                        "ALTER TABLE orders ADD COLUMN assigned_technician TEXT NOT NULL DEFAULT ''"
+                    )
+                    conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_orders_assigned ON orders(assigned_technician)"
+                    )
 
     @staticmethod
     def _row_to_order(row: sqlite3.Row | None) -> Order | None:
@@ -134,6 +144,7 @@ class OrderRepository:
             "result": str(data.get("result") or "").strip(),
             "config_description": str(data.get("config_description") or "").strip(),
             "report_description": str(data.get("report_description") or "").strip(),
+            "assigned_technician": str(data.get("assigned_technician") or "").strip(),
             "source_file": source_file.strip(),
         }
 
@@ -175,28 +186,19 @@ class OrderRepository:
                         ticket_id, service_number, voip_number, customer_name,
                         address, customer_phone, old_sn, new_sn, ont_type, sto,
                         valins_id, result, config_description, report_description,
-                        source_file, created_at, updated_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        assigned_technician, source_file, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        normalized["ticket_id"],
-                        normalized["service_number"],
-                        normalized["voip_number"],
-                        normalized["customer_name"],
-                        normalized["address"],
-                        normalized["customer_phone"],
-                        normalized["old_sn"],
-                        normalized["new_sn"],
-                        normalized["ont_type"],
-                        normalized["sto"],
-                        normalized["valins_id"],
-                        normalized["result"],
-                        normalized["config_description"],
-                        normalized["report_description"],
-                        normalized["source_file"],
-                        now,
-                        now,
+                        normalized["ticket_id"], normalized["service_number"],
+                        normalized["voip_number"], normalized["customer_name"],
+                        normalized["address"], normalized["customer_phone"],
+                        normalized["old_sn"], normalized["new_sn"],
+                        normalized["ont_type"], normalized["sto"],
+                        normalized["valins_id"], normalized["result"],
+                        normalized["config_description"], normalized["report_description"],
+                        normalized["assigned_technician"], normalized["source_file"],
+                        now, now,
                     ),
                 )
                 return "inserted"
@@ -204,10 +206,7 @@ class OrderRepository:
     async def get(self, order_id: int) -> Order | None:
         async with self._lock:
             with self.connection() as conn:
-                row = conn.execute(
-                    "SELECT * FROM orders WHERE id = ?",
-                    (order_id,),
-                ).fetchone()
+                row = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
         return self._row_to_order(row)
 
     async def search(self, query: str, limit: int = 10) -> list[Order]:
@@ -218,35 +217,64 @@ class OrderRepository:
                 rows = conn.execute(
                     """
                     SELECT * FROM orders
-                    WHERE ticket_id LIKE ?
-                       OR service_number LIKE ?
-                       OR customer_name LIKE ?
-                       OR address LIKE ?
-                       OR customer_phone LIKE ?
-                       OR old_sn LIKE ?
-                       OR new_sn LIKE ?
-                    ORDER BY
-                        CASE
-                            WHEN ticket_id = ? THEN 0
-                            WHEN service_number = ? THEN 1
-                            ELSE 2
-                        END,
-                        updated_at DESC
+                    WHERE ticket_id LIKE ? OR service_number LIKE ? OR customer_name LIKE ?
+                       OR address LIKE ? OR customer_phone LIKE ? OR old_sn LIKE ? OR new_sn LIKE ?
+                    ORDER BY CASE WHEN ticket_id = ? THEN 0 WHEN service_number = ? THEN 1 ELSE 2 END,
+                             updated_at DESC
                     LIMIT ?
                     """,
-                    (
-                        like, like, like, like, like, like, like,
-                        query, query, limit,
-                    ),
+                    (like, like, like, like, like, like, like, query, query, limit),
                 ).fetchall()
         return [Order(**dict(row)) for row in rows]
+
+    async def list_for_technician(
+        self, technician_name: str, status: str = "all", limit: int = 50
+    ) -> list[Order]:
+        name = technician_name.strip()
+        status = status.lower().strip()
+        status_sql = ""
+        params: list[Any] = [name]
+        if status == "open":
+            status_sql = "AND UPPER(TRIM(result)) NOT IN ('CLOSE', 'CLOSED', 'SELESAI', 'DONE')"
+        elif status == "close":
+            status_sql = "AND UPPER(TRIM(result)) IN ('CLOSE', 'CLOSED', 'SELESAI', 'DONE')"
+        params.append(limit)
+        async with self._lock:
+            with self.connection() as conn:
+                rows = conn.execute(
+                    f"""
+                    SELECT * FROM orders
+                    WHERE LOWER(TRIM(assigned_technician)) = LOWER(TRIM(?))
+                    {status_sql}
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    params,
+                ).fetchall()
+        return [Order(**dict(row)) for row in rows]
+
+    async def technician_stats(self, technician_name: str) -> dict[str, int]:
+        async with self._lock:
+            with self.connection() as conn:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS total,
+                           SUM(CASE WHEN UPPER(TRIM(result)) IN ('CLOSE','CLOSED','SELESAI','DONE') THEN 1 ELSE 0 END) AS closed
+                    FROM orders
+                    WHERE LOWER(TRIM(assigned_technician)) = LOWER(TRIM(?))
+                    """,
+                    (technician_name.strip(),),
+                ).fetchone()
+        total = int(row["total"] or 0)
+        closed = int(row["closed"] or 0)
+        return {"total": total, "open": total - closed, "close": closed}
 
     async def update_fields(self, order_id: int, fields: dict[str, str]) -> Order:
         allowed = {
             "ticket_id", "service_number", "voip_number", "customer_name",
             "address", "customer_phone", "old_sn", "new_sn", "ont_type",
             "sto", "valins_id", "result", "config_description",
-            "report_description",
+            "report_description", "assigned_technician",
         }
         cleaned: dict[str, str] = {}
         for key, raw_value in fields.items():
@@ -273,10 +301,7 @@ class OrderRepository:
                     f"UPDATE orders SET {assignments}, updated_at = ? WHERE id = ?",
                     values,
                 )
-                row = conn.execute(
-                    "SELECT * FROM orders WHERE id = ?",
-                    (order_id,),
-                ).fetchone()
+                row = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
 
         order = self._row_to_order(row)
         if order is None:
