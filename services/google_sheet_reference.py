@@ -22,6 +22,10 @@ TICKET_HEADERS = {
     "NO. TIKET", "NOMOR TIKET", "TICKET EXTERNAL", "TIKET EXTERNAL",
     "EXTERNAL TICKET", "INCIDENT", "INCIDENT ID", "NO INCIDENT",
 }
+INSERA_TICKET_HEADERS = {
+    "INSERA TODAY", "TIKET INSERA", "TICKET INSERA", "INSERA",
+    "INSERA TICKET", "INSERA TODAY TICKET",
+}
 SERVICE_HEADERS = {
     "NO INET", "NO INTERNET", "NO SERVICE", "SERVICE NUMBER",
     "INTERNET NUMBER", "INET",
@@ -56,6 +60,15 @@ def normalize(value: object) -> str:
 
 def normalize_key(value: object) -> str:
     return re.sub(r"[^A-Z0-9]", "", normalize(value))
+
+
+def normalize_ticket(value: object) -> str:
+    ticket = normalize(value)
+    # Nilai seperti MANUAL bukan nomor tiket. Nomor tiket aktual diprioritaskan
+    # dari kolom INSERA TODAY jika tersedia.
+    if ticket in {"", "-", "MANUAL", "N/A", "NA", "NONE"}:
+        return ""
+    return ticket
 
 
 def current_sheet_url() -> str:
@@ -146,6 +159,12 @@ def find_column(headers: list[str], aliases: set[str]) -> int | None:
     return None
 
 
+def cell(row: list[str], column: int | None) -> str:
+    if column is None or column >= len(row):
+        return ""
+    return str(row[column] or "").strip()
+
+
 def download_statuses() -> dict[str, ReferenceStatus]:
     request = Request(current_csv_url(), headers={"User-Agent": "Kerja-Bot/1.0"})
     with urlopen(request, timeout=20) as response:
@@ -155,41 +174,50 @@ def download_statuses() -> dict[str, ReferenceStatus]:
     if not rows:
         raise ValueError("Google Sheets kosong atau tidak dapat dibaca.")
 
-    columns: tuple[int | None, int | None, int | None, int | None] = (
-        None, None, None, None
+    columns: tuple[int | None, int | None, int | None, int | None, int | None] = (
+        None, None, None, None, None
     )
     header_index = 0
     for index, row in enumerate(rows[:20]):
         ticket_col = find_column(row, TICKET_HEADERS)
+        insera_ticket_col = find_column(row, INSERA_TICKET_HEADERS)
         service_col = find_column(row, SERVICE_HEADERS)
         status_col = find_column(row, STATUS_HEADERS)
         new_sn_col = find_column(row, NEW_SN_HEADERS)
-        if status_col is not None and (ticket_col is not None or service_col is not None):
+        if status_col is not None and (
+            ticket_col is not None
+            or insera_ticket_col is not None
+            or service_col is not None
+        ):
             header_index = index
-            columns = (ticket_col, service_col, status_col, new_sn_col)
+            columns = (
+                ticket_col,
+                insera_ticket_col,
+                service_col,
+                status_col,
+                new_sn_col,
+            )
             break
 
-    ticket_col, service_col, status_col, new_sn_col = columns
-    if status_col is None or (ticket_col is None and service_col is None):
+    ticket_col, insera_ticket_col, service_col, status_col, new_sn_col = columns
+    if status_col is None or (
+        ticket_col is None and insera_ticket_col is None and service_col is None
+    ):
         raise ValueError("Kolom tiket/no internet/status Google Sheets tidak ditemukan.")
 
     result: dict[str, ReferenceStatus] = {}
     for row in rows[header_index + 1:]:
-        status = normalize(row[status_col] if status_col < len(row) else "")
+        status = normalize(cell(row, status_col))
         if not status:
             continue
 
-        ticket_id = ""
-        if ticket_col is not None and ticket_col < len(row):
-            ticket_id = str(row[ticket_col] or "").strip().upper()
-
-        service_number = ""
-        if service_col is not None and service_col < len(row):
-            service_number = str(row[service_col] or "").strip()
-
-        new_sn = ""
-        if new_sn_col is not None and new_sn_col < len(row):
-            new_sn = str(row[new_sn_col] or "").strip().upper()
+        primary_ticket = normalize_ticket(cell(row, ticket_col))
+        insera_ticket = normalize_ticket(cell(row, insera_ticket_col))
+        # TIKET dipakai jika benar-benar berisi nomor tiket. Jika kosong/MANUAL,
+        # gunakan tiket aktual pada kolom INSERA TODAY.
+        ticket_id = primary_ticket or insera_ticket
+        service_number = cell(row, service_col)
+        new_sn = normalize(cell(row, new_sn_col))
 
         reference = ReferenceStatus(
             status=status,
@@ -197,9 +225,14 @@ def download_statuses() -> dict[str, ReferenceStatus]:
             ticket_id=ticket_id,
             service_number=service_number,
         )
-        ticket_key = normalize_key(ticket_id)
-        if ticket_key:
-            result[f"ticket:{ticket_key}"] = reference
+
+        # Simpan kedua nomor tiket sebagai key agar pencocokan tetap berhasil
+        # bila database memiliki salah satu di antaranya.
+        for candidate in {primary_ticket, insera_ticket, ticket_id}:
+            ticket_key = normalize_key(candidate)
+            if ticket_key:
+                result[f"ticket:{ticket_key}"] = reference
+
         service_key = normalize_key(service_number)
         if service_key:
             result[f"service:{service_key}"] = reference
