@@ -58,6 +58,10 @@ ALIASES: dict[str, tuple[str, ...]] = {
         "KETERANGAN REPORT", "KET REPORT", "KETERANGAN STO",
         "REPORT DESCRIPTION", "KETERANGAN",
     ),
+    "assigned_technician": (
+        "NAMA PETUGAS", "PETUGAS", "TEKNISI", "NAMA TEKNISI",
+        "ASSIGNED TECHNICIAN", "TECHNICIAN",
+    ),
 }
 
 
@@ -121,8 +125,6 @@ async def import_workbook(
     file_path: Path,
     repository: OrderRepository,
 ) -> dict[str, int]:
-    # Beberapa file Excel Telkom tidak menyimpan worksheet dimension dengan benar.
-    # Mode normal lebih aman daripada read_only untuk file seperti itu.
     workbook = load_workbook(file_path, read_only=False, data_only=True)
 
     stats = {
