@@ -40,12 +40,17 @@ def format_order(
     else:
         status_label = "🟢 OPEN"
 
+    # Database tetap menjadi sumber utama. Jika SN belum tersimpan di database,
+    # tampilkan SN ONT NEW dari Google Sheets sebagai referensi read-only.
+    displayed_new_sn = order.new_sn or (reference.new_sn if reference else "") or "-"
+    sn_source = " (Google Sheets)" if not order.new_sn and reference and reference.new_sn else ""
+
     return (
         f"{index}. {status_label}\n"
         f"   Tiket : {order.ticket_id or '-'}\n"
         f"   INET  : {order.service_number or '-'}\n"
         f"   Nama  : {order.customer_name or '-'}\n"
-        f"   SN New: {order.new_sn or '-'}"
+        f"   SN New: {displayed_new_sn}{sn_source}"
     )
 
 
@@ -96,8 +101,8 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"🟢 OPEN  : {open_count}\n"
             f"✅ CLOSE : {closed_count}\n"
             f"Progress : {progress:.1f}%\n\n"
-            "Status CLOSE/DONE juga dicek dari referensi Google Sheets. "
-            "Bot hanya membaca dan tidak mengubah Google Sheets.\n\n"
+            "Status dan SN ONT NEW juga dibaca dari referensi Google Sheets. "
+            "Bot tidak mengubah Google Sheets maupun database dari data tersebut.\n\n"
             "Perintah:\n"
             "/orderanku open\n"
             "/orderanku close\n"
@@ -138,6 +143,7 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     else:
         orders = all_orders
 
+    matching_count = len(orders)
     orders = orders[:50]
     title = {
         "open": "🟢 ORDER OPEN",
@@ -166,19 +172,6 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     for chunk in chunks:
         await update.effective_message.reply_text(chunk)
 
-    matching_count = sum(
-        1
-        for order in all_orders
-        if status == "all"
-        or (
-            status == "open"
-            and not is_effectively_closed(order, references.get(order.id))
-        )
-        or (
-            status == "close"
-            and is_effectively_closed(order, references.get(order.id))
-        )
-    )
     if matching_count > 50:
         await update.effective_message.reply_text(
             f"Ditampilkan 50 dari {matching_count} order."
