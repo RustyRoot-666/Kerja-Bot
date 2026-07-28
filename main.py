@@ -24,10 +24,12 @@ from handlers.common import (
     settings_menu,
 )
 from handlers.excel_status import build_excel_status_handlers
+from handlers.google_sheet import build_google_sheet_handlers
 from handlers.login import build_login_conversation, start
 from handlers.my_orders import build_my_orders_handlers, orderanku
 from handlers.order_flow import build_order_conversation
 from services.auto_close import install_auto_close
+from services.google_sheet_reference import initialize_sheet_config
 from services.order_repository import OrderRepository
 from utils.keyboards import MAIN_MENU
 from utils.logging import setup_logging
@@ -38,7 +40,8 @@ async def post_init(application: Application) -> None:
     orders: OrderRepository = application.bot_data["orders"]
     await db.initialize()
     await orders.initialize()
-    logging.info("Bot started; technician and order databases initialized")
+    await initialize_sheet_config(application.bot_data["settings"].database_path)
+    logging.info("Bot started; technician, order, and Google Sheets config initialized")
 
 
 def build_application() -> Application:
@@ -91,6 +94,9 @@ def build_application() -> Application:
         app.add_handler(handler)
 
     for handler in build_my_orders_handlers():
+        app.add_handler(handler)
+
+    for handler in build_google_sheet_handlers():
         app.add_handler(handler)
 
     for handler in build_admin_handlers():
