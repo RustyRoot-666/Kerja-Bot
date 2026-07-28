@@ -20,6 +20,7 @@ class Technician:
     telegram_id: int
     nik: str
     name: str
+    sto: str
     created_at: str
 
 
@@ -50,6 +51,7 @@ class Database:
                         telegram_id INTEGER NOT NULL UNIQUE,
                         nik TEXT NOT NULL,
                         name TEXT NOT NULL,
+                        sto TEXT NOT NULL DEFAULT '',
                         created_at TEXT NOT NULL
                     );
 
@@ -92,6 +94,16 @@ class Database:
                     """
                 )
 
+                # Migrasi aman untuk database lama yang belum memiliki kolom STO.
+                columns = {
+                    row["name"]
+                    for row in conn.execute("PRAGMA table_info(technicians)").fetchall()
+                }
+                if "sto" not in columns:
+                    conn.execute(
+                        "ALTER TABLE technicians ADD COLUMN sto TEXT NOT NULL DEFAULT ''"
+                    )
+
     async def get_technician(self, telegram_id: int) -> Technician | None:
         async with self._lock:
             with self.connection() as conn:
@@ -101,21 +113,47 @@ class Database:
                 ).fetchone()
         return Technician(**dict(row)) if row else None
 
-    async def create_technician(self, telegram_id: int, nik: str, name: str) -> Technician:
+    async def create_technician(
+        self,
+        telegram_id: int,
+        nik: str,
+        name: str,
+        sto: str,
+    ) -> Technician:
         async with self._lock:
             with self.connection() as conn:
                 conn.execute(
                     """
-                    INSERT INTO technicians (telegram_id, nik, name, created_at)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO technicians (telegram_id, nik, name, sto, created_at)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
-                    (telegram_id, nik.strip(), name.strip(), utc_now()),
+                    (
+                        telegram_id,
+                        nik.strip(),
+                        name.strip(),
+                        sto.strip().upper(),
+                        utc_now(),
+                    ),
                 )
                 row = conn.execute(
                     "SELECT * FROM technicians WHERE telegram_id = ?",
                     (telegram_id,),
                 ).fetchone()
         return Technician(**dict(row))
+
+    async def update_technician_sto(self, telegram_id: int, sto: str) -> Technician | None:
+        normalized_sto = sto.strip().upper()
+        async with self._lock:
+            with self.connection() as conn:
+                conn.execute(
+                    "UPDATE technicians SET sto = ? WHERE telegram_id = ?",
+                    (normalized_sto, telegram_id),
+                )
+                row = conn.execute(
+                    "SELECT * FROM technicians WHERE telegram_id = ?",
+                    (telegram_id,),
+                ).fetchone()
+        return Technician(**dict(row)) if row else None
 
     async def list_technicians(self) -> list[sqlite3.Row]:
         async with self._lock:
