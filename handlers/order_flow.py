@@ -129,7 +129,7 @@ async def start_output(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     context.user_data.pop("active_order_id", None)
     context.user_data.pop("missing_fields", None)
 
-    args = list(context.args)
+    args = list(context.args or [])
     if args:
         return await search_and_continue(update, context, " ".join(args))
 
