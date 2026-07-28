@@ -5,7 +5,6 @@ import logging
 from telegram.ext import (
     Application,
     CommandHandler,
-    ConversationHandler,
     MessageHandler,
     filters,
 )
@@ -23,19 +22,19 @@ from handlers.common import (
     search,
     settings_menu,
 )
-from handlers.config_flow import build_config_conversation
-from handlers.full_flow import build_full_conversation
 from handlers.login import build_login_conversation, start
-from handlers.report_flow import build_report_conversation
-from handlers.sto_flow import build_sto_conversation
-from utils.logging import setup_logging
+from handlers.order_flow import build_order_conversation
+from services.order_repository import OrderRepository
 from utils.keyboards import MAIN_MENU
+from utils.logging import setup_logging
 
 
 async def post_init(application: Application) -> None:
     db: Database = application.bot_data["db"]
+    orders: OrderRepository = application.bot_data["orders"]
     await db.initialize()
-    logging.info("Bot started and database initialized")
+    await orders.initialize()
+    logging.info("Bot started; technician and order databases initialized")
 
 
 def build_application() -> Application:
@@ -44,12 +43,15 @@ def build_application() -> Application:
     setup_logging(settings.log_dir)
 
     db = Database(settings.database_path)
+    orders = OrderRepository(settings.database_path)
+
     request = HTTPXRequest(
         connect_timeout=30.0,
         read_timeout=60.0,
         write_timeout=60.0,
         pool_timeout=30.0,
     )
+
     app = (
         Application.builder()
         .token(settings.bot_token)
@@ -58,20 +60,17 @@ def build_application() -> Application:
         .post_init(post_init)
         .build()
     )
+
     app.bot_data["db"] = db
+    app.bot_data["orders"] = orders
     app.bot_data["settings"] = settings
 
     login_conv = build_login_conversation()
-    full_conv = build_full_conversation()
-    config_conv = build_config_conversation()
-    report_conv = build_report_conversation()
-    sto_conv = build_sto_conversation()
+    order_conv = build_order_conversation()
 
     app.add_handler(login_conv)
-    app.add_handler(full_conv)
-    app.add_handler(config_conv)
-    app.add_handler(report_conv)
-    app.add_handler(sto_conv)
+    app.add_handler(order_conv)
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("daftar_teknisi", start))
     app.add_handler(CommandHandler("cancel", cancel))
@@ -85,8 +84,19 @@ def build_application() -> Application:
     for handler in build_admin_handlers():
         app.add_handler(handler)
 
-    app.add_handler(MessageHandler(filters.Regex(f"^({MAIN_MENU['profile']})$"), profile))
-    app.add_handler(MessageHandler(filters.Regex(f"^({MAIN_MENU['settings']})$"), settings_menu))
+    app.add_handler(
+        MessageHandler(
+            filters.Regex(f"^({MAIN_MENU['profile']})$"),
+            profile,
+        )
+    )
+    app.add_handler(
+        MessageHandler(
+            filters.Regex(f"^({MAIN_MENU['settings']})$"),
+            settings_menu,
+        )
+    )
+
     app.add_error_handler(error_handler)
     return app
 
@@ -94,7 +104,9 @@ def build_application() -> Application:
 async def error_handler(update, context) -> None:
     logging.exception("Unhandled bot error", exc_info=context.error)
     if update and update.effective_chat:
-        await update.effective_chat.send_message("Terjadi error. Silakan coba lagi atau hubungi admin.")
+        await update.effective_chat.send_message(
+            "Terjadi error. Silakan coba lagi atau hubungi admin."
+        )
 
 
 def main() -> None:
