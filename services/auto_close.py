@@ -52,6 +52,27 @@ def install_auto_close(order_flow_module) -> None:
         if message is None:
             return order_flow_module.ConversationHandler.END
 
+        # STO adalah profil teknisi dan selalu dipakai lebih dahulu daripada
+        # data order maupun Google Sheets.
+        technician = await order_flow_module.require_technician(update, context)
+        if technician is None:
+            return order_flow_module.ConversationHandler.END
+        if not technician.sto.strip():
+            await message.reply_text(
+                "Profil Anda belum memiliki STO. Silakan /start lalu isi STO satu kali."
+            )
+            return order_flow_module.ConversationHandler.END
+
+        try:
+            current_sto = normalize(order.sto)
+            profile_sto = technician.sto.strip().upper()
+            if current_sto != normalize(profile_sto):
+                order = await context.application.bot_data["orders"].update_fields(
+                    order.id, {"sto": profile_sto}
+                )
+        except Exception:
+            logging.exception("Gagal mengisi STO order dari profil teknisi")
+
         # Google Sheets hanya dibaca. Data teknisi yang sudah tersimpan tidak ditimpa.
         try:
             statuses = await get_reference_statuses()
@@ -64,6 +85,8 @@ def install_auto_close(order_flow_module) -> None:
                 current = order.to_dict()
                 updates: dict[str, str] = {}
                 for field, sheet_value in reference.order_fields().items():
+                    if field == "sto":
+                        continue
                     if sheet_value and is_missing(field, current.get(field, "")):
                         updates[field] = sheet_value
 
@@ -88,6 +111,7 @@ def install_auto_close(order_flow_module) -> None:
             lines.extend([
                 "",
                 "Data dari Google Sheets sudah diambil otomatis. Isi hanya yang tetap kosong.",
+                "STO diambil otomatis dari profil teknisi.",
                 "Data akan disimpan dan permintaan berikutnya langsung dikirim jika sudah lengkap.",
                 f"Jumlah jawaban harus {len(missing)} baris.",
             ])
@@ -100,6 +124,20 @@ def install_auto_close(order_flow_module) -> None:
 
     @wraps(original_send_outputs)
     async def send_outputs_with_auto_close(update, context, order, action) -> None:
+        technician = await order_flow_module.require_technician(update, context)
+        if technician is None or not technician.sto.strip():
+            if update.effective_message:
+                await update.effective_message.reply_text(
+                    "Profil Anda belum memiliki STO. Silakan /start lalu isi STO satu kali."
+                )
+            return
+
+        profile_sto = technician.sto.strip().upper()
+        if normalize(order.sto) != normalize(profile_sto):
+            order = await context.application.bot_data["orders"].update_fields(
+                order.id, {"sto": profile_sto}
+            )
+
         await original_send_outputs(update, context, order, action)
         if normalize(order.result) in CLOSED_STATUSES:
             return
