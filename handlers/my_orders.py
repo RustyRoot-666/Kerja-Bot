@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from html import escape
 
 from telegram import Update
 from telegram.ext import CommandHandler, ContextTypes
@@ -60,6 +61,11 @@ def displayed_package(reference: ReferenceStatus | None) -> str:
     return value
 
 
+def code(value: str) -> str:
+    """Render nilai sebagai teks monospace yang dapat diketuk untuk disalin di Telegram."""
+    return f"<code>{escape(value)}</code>"
+
+
 def format_order(
     order: Order,
     index: int,
@@ -84,23 +90,23 @@ def format_order(
         )
         package = displayed_package(reference)
         return (
-            f"{index}. {name}\n"
+            f"{index}. {escape(name)}\n"
             f"{SEPARATOR}\n"
-            f"🎫 Tiket : {ticket}\n"
-            f"🌐 INET  : {service}\n"
-            f"📞 CP    : {phone}\n"
-            f"⚡ Paket : {package}\n"
+            f"🎫 Tiket : {code(ticket)}\n"
+            f"🌐 INET  : {code(service)}\n"
+            f"📞 CP    : {code(phone)}\n"
+            f"⚡ Paket : {escape(package)}\n"
             f"🏠 Alamat:\n"
-            f"{address}"
+            f"{escape(address)}"
         )
 
     if category == "close":
         return (
-            f"{index}. {name}\n"
+            f"{index}. {escape(name)}\n"
             f"{SEPARATOR}\n"
-            f"🎫 Tiket : {ticket}\n"
-            f"🌐 INET  : {service}\n"
-            f"🔢 SN New: {displayed_new_sn(order, reference)}"
+            f"🎫 Tiket : {code(ticket)}\n"
+            f"🌐 INET  : {code(service)}\n"
+            f"🔢 SN New: {code(displayed_new_sn(order, reference))}"
         )
 
     status_label = (
@@ -110,12 +116,12 @@ def format_order(
         else "OPEN"
     )
     return (
-        f"{index}. {name}\n"
+        f"{index}. {escape(name)}\n"
         f"{SEPARATOR}\n"
-        f"Status   : {status_label}\n"
-        f"🎫 Tiket : {ticket}\n"
-        f"🌐 INET  : {service}\n"
-        f"🔢 SN New: {displayed_new_sn(order, reference)}"
+        f"Status   : {escape(status_label)}\n"
+        f"🎫 Tiket : {code(ticket)}\n"
+        f"🌐 INET  : {code(service)}\n"
+        f"🔢 SN New: {code(displayed_new_sn(order, reference))}"
     )
 
 
@@ -223,7 +229,7 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     chunks: list[str] = []
-    current = f"{title} — {technician.name.upper()}\n\n"
+    current = f"{title} — {escape(technician.name.upper())}\n\n"
     for index, order in enumerate(orders, start=1):
         item = format_order(order, index, references.get(order.id), status) + "\n\n"
         if len(current) + len(item) > 3800:
@@ -235,7 +241,7 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chunks.append(current.rstrip())
 
     for chunk in chunks:
-        await update.effective_message.reply_text(chunk)
+        await update.effective_message.reply_text(chunk, parse_mode="HTML")
 
     if matching_count > 50:
         await update.effective_message.reply_text(
