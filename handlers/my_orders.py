@@ -3,8 +3,19 @@ from __future__ import annotations
 import re
 from html import escape
 
-from telegram import ReplyKeyboardMarkup, Update
-from telegram.ext import CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
+    Update,
+)
+from telegram.ext import (
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 from services.auth import require_technician
 from services.google_sheet_reference import (
@@ -21,6 +32,7 @@ from utils.keyboards import main_menu_keyboard
 CLOSED_STATUSES = {"CLOSE", "CLOSED", "SELESAI", "DONE"}
 SEPARATOR = "━━━━━━━━━━━━━━━"
 BACK_TO_MAIN = "⬅️ Kembali ke Menu Utama"
+COPY_CALLBACK_PATTERN = r"^copy_(inet|cp):"
 
 
 def repository(context: ContextTypes.DEFAULT_TYPE) -> OrderRepository:
@@ -62,10 +74,6 @@ def displayed_package(reference: ReferenceStatus | None) -> str:
     return value
 
 
-def copy_block(value: str) -> str:
-    return f"<pre>{escape(value)}</pre>"
-
-
 def orderanku_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
@@ -76,6 +84,23 @@ def orderanku_menu() -> ReplyKeyboardMarkup:
         resize_keyboard=True,
         one_time_keyboard=False,
         input_field_placeholder="Pilih kategori order",
+    )
+
+
+def copy_buttons(service: str, phone: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "📋 Salin INET",
+                    callback_data=f"copy_inet:{service}",
+                ),
+                InlineKeyboardButton(
+                    "📋 Salin CP",
+                    callback_data=f"copy_cp:{phone}",
+                ),
+            ]
+        ]
     )
 
 
@@ -105,9 +130,9 @@ def format_order(
         return (
             f"{index}. {escape(name)}\n"
             f"{SEPARATOR}\n"
-            f"🎫 Tiket:\n{copy_block(ticket)}\n"
-            f"🌐 INET:\n{copy_block(service)}\n"
-            f"📞 CP:\n{copy_block(phone)}\n"
+            f"🎫 Tiket : {escape(ticket)}\n"
+            f"🌐 INET  : {escape(service)}\n"
+            f"📞 CP    : {escape(phone)}\n"
             f"⚡ Paket : {escape(package)}\n"
             f"🏠 Alamat:\n"
             f"{escape(address)}"
@@ -117,9 +142,9 @@ def format_order(
         return (
             f"{index}. {escape(name)}\n"
             f"{SEPARATOR}\n"
-            f"🎫 Tiket:\n{copy_block(ticket)}\n"
-            f"🌐 INET:\n{copy_block(service)}\n"
-            f"🔢 SN New:\n{copy_block(displayed_new_sn(order, reference))}"
+            f"🎫 Tiket : {escape(ticket)}\n"
+            f"🌐 INET  : {escape(service)}\n"
+            f"🔢 SN New: {escape(displayed_new_sn(order, reference))}"
         )
 
     status_label = (
@@ -132,9 +157,28 @@ def format_order(
         f"{index}. {escape(name)}\n"
         f"{SEPARATOR}\n"
         f"Status   : {escape(status_label)}\n"
-        f"🎫 Tiket:\n{copy_block(ticket)}\n"
-        f"🌐 INET:\n{copy_block(service)}\n"
-        f"🔢 SN New:\n{copy_block(displayed_new_sn(order, reference))}"
+        f"🎫 Tiket : {escape(ticket)}\n"
+        f"🌐 INET  : {escape(service)}\n"
+        f"🔢 SN New: {escape(displayed_new_sn(order, reference))}"
+    )
+
+
+async def copy_order_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query is None or query.message is None:
+        return
+
+    data = query.data or ""
+    prefix, separator, value = data.partition(":")
+    if not separator or prefix not in {"copy_inet", "copy_cp"}:
+        await query.answer("Data tidak valid.", show_alert=True)
+        return
+
+    await query.answer("Nomor dikirim. Tekan lama pada pesan untuk menyalin.")
+    label = "INET" if prefix == "copy_inet" else "CP"
+    await query.message.reply_text(
+        value,
+        reply_to_message_id=query.message.message_id,
     )
 
 
@@ -251,24 +295,42 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
 
-    chunks: list[str] = []
-    current = f"{title} — {escape(technician.name.upper())}\n\n"
-    for index, order in enumerate(orders, start=1):
-        item = format_order(order, index, references.get(order.id), status) + "\n\n"
-        if len(current) + len(item) > 3800:
-            chunks.append(current.rstrip())
-            current = item
-        else:
-            current += item
-    if current.strip():
-        chunks.append(current.rstrip())
+    await update.effective_message.reply_text(
+        f"{title} — {technician.name.upper()}",
+        reply_markup=orderanku_menu(),
+    )
 
-    for chunk in chunks:
-        await update.effective_message.reply_text(
-            chunk,
-            parse_mode="HTML",
-            reply_markup=orderanku_menu(),
-        )
+    if status == "open":
+        for index, order in enumerate(orders, start=1):
+            reference = references.get(order.id)
+            service = displayed_service(order, reference)
+            phone = displayed_value(
+                order.customer_phone,
+                reference.customer_phone if reference else "",
+            )
+            await update.effective_message.reply_text(
+                format_order(order, index, reference, status),
+                parse_mode="HTML",
+                reply_markup=copy_buttons(service, phone),
+            )
+    else:
+        chunks: list[str] = []
+        current = ""
+        for index, order in enumerate(orders, start=1):
+            item = format_order(order, index, references.get(order.id), status) + "\n\n"
+            if len(current) + len(item) > 3800:
+                chunks.append(current.rstrip())
+                current = item
+            else:
+                current += item
+        if current.strip():
+            chunks.append(current.rstrip())
+
+        for chunk in chunks:
+            await update.effective_message.reply_text(
+                chunk,
+                parse_mode="HTML",
+            )
 
     if matching_count > 50:
         await update.effective_message.reply_text(
@@ -280,5 +342,6 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 def build_my_orders_handlers() -> list:
     return [
         CommandHandler("orderanku", orderanku),
+        CallbackQueryHandler(copy_order_value, pattern=COPY_CALLBACK_PATTERN),
         MessageHandler(filters.Regex(f"^{re.escape(BACK_TO_MAIN)}$"), back_to_main_menu),
     ]
