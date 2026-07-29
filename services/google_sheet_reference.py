@@ -26,6 +26,7 @@ HEADER_ALIASES: dict[str, set[str]] = {
     "customer_name": {"NAMA PELANGGAN", "CUSTOMER NAME", "NAMA CUSTOMER", "NAMA"},
     "address": {"ALAMAT", "ADDRESS", "ALAMAT PELANGGAN"},
     "customer_phone": {"CP", "NO HP", "NO. HP", "NOMOR HP", "CP / NO HP", "CONTACT PERSON", "PHONE"},
+    "package": {"PAKET", "KECEPATAN", "SPEED", "SPEED PAKET", "PAKET INTERNET", "BANDWIDTH", "SPEED BY TACPRO"},
     "old_sn": {"SN ONT LAMA", "SN LAMA", "OLD SN", "SN OLD", "SERIAL NUMBER LAMA"},
     "new_sn": {"SN ONT NEW", "SN ONT BARU", "SN NEW", "NEW SN", "SN BARU", "SERIAL NUMBER BARU"},
     "ont_type": {"TYPE ONT", "TIPE ONT", "MODEL ONT", "MODEL ONT BARU", "TYPE ONT BARU", "TIPE ONT BARU"},
@@ -46,6 +47,7 @@ class ReferenceStatus:
     customer_name: str = ""
     address: str = ""
     customer_phone: str = ""
+    package: str = ""
     old_sn: str = ""
     ont_type: str = ""
     sto: str = ""
@@ -190,10 +192,11 @@ def download_statuses() -> dict[str, ReferenceStatus]:
             status=normalize(values["status"]), ticket_id=ticket_id,
             service_number=service_number, voip_number=values["voip_number"],
             customer_name=values["customer_name"], address=values["address"],
-            customer_phone=values["customer_phone"], old_sn=normalize(values["old_sn"]),
-            new_sn=normalize(values["new_sn"]), ont_type=normalize(values["ont_type"]),
-            sto=normalize(values["sto"]), valins_id=values["valins_id"],
-            config_description=values["config_description"], report_description=values["report_description"],
+            customer_phone=values["customer_phone"], package=values["package"],
+            old_sn=normalize(values["old_sn"]), new_sn=normalize(values["new_sn"]),
+            ont_type=normalize(values["ont_type"]), sto=normalize(values["sto"]),
+            valins_id=values["valins_id"], config_description=values["config_description"],
+            report_description=values["report_description"],
         )
         for candidate in {primary_ticket, insera_ticket, ticket_id}:
             key = normalize_key(candidate)
