@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from telegram import Update
 from telegram.ext import CommandHandler, ContextTypes
 
@@ -15,6 +17,7 @@ from services.order_repository import Order, OrderRepository
 
 
 CLOSED_STATUSES = {"CLOSE", "CLOSED", "SELESAI", "DONE"}
+SEPARATOR = "━━━━━━━━━━━━━━━"
 
 
 def repository(context: ContextTypes.DEFAULT_TYPE) -> OrderRepository:
@@ -48,6 +51,15 @@ def displayed_value(order_value: str, reference_value: str = "") -> str:
     return order_value.strip() or reference_value.strip() or "-"
 
 
+def displayed_package(reference: ReferenceStatus | None) -> str:
+    value = (reference.package if reference else "").strip()
+    if not value:
+        return "-"
+    if re.fullmatch(r"\d+(?:[.,]\d+)?", value):
+        return f"{value} Mbps"
+    return value
+
+
 def format_order(
     order: Order,
     index: int,
@@ -70,22 +82,25 @@ def format_order(
             order.address,
             reference.address if reference else "",
         )
+        package = displayed_package(reference)
         return (
-            f"{index}.\n"
-            f"Tiket  : {ticket}\n"
-            f"INET   : {service}\n"
-            f"CP     : {phone}\n"
-            f"Nama   : {name}\n"
-            f"Alamat : {address}"
+            f"{index}. {name}\n"
+            f"{SEPARATOR}\n"
+            f"🎫 Tiket : {ticket}\n"
+            f"🌐 INET  : {service}\n"
+            f"📞 CP    : {phone}\n"
+            f"⚡ Paket : {package}\n"
+            f"🏠 Alamat:\n"
+            f"{address}"
         )
 
     if category == "close":
         return (
-            f"{index}.\n"
-            f"Tiket : {ticket}\n"
-            f"INET  : {service}\n"
-            f"Nama  : {name}\n"
-            f"SN New: {displayed_new_sn(order, reference)}"
+            f"{index}. {name}\n"
+            f"{SEPARATOR}\n"
+            f"🎫 Tiket : {ticket}\n"
+            f"🌐 INET  : {service}\n"
+            f"🔢 SN New: {displayed_new_sn(order, reference)}"
         )
 
     status_label = (
@@ -95,11 +110,12 @@ def format_order(
         else "OPEN"
     )
     return (
-        f"{index}. {status_label}\n"
-        f"Tiket : {ticket}\n"
-        f"INET  : {service}\n"
-        f"Nama  : {name}\n"
-        f"SN New: {displayed_new_sn(order, reference)}"
+        f"{index}. {name}\n"
+        f"{SEPARATOR}\n"
+        f"Status   : {status_label}\n"
+        f"🎫 Tiket : {ticket}\n"
+        f"🌐 INET  : {service}\n"
+        f"🔢 SN New: {displayed_new_sn(order, reference)}"
     )
 
 
@@ -150,7 +166,7 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"🟢 OPEN  : {open_count}\n"
             f"🔴 CLOSE : {closed_count}\n"
             f"Progress : {progress:.1f}%\n\n"
-            "Status, tiket, dan SN ONT NEW juga dibaca dari referensi Google Sheets. "
+            "Status, tiket, SN ONT NEW, dan paket juga dibaca dari referensi Google Sheets. "
             "Bot tidak mengubah Google Sheets maupun database dari data tersebut.\n\n"
             "Perintah:\n"
             "/orderanku open\n"
