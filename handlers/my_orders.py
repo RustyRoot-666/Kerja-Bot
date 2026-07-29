@@ -4,7 +4,7 @@ import re
 from html import escape
 
 from telegram import ReplyKeyboardMarkup, Update
-from telegram.ext import CommandHandler, ContextTypes
+from telegram.ext import CommandHandler, ContextTypes, MessageHandler, filters
 
 from services.auth import require_technician
 from services.google_sheet_reference import (
@@ -15,10 +15,12 @@ from services.google_sheet_reference import (
     status_for_order,
 )
 from services.order_repository import Order, OrderRepository
+from utils.keyboards import main_menu_keyboard
 
 
 CLOSED_STATUSES = {"CLOSE", "CLOSED", "SELESAI", "DONE"}
 SEPARATOR = "━━━━━━━━━━━━━━━"
+BACK_TO_MAIN = "⬅️ Kembali ke Menu Utama"
 
 
 def repository(context: ContextTypes.DEFAULT_TYPE) -> OrderRepository:
@@ -34,7 +36,6 @@ def is_effectively_closed(order: Order, reference: ReferenceStatus | None) -> bo
 
 
 def displayed_ticket(order: Order, reference: ReferenceStatus | None) -> str:
-    """Prioritas tiket: TIKET valid, lalu INSERA TODAY dari referensi, lalu MANUAL."""
     database_ticket = normalize_ticket(order.ticket_id)
     reference_ticket = normalize_ticket(reference.ticket_id if reference else "")
     return database_ticket or reference_ticket or "MANUAL"
@@ -61,9 +62,8 @@ def displayed_package(reference: ReferenceStatus | None) -> str:
     return value
 
 
-def code(value: str) -> str:
-    """Render nilai sebagai teks monospace yang dapat diketuk untuk disalin di Telegram."""
-    return f"<code>{escape(value)}</code>"
+def copy_block(value: str) -> str:
+    return f"<pre>{escape(value)}</pre>"
 
 
 def orderanku_menu() -> ReplyKeyboardMarkup:
@@ -71,10 +71,11 @@ def orderanku_menu() -> ReplyKeyboardMarkup:
         [
             ["/orderanku open", "/orderanku close"],
             ["/orderanku semua"],
+            [BACK_TO_MAIN],
         ],
         resize_keyboard=True,
         one_time_keyboard=False,
-        input_field_placeholder="Pilih order OPEN, CLOSE, atau SEMUA",
+        input_field_placeholder="Pilih kategori order",
     )
 
 
@@ -104,9 +105,9 @@ def format_order(
         return (
             f"{index}. {escape(name)}\n"
             f"{SEPARATOR}\n"
-            f"🎫 Tiket : {code(ticket)}\n"
-            f"🌐 INET  : {code(service)}\n"
-            f"📞 CP    : {code(phone)}\n"
+            f"🎫 Tiket:\n{copy_block(ticket)}\n"
+            f"🌐 INET:\n{copy_block(service)}\n"
+            f"📞 CP:\n{copy_block(phone)}\n"
             f"⚡ Paket : {escape(package)}\n"
             f"🏠 Alamat:\n"
             f"{escape(address)}"
@@ -116,9 +117,9 @@ def format_order(
         return (
             f"{index}. {escape(name)}\n"
             f"{SEPARATOR}\n"
-            f"🎫 Tiket : {code(ticket)}\n"
-            f"🌐 INET  : {code(service)}\n"
-            f"🔢 SN New: {code(displayed_new_sn(order, reference))}"
+            f"🎫 Tiket:\n{copy_block(ticket)}\n"
+            f"🌐 INET:\n{copy_block(service)}\n"
+            f"🔢 SN New:\n{copy_block(displayed_new_sn(order, reference))}"
         )
 
     status_label = (
@@ -131,9 +132,21 @@ def format_order(
         f"{index}. {escape(name)}\n"
         f"{SEPARATOR}\n"
         f"Status   : {escape(status_label)}\n"
-        f"🎫 Tiket : {code(ticket)}\n"
-        f"🌐 INET  : {code(service)}\n"
-        f"🔢 SN New: {code(displayed_new_sn(order, reference))}"
+        f"🎫 Tiket:\n{copy_block(ticket)}\n"
+        f"🌐 INET:\n{copy_block(service)}\n"
+        f"🔢 SN New:\n{copy_block(displayed_new_sn(order, reference))}"
+    )
+
+
+async def back_to_main_menu(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    technician = await require_technician(update, context)
+    if technician is None or update.effective_message is None:
+        return
+    await update.effective_message.reply_text(
+        "Menu utama.",
+        reply_markup=main_menu_keyboard(),
     )
 
 
@@ -154,7 +167,8 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "Belum ada order yang cocok dengan nama teknisi kamu.\n\n"
             f"Nama akun bot : {technician.name}\n"
             "Pastikan penulisannya sama dengan kolom NAMA PETUGAS di Excel, "
-            "kemudian import ulang melalui /importorder."
+            "kemudian import ulang melalui /importorder.",
+            reply_markup=orderanku_menu(),
         )
         return
 
@@ -263,5 +277,8 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
 
 
-def build_my_orders_handlers() -> list[CommandHandler]:
-    return [CommandHandler("orderanku", orderanku)]
+def build_my_orders_handlers() -> list:
+    return [
+        CommandHandler("orderanku", orderanku),
+        MessageHandler(filters.Regex(f"^{re.escape(BACK_TO_MAIN)}$"), back_to_main_menu),
+    ]
