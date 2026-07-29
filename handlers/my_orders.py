@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from html import escape
 
-from telegram import Update
+from telegram import ReplyKeyboardMarkup, Update
 from telegram.ext import CommandHandler, ContextTypes
 
 from services.auth import require_technician
@@ -64,6 +64,19 @@ def displayed_package(reference: ReferenceStatus | None) -> str:
 def code(value: str) -> str:
     """Render nilai sebagai teks monospace yang dapat diketuk untuk disalin di Telegram."""
     return f"<code>{escape(value)}</code>"
+
+
+def orderanku_menu() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            ["🟢 Orderanku Open", "🔴 Orderanku Close"],
+            ["📋 Semua Orderanku"],
+            ["↩️ Kembali"],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=False,
+        input_field_placeholder="Pilih kategori orderanku",
+    )
 
 
 def format_order(
@@ -172,12 +185,8 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"🟢 OPEN  : {open_count}\n"
             f"🔴 CLOSE : {closed_count}\n"
             f"Progress : {progress:.1f}%\n\n"
-            "Status, tiket, SN ONT NEW, dan paket juga dibaca dari referensi Google Sheets. "
-            "Bot tidak mengubah Google Sheets maupun database dari data tersebut.\n\n"
-            "Perintah:\n"
-            "/orderanku open\n"
-            "/orderanku close\n"
-            "/orderanku semua"
+            "Silakan pilih kategori order di menu bawah.",
+            reply_markup=orderanku_menu(),
         )
         return
 
@@ -195,7 +204,8 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if status is None:
         await update.effective_message.reply_text(
             "Pilihan tidak dikenali. Gunakan /orderanku, /orderanku open, "
-            "/orderanku close, atau /orderanku semua."
+            "/orderanku close, atau /orderanku semua.",
+            reply_markup=orderanku_menu(),
         )
         return
 
@@ -224,7 +234,8 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if not orders:
         await update.effective_message.reply_text(
-            f"{title} — {technician.name.upper()}\n\nTidak ada order pada kategori ini."
+            f"{title} — {technician.name.upper()}\n\nTidak ada order pada kategori ini.",
+            reply_markup=orderanku_menu(),
         )
         return
 
@@ -241,11 +252,16 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chunks.append(current.rstrip())
 
     for chunk in chunks:
-        await update.effective_message.reply_text(chunk, parse_mode="HTML")
+        await update.effective_message.reply_text(
+            chunk,
+            parse_mode="HTML",
+            reply_markup=orderanku_menu(),
+        )
 
     if matching_count > 50:
         await update.effective_message.reply_text(
-            f"Ditampilkan 50 dari {matching_count} order."
+            f"Ditampilkan 50 dari {matching_count} order.",
+            reply_markup=orderanku_menu(),
         )
 
 
