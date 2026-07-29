@@ -69,13 +69,12 @@ def code(value: str) -> str:
 def orderanku_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
-            ["🟢 Orderanku Open", "🔴 Orderanku Close"],
-            ["📋 Semua Orderanku"],
-            ["↩️ Kembali"],
+            ["/orderanku open", "/orderanku close"],
+            ["/orderanku semua"],
         ],
         resize_keyboard=True,
         one_time_keyboard=False,
-        input_field_placeholder="Pilih kategori orderanku",
+        input_field_placeholder="Pilih order OPEN, CLOSE, atau SEMUA",
     )
 
 
@@ -185,7 +184,7 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"🟢 OPEN  : {open_count}\n"
             f"🔴 CLOSE : {closed_count}\n"
             f"Progress : {progress:.1f}%\n\n"
-            "Silakan pilih kategori order di menu bawah.",
+            "Pilih kategori melalui tombol di bawah.",
             reply_markup=orderanku_menu(),
         )
         return
@@ -203,8 +202,7 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     status = aliases.get(mode)
     if status is None:
         await update.effective_message.reply_text(
-            "Pilihan tidak dikenali. Gunakan /orderanku, /orderanku open, "
-            "/orderanku close, atau /orderanku semua.",
+            "Pilihan tidak dikenali. Gunakan tombol OPEN, CLOSE, atau SEMUA.",
             reply_markup=orderanku_menu(),
         )
         return
