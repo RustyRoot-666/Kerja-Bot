@@ -175,10 +175,35 @@ async def copy_order_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     await query.answer("Nomor dikirim. Tekan lama pada pesan untuk menyalin.")
-    label = "INET" if prefix == "copy_inet" else "CP"
     await query.message.reply_text(
         value,
         reply_to_message_id=query.message.message_id,
+    )
+
+
+async def refresh_sheet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    technician = await require_technician(update, context)
+    if technician is None or update.effective_message is None:
+        return
+
+    await update.effective_message.reply_text("🔄 Membaca ulang Google Sheets...")
+    try:
+        statuses = await get_reference_statuses(force=True, raise_errors=True)
+    except Exception:
+        await update.effective_message.reply_text(
+            "❌ Gagal membaca Google Sheets.\n"
+            "Periksa URL, akses sharing, tab Sheet, dan koneksi internet."
+        )
+        return
+
+    unique_orders = {
+        reference.service_number or reference.ticket_id
+        for reference in statuses.values()
+        if reference.service_number or reference.ticket_id
+    }
+    await update.effective_message.reply_text(
+        "✅ Data terbaru Google Sheets berhasil dimuat.\n"
+        f"Referensi terbaca: {len(unique_orders)} order."
     )
 
 
@@ -342,6 +367,7 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 def build_my_orders_handlers() -> list:
     return [
         CommandHandler("orderanku", orderanku),
+        CommandHandler("refreshsheet", refresh_sheet),
         CallbackQueryHandler(copy_order_value, pattern=COPY_CALLBACK_PATTERN),
         MessageHandler(filters.Regex(f"^{re.escape(BACK_TO_MAIN)}$"), back_to_main_menu),
     ]
