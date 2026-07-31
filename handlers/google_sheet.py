@@ -80,12 +80,12 @@ async def syncsheet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     await update.effective_message.reply_text(
-        "🔄 Membaca Google Sheets terbaru dan menyinkronkan order yang belum ada..."
+        "🔄 Membaca Google Sheets terbaru dan menyinkronkan database..."
     )
     try:
         statuses = await get_reference_statuses(force=True, raise_errors=True)
         database_path = context.application.bot_data["settings"].database_path
-        total, inserted, skipped = await sync_missing_orders_from_sheet(
+        total, inserted, updated, unchanged = await sync_missing_orders_from_sheet(
             database_path,
             statuses,
         )
@@ -100,8 +100,9 @@ async def syncsheet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "✅ Sinkronisasi selesai.\n\n"
         f"Order unik di Sheet : {total}\n"
         f"Order baru masuk DB : {inserted}\n"
-        f"Order sudah ada     : {skipped}\n\n"
-        "Data yang sudah ada di database tidak ditimpa.\n"
+        f"Order diperbarui    : {updated}\n"
+        f"Tidak berubah       : {unchanged}\n\n"
+        "Database diperbarui dari Google Sheets, termasuk NAMA PETUGAS.\n"
         "Google Sheets tetap read-only."
     )
 
