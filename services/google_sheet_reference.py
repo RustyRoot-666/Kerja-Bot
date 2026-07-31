@@ -8,6 +8,7 @@ import re
 import sqlite3
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
@@ -34,6 +35,7 @@ HEADER_ALIASES: dict[str, set[str]] = {
     "valins_id": {"VALINS ID", "ID VALINS", "VALINS"},
     "config_description": {"KETERANGAN CONFIG", "KETERANGAN KONFIG", "DESKRIPSI CONFIG", "KET CONFIG"},
     "report_description": {"KETERANGAN REPORT/STO", "KETERANGAN REPORT", "KETERANGAN STO", "KET REPORT/STO", "KET REPORT"},
+    "assigned_technician": {"NAMA PETUGAS", "PETUGAS", "TEKNISI", "NAMA TEKNISI", "ASSIGNED TECHNICIAN"},
 }
 
 
@@ -54,6 +56,7 @@ class ReferenceStatus:
     valins_id: str = ""
     config_description: str = ""
     report_description: str = ""
+    assigned_technician: str = ""
     source: str = "Google Sheets"
 
     def order_fields(self) -> dict[str, str]:
@@ -72,6 +75,7 @@ class ReferenceStatus:
             "result": self.status,
             "config_description": self.config_description,
             "report_description": self.report_description,
+            "assigned_technician": self.assigned_technician,
         }
 
 
@@ -197,6 +201,7 @@ def download_statuses() -> dict[str, ReferenceStatus]:
             ont_type=normalize(values["ont_type"]), sto=normalize(values["sto"]),
             valins_id=values["valins_id"], config_description=values["config_description"],
             report_description=values["report_description"],
+            assigned_technician=values["assigned_technician"],
         )
         for candidate in {primary_ticket, insera_ticket, ticket_id}:
             key = normalize_key(candidate)
@@ -224,6 +229,62 @@ async def get_reference_statuses(force: bool = False, raise_errors: bool = False
             if raise_errors:
                 raise
         return _cache
+
+
+def unique_reference_orders(statuses: dict[str, ReferenceStatus]) -> list[ReferenceStatus]:
+    unique: dict[tuple[str, str], ReferenceStatus] = {}
+    for reference in statuses.values():
+        key = (normalize_key(reference.ticket_id), normalize_key(reference.service_number))
+        if key != ("", ""):
+            unique[key] = reference
+    return list(unique.values())
+
+
+def _sync_missing_orders(database_path: Path, references: list[ReferenceStatus]) -> tuple[int, int]:
+    inserted = 0
+    skipped = 0
+    now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    with sqlite3.connect(database_path) as conn:
+        for reference in references:
+            existing = conn.execute(
+                """
+                SELECT id FROM orders
+                WHERE (ticket_id != '' AND ticket_id = ?)
+                   OR (service_number != '' AND service_number = ?)
+                LIMIT 1
+                """,
+                (reference.ticket_id, reference.service_number),
+            ).fetchone()
+            if existing:
+                skipped += 1
+                continue
+            fields = reference.order_fields()
+            conn.execute(
+                """
+                INSERT INTO orders (
+                    ticket_id, service_number, voip_number, customer_name,
+                    address, customer_phone, old_sn, new_sn, ont_type, sto,
+                    valins_id, result, config_description, report_description,
+                    assigned_technician, source_file, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    fields["ticket_id"], fields["service_number"], fields["voip_number"],
+                    fields["customer_name"], fields["address"], fields["customer_phone"],
+                    fields["old_sn"], fields["new_sn"], fields["ont_type"], fields["sto"],
+                    fields["valins_id"], fields["result"], fields["config_description"],
+                    fields["report_description"], fields["assigned_technician"],
+                    "Google Sheets", now, now,
+                ),
+            )
+            inserted += 1
+    return inserted, skipped
+
+
+async def sync_missing_orders_from_sheet(database_path: Path, statuses: dict[str, ReferenceStatus]) -> tuple[int, int, int]:
+    references = unique_reference_orders(statuses)
+    inserted, skipped = await asyncio.to_thread(_sync_missing_orders, database_path, references)
+    return len(references), inserted, skipped
 
 
 def status_for_order(statuses: dict[str, ReferenceStatus], ticket_id: str, service_number: str) -> ReferenceStatus | None:
