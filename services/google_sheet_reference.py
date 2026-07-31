@@ -240,25 +240,46 @@ def unique_reference_orders(statuses: dict[str, ReferenceStatus]) -> list[Refere
     return list(unique.values())
 
 
-def _sync_missing_orders(database_path: Path, references: list[ReferenceStatus]) -> tuple[int, int]:
+def _sync_missing_orders(database_path: Path, references: list[ReferenceStatus]) -> tuple[int, int, int]:
     inserted = 0
-    skipped = 0
+    updated = 0
+    unchanged = 0
     now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
     with sqlite3.connect(database_path) as conn:
+        conn.row_factory = sqlite3.Row
         for reference in references:
             existing = conn.execute(
                 """
-                SELECT id FROM orders
+                SELECT * FROM orders
                 WHERE (ticket_id != '' AND ticket_id = ?)
                    OR (service_number != '' AND service_number = ?)
+                ORDER BY id DESC
                 LIMIT 1
                 """,
                 (reference.ticket_id, reference.service_number),
             ).fetchone()
-            if existing:
-                skipped += 1
-                continue
             fields = reference.order_fields()
+            if existing:
+                changes: dict[str, str] = {}
+                for field, value in fields.items():
+                    value = str(value or "").strip()
+                    if not value:
+                        continue
+                    current = str(existing[field] or "").strip()
+                    if current != value:
+                        changes[field] = value
+                if changes:
+                    assignments = ", ".join(f"{field} = ?" for field in changes)
+                    values = list(changes.values()) + [now, existing["id"]]
+                    conn.execute(
+                        f"UPDATE orders SET {assignments}, updated_at = ? WHERE id = ?",
+                        values,
+                    )
+                    updated += 1
+                else:
+                    unchanged += 1
+                continue
+
             conn.execute(
                 """
                 INSERT INTO orders (
@@ -278,13 +299,13 @@ def _sync_missing_orders(database_path: Path, references: list[ReferenceStatus])
                 ),
             )
             inserted += 1
-    return inserted, skipped
+    return inserted, updated, unchanged
 
 
-async def sync_missing_orders_from_sheet(database_path: Path, statuses: dict[str, ReferenceStatus]) -> tuple[int, int, int]:
+async def sync_missing_orders_from_sheet(database_path: Path, statuses: dict[str, ReferenceStatus]) -> tuple[int, int, int, int]:
     references = unique_reference_orders(statuses)
-    inserted, skipped = await asyncio.to_thread(_sync_missing_orders, database_path, references)
-    return len(references), inserted, skipped
+    inserted, updated, unchanged = await asyncio.to_thread(_sync_missing_orders, database_path, references)
+    return len(references), inserted, updated, unchanged
 
 
 def status_for_order(statuses: dict[str, ReferenceStatus], ticket_id: str, service_number: str) -> ReferenceStatus | None:
