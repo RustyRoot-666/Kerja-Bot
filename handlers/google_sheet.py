@@ -9,6 +9,7 @@ from services.google_sheet_reference import (
     configure_sheet,
     current_sheet_url,
     get_reference_statuses,
+    sync_missing_orders_from_sheet,
 )
 
 
@@ -74,9 +75,41 @@ async def testsheet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+async def syncsheet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await admin_guard(update, context) or update.effective_message is None:
+        return
+
+    await update.effective_message.reply_text(
+        "🔄 Membaca Google Sheets terbaru dan menyinkronkan order yang belum ada..."
+    )
+    try:
+        statuses = await get_reference_statuses(force=True, raise_errors=True)
+        database_path = context.application.bot_data["settings"].database_path
+        total, inserted, skipped = await sync_missing_orders_from_sheet(
+            database_path,
+            statuses,
+        )
+    except Exception as exc:
+        await update.effective_message.reply_text(
+            "❌ Sinkronisasi Google Sheets gagal.\n"
+            f"Alasan: {exc}"
+        )
+        return
+
+    await update.effective_message.reply_text(
+        "✅ Sinkronisasi selesai.\n\n"
+        f"Order unik di Sheet : {total}\n"
+        f"Order baru masuk DB : {inserted}\n"
+        f"Order sudah ada     : {skipped}\n\n"
+        "Data yang sudah ada di database tidak ditimpa.\n"
+        "Google Sheets tetap read-only."
+    )
+
+
 def build_google_sheet_handlers() -> list[CommandHandler]:
     return [
         CommandHandler("setsheet", setsheet),
         CommandHandler("getsheet", getsheet),
         CommandHandler("testsheet", testsheet),
+        CommandHandler("syncsheet", syncsheet),
     ]
