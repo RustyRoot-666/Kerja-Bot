@@ -152,16 +152,33 @@ class OrderRepository:
         now = utc_now()
         async with self._lock:
             with self.connection() as conn:
-                existing = conn.execute(
-                    """
-                    SELECT id FROM orders
-                    WHERE (ticket_id != '' AND ticket_id = ?)
-                       OR (service_number != '' AND service_number = ?)
-                    ORDER BY id DESC
-                    LIMIT 1
-                    """,
-                    (normalized["ticket_id"], normalized["service_number"]),
-                ).fetchone()
+                ticket_id = normalized["ticket_id"]
+                service_number = normalized["service_number"]
+                is_manual_ticket = ticket_id.strip().upper() in {
+                    "", "-", "MANUAL", "N/A", "NA", "NONE"
+                }
+
+                if is_manual_ticket:
+                    existing = conn.execute(
+                        """
+                        SELECT id FROM orders
+                        WHERE service_number != '' AND service_number = ?
+                        ORDER BY id DESC
+                        LIMIT 1
+                        """,
+                        (service_number,),
+                    ).fetchone()
+                else:
+                    existing = conn.execute(
+                        """
+                        SELECT id FROM orders
+                        WHERE (ticket_id != '' AND ticket_id = ?)
+                           OR (service_number != '' AND service_number = ?)
+                        ORDER BY id DESC
+                        LIMIT 1
+                        """,
+                        (ticket_id, service_number),
+                    ).fetchone()
 
                 if existing:
                     assignments = ", ".join(
