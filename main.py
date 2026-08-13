@@ -29,10 +29,39 @@ from handlers.login import build_login_conversation, start
 from handlers.my_orders import build_my_orders_handlers, orderanku
 from handlers.order_flow import build_order_conversation
 from services.auto_close import install_auto_close
-from services.google_sheet_reference import initialize_sheet_config
+from services.google_sheet_reference import (
+    get_reference_statuses,
+    initialize_sheet_config,
+    sync_missing_orders_from_sheet,
+)
 from services.order_repository import OrderRepository
 from utils.keyboards import MAIN_MENU
 from utils.logging import setup_logging
+
+
+AUTO_SHEET_SYNC_SECONDS = 180
+
+
+async def auto_sync_google_sheet(context) -> None:
+    """Refresh Google Sheet and mirror its latest order data into the local DB."""
+    try:
+        app = context.application
+        database_path = app.bot_data["settings"].database_path
+        statuses = await get_reference_statuses(force=True, raise_errors=True)
+        total, inserted, updated, unchanged = await sync_missing_orders_from_sheet(
+            database_path,
+            statuses,
+        )
+        logging.info(
+            "Google Sheet auto-sync complete: total=%s inserted=%s updated=%s unchanged=%s",
+            total,
+            inserted,
+            updated,
+            unchanged,
+        )
+    except Exception:
+        # A temporary Google/network failure must never stop the Telegram bot.
+        logging.exception("Google Sheet auto-sync failed; keeping previous data")
 
 
 async def post_init(application: Application) -> None:
@@ -41,7 +70,23 @@ async def post_init(application: Application) -> None:
     await db.initialize()
     await orders.initialize()
     await initialize_sheet_config(application.bot_data["settings"].database_path)
-    logging.info("Bot started; technician, order, and Google Sheets config initialized")
+
+    if application.job_queue is None:
+        logging.warning(
+            "JobQueue unavailable; Google Sheet auto-sync is disabled. "
+            "Install python-telegram-bot[job-queue]."
+        )
+    else:
+        application.job_queue.run_repeating(
+            auto_sync_google_sheet,
+            interval=AUTO_SHEET_SYNC_SECONDS,
+            first=5,
+            name="google-sheet-auto-sync",
+        )
+
+    logging.info(
+        "Bot started; technician, order, Google Sheets config, and auto-sync initialized"
+    )
 
 
 def build_application() -> Application:
