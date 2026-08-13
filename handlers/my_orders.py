@@ -34,7 +34,6 @@ from utils.keyboards import main_menu_keyboard
 
 CLOSED_STATUSES = {"CLOSE", "CLOSED", "SELESAI", "DONE", "COMPLETED"}
 UPDATE_STATUSES = {"UPDATE", "UPDATED", "PROGRESS", "ON PROGRESS", "PENDING"}
-REJECT_STATUSES = {"MENOLAK", "TOLAK", "REJECT", "REJECTED", "DITOLAK"}
 SEPARATOR = "━━━━━━━━━━━━━━━"
 BACK_TO_MAIN = "⬅️ Kembali ke Menu Utama"
 COPY_CALLBACK_PATTERN = r"^copy_(inet|cp):"
@@ -86,6 +85,13 @@ def displayed_new_sn(order: Order, reference: ReferenceStatus | None) -> str:
 
 def displayed_value(order_value: str, reference_value: str = "") -> str:
     return order_value.strip() or reference_value.strip() or "-"
+
+
+def displayed_sheet_value(value: str) -> str:
+    cleaned = str(value or "").strip()
+    if normalize(cleaned) in {"", "-", "N/A", "NA", "NONE"}:
+        return "-"
+    return cleaned
 
 
 def displayed_package(reference: ReferenceStatus | None) -> str:
@@ -153,8 +159,6 @@ def sheet_status_bucket(reference: ReferenceStatus) -> str:
     status = normalize(reference.status)
     if status in CLOSED_STATUSES:
         return "close"
-    if status in REJECT_STATUSES or "TOLAK" in status or "REJECT" in status:
-        return "reject"
     if status in UPDATE_STATUSES or "UPDATE" in status or "PROGRESS" in status:
         return "update"
     return "open"
@@ -173,12 +177,23 @@ def technician_sheet_orders(
 
 def area_summary(references: list[ReferenceStatus]) -> dict[str, dict[str, int]]:
     summary: dict[str, dict[str, int]] = defaultdict(
-        lambda: {"open": 0, "close": 0, "update": 0, "reject": 0}
+        lambda: {"open": 0, "close": 0, "update": 0}
     )
     for reference in references:
         area = classify_area(reference.address)
         summary[area][sheet_status_bucket(reference)] += 1
     return dict(summary)
+
+
+def area_rca_summary(references: list[ReferenceStatus]) -> dict[str, dict[str, int]]:
+    summary: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for reference in references:
+        rca = displayed_sheet_value(reference.rca)
+        if rca == "-":
+            continue
+        area = classify_area(reference.address)
+        summary[area][normalize(rca)] += 1
+    return {area: dict(counts) for area, counts in summary.items()}
 
 
 def area_keyboard(areas: list[str]) -> InlineKeyboardMarkup:
@@ -200,6 +215,8 @@ def format_reference_open(reference: ReferenceStatus, index: int) -> str:
     phone = reference.customer_phone.strip() or "-"
     address = reference.address.strip() or "-"
     package = displayed_package(reference)
+    onu_rx = displayed_sheet_value(reference.onu_rx)
+    rca = displayed_sheet_value(reference.rca)
     return (
         f"{index}. {escape(name)}\n"
         f"{SEPARATOR}\n"
@@ -207,6 +224,8 @@ def format_reference_open(reference: ReferenceStatus, index: int) -> str:
         f"🌐 INET  : {escape(service)}\n"
         f"📞 CP    : {escape(phone)}\n"
         f"⚡ Paket : {escape(package)}\n"
+        f"📡 ONU RX: {escape(onu_rx)}\n"
+        f"📝 RCA   : {escape(rca)}\n"
         f"🏠 Alamat:\n{escape(address)}"
     )
 
@@ -220,12 +239,16 @@ def format_order(order: Order, index: int, reference: ReferenceStatus | None, ca
         phone = displayed_value(order.customer_phone, reference.customer_phone if reference else "")
         address = displayed_value(order.address, reference.address if reference else "")
         package = displayed_package(reference)
+        onu_rx = displayed_sheet_value(reference.onu_rx if reference else "")
+        rca = displayed_sheet_value(reference.rca if reference else "")
         return (
             f"{index}. {escape(name)}\n{SEPARATOR}\n"
             f"🎫 Tiket : {escape(ticket)}\n"
             f"🌐 INET  : {escape(service)}\n"
             f"📞 CP    : {escape(phone)}\n"
             f"⚡ Paket : {escape(package)}\n"
+            f"📡 ONU RX: {escape(onu_rx)}\n"
+            f"📝 RCA   : {escape(rca)}\n"
             f"🏠 Alamat:\n{escape(address)}"
         )
 
@@ -360,8 +383,7 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     mode = context.args[0].lower().strip() if context.args else "ringkas"
 
-    # Menu utama Orderanku sekarang mengambil dashboard area langsung dari
-    # Google Sheets terbaru, bukan jumlah dari database lokal.
+    # Dashboard utama mengambil data Google Sheets terbaru.
     if mode in {"ringkas", "menu", "statistik", "stats"}:
         try:
             statuses = await get_reference_statuses(force=True, raise_errors=True)
@@ -382,29 +404,60 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             return
 
         summary = area_summary(references)
+        rca_summary = area_rca_summary(references)
         areas = sorted(summary, key=lambda area: (-summary[area]["open"], area))
-        lines = [
-            f"📋 ORDERANKU — {technician.name.upper()}",
+        total = len(references)
+        open_count = sum(1 for reference in references if sheet_status_bucket(reference) == "open")
+        close_count = sum(1 for reference in references if sheet_status_bucket(reference) == "close")
+        progress = (close_count / total * 100) if total else 0.0
+
+        header_lines = [
+            f"📋 ORDER {technician.name.upper()}",
             "",
-            f"Total dari Google Sheet: {len(references)}",
+            f"Total    : {total}",
+            f"🟢 OPEN  : {open_count}",
+            f"🔴 CLOSE : {close_count}",
+            f"Progress : {progress:.1f}%",
+            "",
+            "Pilih kategori melalui tombol di bawah.",
             "",
             "📍 AREA PEKERJAAN",
         ]
+
+        area_blocks: list[str] = []
         for area in areas:
             counts = summary[area]
-            lines.extend([
-                "",
+            area_lines = [
                 f"📍 {area}",
                 f"🟢 Open: {counts['open']} | 🔴 Close: {counts['close']}",
-                f"🟡 Update: {counts['update']} | ⚫ Menolak: {counts['reject']}",
-            ])
+            ]
+            rca_counts = rca_summary.get(area, {})
+            if rca_counts:
+                area_lines.append("RCA:")
+                for rca, count in sorted(rca_counts.items(), key=lambda item: (-item[1], item[0])):
+                    area_lines.append(f"• {rca}: {count}")
+            else:
+                area_lines.append("RCA: -")
+            area_blocks.append("\n".join(area_lines))
+
+        # Pecah dashboard bila rekap RCA membuat teks melebihi batas Telegram.
+        messages: list[str] = []
+        current = "\n".join(header_lines)
+        for block in area_blocks:
+            candidate = f"{current}\n\n{block}" if current else block
+            if len(candidate) > 3800 and current:
+                messages.append(current)
+                current = block
+            else:
+                current = candidate
+        if current:
+            messages.append(current)
 
         # Callback memakai index dari urutan alfabet agar stabil saat tombol ditekan.
         callback_areas = sorted(summary)
-        await update.effective_message.reply_text(
-            "\n".join(lines),
-            reply_markup=area_keyboard(callback_areas),
-        )
+        for index, message in enumerate(messages):
+            reply_markup = area_keyboard(callback_areas) if index == len(messages) - 1 else None
+            await update.effective_message.reply_text(message, reply_markup=reply_markup)
         return
 
     # Command lama tetap dipertahankan untuk kompatibilitas.
