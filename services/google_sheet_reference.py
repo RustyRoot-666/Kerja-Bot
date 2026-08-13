@@ -28,6 +28,8 @@ HEADER_ALIASES: dict[str, set[str]] = {
     "address": {"ALAMAT", "ADDRESS", "ALAMAT PELANGGAN"},
     "customer_phone": {"CP", "NO HP", "NO. HP", "NOMOR HP", "CP / NO HP", "CONTACT PERSON", "PHONE"},
     "package": {"PAKET", "KECEPATAN", "SPEED", "SPEED PAKET", "PAKET INTERNET", "BANDWIDTH", "SPEED BY TACPRO"},
+    "onu_rx": {"ONU RX", "ONU_RX", "RX ONU", "ONU RX POWER", "RX POWER ONU"},
+    "rca": {"RCA", "ROOT CAUSE", "ROOT CAUSE ANALYSIS"},
     "old_sn": {"SN ONT LAMA", "SN LAMA", "OLD SN", "SN OLD", "SERIAL NUMBER LAMA"},
     "new_sn": {"SN ONT NEW", "SN ONT BARU", "SN NEW", "NEW SN", "SN BARU", "SERIAL NUMBER BARU"},
     "ont_type": {"TYPE ONT", "TIPE ONT", "MODEL ONT", "MODEL ONT BARU", "TYPE ONT BARU", "TIPE ONT BARU"},
@@ -50,6 +52,8 @@ class ReferenceStatus:
     address: str = ""
     customer_phone: str = ""
     package: str = ""
+    onu_rx: str = ""
+    rca: str = ""
     old_sn: str = ""
     ont_type: str = ""
     sto: str = ""
@@ -197,6 +201,7 @@ def download_statuses() -> dict[str, ReferenceStatus]:
             service_number=service_number, voip_number=values["voip_number"],
             customer_name=values["customer_name"], address=values["address"],
             customer_phone=values["customer_phone"], package=values["package"],
+            onu_rx=values["onu_rx"], rca=values["rca"],
             old_sn=normalize(values["old_sn"]), new_sn=normalize(values["new_sn"]),
             ont_type=normalize(values["ont_type"]), sto=normalize(values["sto"]),
             valins_id=values["valins_id"], config_description=values["config_description"],
