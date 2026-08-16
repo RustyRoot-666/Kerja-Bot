@@ -19,6 +19,7 @@ DEFAULT_REPORT_GROUP_TITLE = "REPLACEMENT 200K | MANJA"
 REPORT_GROUP_SETTING_KEY = "report_group_id"
 REPORT_THREAD_SETTING_KEY = "report_thread_id"
 REPORT_BIND_COMMANDS = {"/setreport", "/setreportmanyar"}
+REPORT_MANUAL_COMMANDS = {"/leaderboard", "/closeharian"}
 
 MONTH_NAMES = [
     "Januari", "Februari", "Maret", "April", "Mei", "Juni",
@@ -229,6 +230,7 @@ async def capture_report_group_message(update: Update, context: ContextTypes.DEF
         return
 
     db: Database = context.application.bot_data["db"]
+    settings = context.application.bot_data["settings"]
     text = (message.text or message.caption or "").strip()
     command = text.split(maxsplit=1)[0].lower().split("@", 1)[0] if text else ""
 
@@ -257,12 +259,21 @@ async def capture_report_group_message(update: Update, context: ContextTypes.DEF
     if chat.id != stored_group_id or message.message_thread_id != stored_thread_id:
         return
 
+    if command in REPORT_MANUAL_COMMANDS:
+        user = update.effective_user
+        if not user or user.id not in settings.admin_ids:
+            return
+        if command == "/leaderboard":
+            await send_report_leaderboard(context)
+        else:
+            await send_daily_close(context)
+        return
+
     service_match = NO_SERVICE_RE.search(text)
     tech_match = TECH_RE.search(text)
     if not service_match or not tech_match:
         return
 
-    settings = context.application.bot_data["settings"]
     tz = ZoneInfo(settings.timezone)
     message_dt = message.date.astimezone(tz)
     period_start, _ = _period_bounds(message_dt.date())
