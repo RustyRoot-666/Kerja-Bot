@@ -8,6 +8,7 @@ from handlers.common import cancel
 from handlers.config_flow import MIN_OCR_CONFIDENCE, process_ocr_photo
 from services.auth import require_technician
 from services.formatters import generate_config, generate_report, generate_sto
+from services.logic_dispatch import send_config_to_logic_once
 from utils.keyboards import MAIN_MENU, cancel_keyboard, main_menu_keyboard
 from utils.telegram_format import pre_block
 
@@ -230,6 +231,7 @@ async def customer_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text(pre_block(config_text), parse_mode="HTML")
     await update.message.reply_text(pre_block(report_text), parse_mode="HTML")
     await update.message.reply_text(pre_block(sto_text), parse_mode="HTML", reply_markup=main_menu_keyboard())
+    await send_config_to_logic_once(context, db, data.get("service_number", ""), config_text)
     return ConversationHandler.END
 
 
