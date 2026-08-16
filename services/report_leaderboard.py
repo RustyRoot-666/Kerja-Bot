@@ -83,25 +83,6 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
     )
 
 
-def _save_setting(database_path: Path, key: str, value: int) -> None:
-    conn = sqlite3.connect(database_path)
-    try:
-        _ensure_tables(conn)
-        conn.execute(
-            """
-            INSERT INTO report_bot_settings (key, value, updated_at)
-            VALUES (?, ?, ?)
-            ON CONFLICT(key) DO UPDATE SET
-                value = excluded.value,
-                updated_at = excluded.updated_at
-            """,
-            (key, str(value), _utc_now()),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
 def _stored_setting(database_path: Path, key: str) -> int | None:
     conn = sqlite3.connect(database_path)
     try:
@@ -291,11 +272,7 @@ async def capture_report_group_message(update: Update, context: ContextTypes.DEF
         )
 
 
-def build_leaderboard_text(
-    rows: list[tuple[str, int]],
-    daily_rows: list[tuple[str, int]],
-    today: date,
-) -> str:
+def build_leaderboard_text(rows: list[tuple[str, int]], today: date) -> str:
     period_start, period_end = _period_bounds(today)
     lines = [
         "🏆 LEADERBOARD PERIODE BERJALAN",
@@ -311,15 +288,6 @@ def build_leaderboard_text(
     else:
         lines.append("Belum ada order yang tercatat pada periode ini.")
 
-    lines.extend(["", "📊 CLOSE HARI INI"])
-    if daily_rows:
-        daily_width = max(len(name.upper()) for name, _ in daily_rows)
-        for index, (name, total) in enumerate(daily_rows, start=1):
-            lines.append(f"{index}. {name.upper().ljust(daily_width)} : {total} close")
-        lines.append(f"TOTAL CLOSE HARI INI : {sum(total for _, total in daily_rows)}")
-    else:
-        lines.append("Belum ada close yang tercatat hari ini.")
-
     lines.append("")
     remaining = (period_end - today).days
     if remaining <= 0:
@@ -331,6 +299,29 @@ def build_leaderboard_text(
     return "\n".join(lines)
 
 
+def build_daily_close_text(rows: list[tuple[str, int]], today: date) -> str:
+    lines = [
+        "📊 CLOSE HARI INI",
+        f"📅 {DAY_NAMES[today.weekday()]}, {_format_date(today)}",
+        "",
+    ]
+    if rows:
+        width = max(len(name.upper()) for name, _ in rows)
+        for index, (name, total) in enumerate(rows, start=1):
+            lines.append(f"{index}. {name.upper().ljust(width)} : {total} close")
+        lines.extend(["", f"TOTAL CLOSE HARI INI : {sum(total for _, total in rows)}"])
+    else:
+        lines.append("Belum ada close yang tercatat hari ini.")
+    lines.extend(["", "💪 Terima kasih untuk kerja keras hari ini. Tetap jaga semangat dan kualitas pekerjaan!"])
+    return "\n".join(lines)
+
+
+async def _report_target(db: Database) -> tuple[int | None, int | None]:
+    group_id = await asyncio.to_thread(_stored_setting, db.db_path, REPORT_GROUP_SETTING_KEY)
+    thread_id = await asyncio.to_thread(_stored_setting, db.db_path, REPORT_THREAD_SETTING_KEY)
+    return group_id, thread_id
+
+
 async def send_report_leaderboard(context: ContextTypes.DEFAULT_TYPE) -> None:
     app = context.application
     db: Database = app.bot_data["db"]
@@ -339,17 +330,34 @@ async def send_report_leaderboard(context: ContextTypes.DEFAULT_TYPE) -> None:
     today = datetime.now(tz).date()
     period_start, _ = _period_bounds(today)
 
-    group_id = await asyncio.to_thread(_stored_setting, db.db_path, REPORT_GROUP_SETTING_KEY)
-    thread_id = await asyncio.to_thread(_stored_setting, db.db_path, REPORT_THREAD_SETTING_KEY)
+    group_id, thread_id = await _report_target(db)
     if group_id is None or thread_id is None:
         logging.warning("Leaderboard belum dikirim: topic REPORT MANYAR belum di-bind dengan /setreport")
         return
 
     rows = await asyncio.to_thread(_leaderboard_rows, db.db_path, period_start)
-    daily_rows = await asyncio.to_thread(_daily_close_rows, db.db_path, today)
-    text = build_leaderboard_text(rows, daily_rows, today)
     await context.bot.send_message(
         chat_id=group_id,
         message_thread_id=thread_id,
-        text=text,
+        text=build_leaderboard_text(rows, today),
+    )
+
+
+async def send_daily_close(context: ContextTypes.DEFAULT_TYPE) -> None:
+    app = context.application
+    db: Database = app.bot_data["db"]
+    settings = app.bot_data["settings"]
+    tz = ZoneInfo(settings.timezone)
+    today = datetime.now(tz).date()
+
+    group_id, thread_id = await _report_target(db)
+    if group_id is None or thread_id is None:
+        logging.warning("Close harian belum dikirim: topic REPORT MANYAR belum di-bind dengan /setreport")
+        return
+
+    rows = await asyncio.to_thread(_daily_close_rows, db.db_path, today)
+    await context.bot.send_message(
+        chat_id=group_id,
+        message_thread_id=thread_id,
+        text=build_daily_close_text(rows, today),
     )
