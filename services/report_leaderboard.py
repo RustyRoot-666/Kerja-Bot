@@ -206,6 +206,26 @@ def _leaderboard_rows(database_path: Path, period_start: date) -> list[tuple[str
         conn.close()
 
 
+def _daily_close_rows(database_path: Path, day: date) -> list[tuple[str, int]]:
+    conn = sqlite3.connect(database_path)
+    try:
+        _ensure_tables(conn)
+        rows = conn.execute(
+            """
+            SELECT MAX(technician_name) AS technician_name, COUNT(*) AS total
+            FROM report_group_orders
+            WHERE substr(message_date, 1, 10) = ?
+            GROUP BY technician_nik
+            ORDER BY total DESC, UPPER(MAX(technician_name)) ASC
+            """,
+            (day.isoformat(),),
+        ).fetchall()
+        conn.commit()
+        return [(str(name), int(total)) for name, total in rows]
+    finally:
+        conn.close()
+
+
 async def capture_report_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat = update.effective_chat
     message = update.effective_message
@@ -218,9 +238,6 @@ async def capture_report_group_message(update: Update, context: ContextTypes.DEF
     text = (message.text or message.caption or "").strip()
     command = text.split(maxsplit=1)[0].lower().split("@", 1)[0] if text else ""
 
-    # Telegram tidak menyertakan nama topic pada setiap pesan biasa. Karena itu topic
-    # REPORT MANYAR diikat sekali lewat /setreport atau /setreportmanyar yang dikirim
-    # langsung dari topic tersebut. Setelah itu hanya message_thread_id itu yang dibaca.
     if command in REPORT_BIND_COMMANDS:
         thread_id = message.message_thread_id
         if thread_id is None:
@@ -274,7 +291,11 @@ async def capture_report_group_message(update: Update, context: ContextTypes.DEF
         )
 
 
-def build_leaderboard_text(rows: list[tuple[str, int]], today: date) -> str:
+def build_leaderboard_text(
+    rows: list[tuple[str, int]],
+    daily_rows: list[tuple[str, int]],
+    today: date,
+) -> str:
     period_start, period_end = _period_bounds(today)
     lines = [
         "🏆 LEADERBOARD PERIODE BERJALAN",
@@ -289,6 +310,15 @@ def build_leaderboard_text(rows: list[tuple[str, int]], today: date) -> str:
             lines.append(f"{index}. {name.upper().ljust(width)} : {total} order")
     else:
         lines.append("Belum ada order yang tercatat pada periode ini.")
+
+    lines.extend(["", "📊 CLOSE HARI INI"])
+    if daily_rows:
+        daily_width = max(len(name.upper()) for name, _ in daily_rows)
+        for index, (name, total) in enumerate(daily_rows, start=1):
+            lines.append(f"{index}. {name.upper().ljust(daily_width)} : {total} close")
+        lines.append(f"TOTAL CLOSE HARI INI : {sum(total for _, total in daily_rows)}")
+    else:
+        lines.append("Belum ada close yang tercatat hari ini.")
 
     lines.append("")
     remaining = (period_end - today).days
@@ -316,7 +346,8 @@ async def send_report_leaderboard(context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     rows = await asyncio.to_thread(_leaderboard_rows, db.db_path, period_start)
-    text = build_leaderboard_text(rows, today)
+    daily_rows = await asyncio.to_thread(_daily_close_rows, db.db_path, today)
+    text = build_leaderboard_text(rows, daily_rows, today)
     await context.bot.send_message(
         chat_id=group_id,
         message_thread_id=thread_id,
