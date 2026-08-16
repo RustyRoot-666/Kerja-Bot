@@ -34,6 +34,7 @@ from services.google_sheet_reference import (
     initialize_sheet_config,
     sync_missing_orders_from_sheet,
 )
+from services.logic_dispatch import detect_logic_group, ignore_group_message
 from services.order_repository import OrderRepository
 from utils.keyboards import MAIN_MENU
 from utils.logging import setup_logging
@@ -118,6 +119,18 @@ def build_application() -> Application:
     app.bot_data["settings"] = settings
 
     install_auto_close(order_flow_module)
+
+    # Grup hanya dipakai sebagai tujuan CONFIG. Pesan grup dipakai diam-diam
+    # untuk mendeteksi chat ID grup Logic, lalu dihentikan agar handler bot
+    # lainnya tidak pernah membalas di grup.
+    app.add_handler(
+        MessageHandler(filters.ChatType.GROUPS, detect_logic_group),
+        group=-1,
+    )
+    app.add_handler(
+        MessageHandler(filters.ChatType.GROUPS, ignore_group_message),
+        group=0,
+    )
 
     login_conv = build_login_conversation()
     order_conv = build_order_conversation()
