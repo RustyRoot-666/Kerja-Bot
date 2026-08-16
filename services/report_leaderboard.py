@@ -15,8 +15,10 @@ from telegram.ext import ContextTypes
 from database import Database
 
 
-DEFAULT_REPORT_GROUP_TITLE = "REPORT MANYAR"
+DEFAULT_REPORT_GROUP_TITLE = "REPLACEMENT 200K | MANJA"
 REPORT_GROUP_SETTING_KEY = "report_group_id"
+REPORT_THREAD_SETTING_KEY = "report_thread_id"
+REPORT_BIND_COMMANDS = {"/setreport", "/setreportmanyar"}
 
 MONTH_NAMES = [
     "Januari", "Februari", "Maret", "April", "Mei", "Juni",
@@ -81,7 +83,7 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
     )
 
 
-def _save_group_id(database_path: Path, group_id: int) -> None:
+def _save_setting(database_path: Path, key: str, value: int) -> None:
     conn = sqlite3.connect(database_path)
     try:
         _ensure_tables(conn)
@@ -93,20 +95,20 @@ def _save_group_id(database_path: Path, group_id: int) -> None:
                 value = excluded.value,
                 updated_at = excluded.updated_at
             """,
-            (REPORT_GROUP_SETTING_KEY, str(group_id), _utc_now()),
+            (key, str(value), _utc_now()),
         )
         conn.commit()
     finally:
         conn.close()
 
 
-def _stored_group_id(database_path: Path) -> int | None:
+def _stored_setting(database_path: Path, key: str) -> int | None:
     conn = sqlite3.connect(database_path)
     try:
         _ensure_tables(conn)
         row = conn.execute(
             "SELECT value FROM report_bot_settings WHERE key = ?",
-            (REPORT_GROUP_SETTING_KEY,),
+            (key,),
         ).fetchone()
         conn.commit()
     finally:
@@ -117,8 +119,34 @@ def _stored_group_id(database_path: Path) -> int | None:
     try:
         return int(row[0])
     except (TypeError, ValueError):
-        logging.error("report_group_id tersimpan tidak valid: %r", row[0])
+        logging.error("Setting %s tidak valid: %r", key, row[0])
         return None
+
+
+def _save_report_target(database_path: Path, group_id: int, thread_id: int) -> None:
+    conn = sqlite3.connect(database_path)
+    try:
+        _ensure_tables(conn)
+        now = _utc_now()
+        conn.execute(
+            """
+            INSERT INTO report_bot_settings (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            (REPORT_GROUP_SETTING_KEY, str(group_id), now),
+        )
+        conn.execute(
+            """
+            INSERT INTO report_bot_settings (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            (REPORT_THREAD_SETTING_KEY, str(thread_id), now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _store_order(
@@ -187,9 +215,29 @@ async def capture_report_group_message(update: Update, context: ContextTypes.DEF
         return
 
     db: Database = context.application.bot_data["db"]
-    await asyncio.to_thread(_save_group_id, db.db_path, chat.id)
+    text = (message.text or message.caption or "").strip()
+    command = text.split(maxsplit=1)[0].lower().split("@", 1)[0] if text else ""
 
-    text = message.text or message.caption or ""
+    # Telegram tidak menyertakan nama topic pada setiap pesan biasa. Karena itu topic
+    # REPORT MANYAR diikat sekali lewat /setreport atau /setreportmanyar yang dikirim
+    # langsung dari topic tersebut. Setelah itu hanya message_thread_id itu yang dibaca.
+    if command in REPORT_BIND_COMMANDS:
+        thread_id = message.message_thread_id
+        if thread_id is None:
+            await message.reply_text("Perintah ini harus dikirim dari topic REPORT MANYAR.")
+            return
+        await asyncio.to_thread(_save_report_target, db.db_path, chat.id, thread_id)
+        await message.reply_text("✅ Topic REPORT MANYAR berhasil dikunci untuk leaderboard.")
+        logging.info("REPORT MANYAR bound: chat_id=%s thread_id=%s", chat.id, thread_id)
+        return
+
+    stored_group_id = await asyncio.to_thread(_stored_setting, db.db_path, REPORT_GROUP_SETTING_KEY)
+    stored_thread_id = await asyncio.to_thread(_stored_setting, db.db_path, REPORT_THREAD_SETTING_KEY)
+    if stored_group_id is None or stored_thread_id is None:
+        return
+    if chat.id != stored_group_id or message.message_thread_id != stored_thread_id:
+        return
+
     service_match = NO_SERVICE_RE.search(text)
     tech_match = TECH_RE.search(text)
     if not service_match or not tech_match:
@@ -217,11 +265,12 @@ async def capture_report_group_message(update: Update, context: ContextTypes.DEF
     )
     if inserted:
         logging.info(
-            "Report order captured: inet=%s teknisi=%s (%s) periode=%s",
+            "Report order captured: inet=%s teknisi=%s (%s) periode=%s thread_id=%s",
             service_number,
             technician_name,
             technician_nik,
             period_start,
+            message.message_thread_id,
         )
 
 
@@ -258,11 +307,16 @@ async def send_report_leaderboard(context: ContextTypes.DEFAULT_TYPE) -> None:
     today = datetime.now(tz).date()
     period_start, _ = _period_bounds(today)
 
-    group_id = await asyncio.to_thread(_stored_group_id, db.db_path)
-    if group_id is None:
-        logging.warning("Leaderboard belum dikirim: grup %s belum terdeteksi", _target_group_title())
+    group_id = await asyncio.to_thread(_stored_setting, db.db_path, REPORT_GROUP_SETTING_KEY)
+    thread_id = await asyncio.to_thread(_stored_setting, db.db_path, REPORT_THREAD_SETTING_KEY)
+    if group_id is None or thread_id is None:
+        logging.warning("Leaderboard belum dikirim: topic REPORT MANYAR belum di-bind dengan /setreport")
         return
 
     rows = await asyncio.to_thread(_leaderboard_rows, db.db_path, period_start)
     text = build_leaderboard_text(rows, today)
-    await context.bot.send_message(chat_id=group_id, text=text)
+    await context.bot.send_message(
+        chat_id=group_id,
+        message_thread_id=thread_id,
+        text=text,
+    )
