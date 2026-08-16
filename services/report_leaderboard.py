@@ -295,7 +295,9 @@ def build_leaderboard_text(rows: list[tuple[str, int]], today: date) -> str:
     if remaining <= 0:
         lines.append("🏁 Periode selesai. Terima kasih atas kerja keras semuanya!")
     else:
-        lines.append(f"🔥 Masih ada {remaining} hari lagi. Posisi masih bisa berubah!")
+        lines.append(
+            f"🔥 Masih ada {remaining} hari lagi. Tetap semangat, setiap order adalah langkah menuju hasil terbaik! 💪"
+        )
     return "\n".join(lines)
 
 
