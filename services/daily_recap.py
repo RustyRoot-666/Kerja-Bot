@@ -94,7 +94,15 @@ def _summarize(rows) -> tuple[list[tuple[str, str]], dict[str, int]]:
     return list(jobs.values()), counts
 
 
-async def build_recap_text(
+def _append_jobs(lines: list[str], jobs: list[tuple[str, str]]) -> None:
+    if not jobs:
+        return
+    lines.append("")
+    for index, (service, ticket) in enumerate(jobs, start=1):
+        lines.append(f"{index}. {service} | {ticket}")
+
+
+async def build_daily_recap_text(
     db: Database,
     telegram_id: int,
     technician_name: str,
@@ -103,37 +111,55 @@ async def build_recap_text(
 ) -> str:
     tz = ZoneInfo(timezone_name)
     day_start, day_end = _local_day_bounds(day, tz)
-    period_start, period_end = _period_bounds(day)
-    period_start_utc, period_end_utc = _local_period_bounds(period_start, min(day, period_end), tz)
-
-    daily_rows = await _history_rows(db, telegram_id, day_start, day_end)
-    period_rows = await _history_rows(db, telegram_id, period_start_utc, period_end_utc)
-
-    daily_jobs, daily_counts = _summarize(daily_rows)
-    _, period_counts = _summarize(period_rows)
+    rows = await _history_rows(db, telegram_id, day_start, day_end)
+    jobs, counts = _summarize(rows)
 
     lines = [
         "📊 REKAP PEKERJAAN HARIAN",
         f"📅 {DAY_NAMES[day.weekday()]}, {_format_date(day)}",
         f"👷 {technician_name}",
         "",
-        f"Total pekerjaan hari ini : {daily_counts['TOTAL']}",
+        f"Total pekerjaan : {counts['TOTAL']}",
     ]
-
-    if daily_jobs:
-        lines.append("")
-        for index, (service, ticket) in enumerate(daily_jobs, start=1):
-            lines.append(f"{index}. {service} | {ticket}")
-
+    _append_jobs(lines, jobs)
     lines.extend(
         [
             "",
-            f"CONFIG : {daily_counts['CONFIG']}",
-            f"REPORT : {daily_counts['REPORT']}",
-            f"STO    : {daily_counts['STO']}",
+            f"CONFIG : {counts['CONFIG']}",
+            f"REPORT : {counts['REPORT']}",
+            f"STO    : {counts['STO']}",
+        ]
+    )
+    return "\n".join(lines)
+
+
+async def build_weekly_recap_text(
+    db: Database,
+    telegram_id: int,
+    technician_name: str,
+    day: date,
+    timezone_name: str,
+) -> str:
+    tz = ZoneInfo(timezone_name)
+    period_start, period_end = _period_bounds(day)
+    start_utc, end_utc = _local_period_bounds(period_start, period_end, tz)
+    rows = await _history_rows(db, telegram_id, start_utc, end_utc)
+    jobs, counts = _summarize(rows)
+
+    lines = [
+        "📈 REKAP PEKERJAAN MINGGUAN",
+        f"📆 Periode: {_format_date(period_start)} - {_format_date(period_end)}",
+        f"👷 {technician_name}",
+        "",
+        f"Total pekerjaan : {counts['TOTAL']}",
+    ]
+    _append_jobs(lines, jobs)
+    lines.extend(
+        [
             "",
-            f"📆 Periode: {_format_date(period_start)} - {_format_date(period_end)}",
-            f"Total periode berjalan : {period_counts['TOTAL']}",
+            f"CONFIG : {counts['CONFIG']}",
+            f"REPORT : {counts['REPORT']}",
+            f"STO    : {counts['STO']}",
         ]
     )
     return "\n".join(lines)
@@ -150,7 +176,7 @@ async def send_daily_recaps(context: ContextTypes.DEFAULT_TYPE) -> None:
     for technician in technicians:
         telegram_id = int(technician["telegram_id"])
         try:
-            text = await build_recap_text(
+            text = await build_daily_recap_text(
                 db,
                 telegram_id,
                 technician["name"],
@@ -162,6 +188,29 @@ async def send_daily_recaps(context: ContextTypes.DEFAULT_TYPE) -> None:
             logging.exception("Gagal mengirim rekap harian ke telegram_id=%s", telegram_id)
 
 
+async def send_weekly_recaps(context: ContextTypes.DEFAULT_TYPE) -> None:
+    app = context.application
+    db: Database = app.bot_data["db"]
+    settings = app.bot_data["settings"]
+    tz = ZoneInfo(settings.timezone)
+    today = datetime.now(tz).date()
+
+    technicians = await db.list_technicians()
+    for technician in technicians:
+        telegram_id = int(technician["telegram_id"])
+        try:
+            text = await build_weekly_recap_text(
+                db,
+                telegram_id,
+                technician["name"],
+                today,
+                settings.timezone,
+            )
+            await context.bot.send_message(chat_id=telegram_id, text=text)
+        except Exception:
+            logging.exception("Gagal mengirim rekap mingguan ke telegram_id=%s", telegram_id)
+
+
 async def recap_harian_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     technician = await require_technician(update, context)
     if technician is None or update.effective_message is None:
@@ -171,7 +220,26 @@ async def recap_harian_command(update: Update, context: ContextTypes.DEFAULT_TYP
     db: Database = context.application.bot_data["db"]
     tz = ZoneInfo(settings.timezone)
     today = datetime.now(tz).date()
-    text = await build_recap_text(
+    text = await build_daily_recap_text(
+        db,
+        technician.telegram_id,
+        technician.name,
+        today,
+        settings.timezone,
+    )
+    await update.effective_message.reply_text(text)
+
+
+async def recap_mingguan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    technician = await require_technician(update, context)
+    if technician is None or update.effective_message is None:
+        return
+
+    settings = context.application.bot_data["settings"]
+    db: Database = context.application.bot_data["db"]
+    tz = ZoneInfo(settings.timezone)
+    today = datetime.now(tz).date()
+    text = await build_weekly_recap_text(
         db,
         technician.telegram_id,
         technician.name,
