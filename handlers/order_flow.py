@@ -21,7 +21,6 @@ from services.google_sheet_reference import (
     normalize,
     status_for_order,
 )
-from services.logic_dispatch import send_config_to_logic_once
 from services.order_repository import Order, OrderRepository
 from utils.keyboards import MAIN_MENU, cancel_keyboard, main_menu_keyboard
 from utils.telegram_format import pre_block
@@ -318,11 +317,9 @@ async def send_outputs(
     db: Database = context.application.bot_data["db"]
 
     outputs: list[tuple[str, str]] = []
-    config_text: str | None = None
 
     if action in {"config", "lengkap"}:
-        config_text = generate_config(technician, data)
-        outputs.append(("CONFIG", config_text))
+        outputs.append(("CONFIG", generate_config(technician, data)))
 
     if action in {"report", "lengkap"}:
         outputs.append(("REPORT", generate_report(technician, data, settings.timezone)))
@@ -337,14 +334,6 @@ async def send_outputs(
             pre_block(content),
             parse_mode="HTML",
             reply_markup=markup,
-        )
-
-    if config_text is not None:
-        await send_config_to_logic_once(
-            context,
-            db,
-            data.get("service_number", ""),
-            config_text,
         )
 
     context.user_data["last_replacement"] = data.copy()
