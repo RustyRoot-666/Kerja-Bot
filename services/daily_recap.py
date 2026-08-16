@@ -145,14 +145,6 @@ async def build_daily_recap_text(
         f"Total pekerjaan : {counts['TOTAL']}",
     ]
     _append_jobs(lines, jobs)
-    lines.extend(
-        [
-            "",
-            f"CONFIG : {counts['CONFIG']}",
-            f"REPORT : {counts['REPORT']}",
-            f"STO    : {counts['STO']}",
-        ]
-    )
     return "\n".join(lines)
 
 
@@ -177,14 +169,6 @@ async def build_weekly_recap_text_for_period(
         f"Total pekerjaan : {counts['TOTAL']}",
     ]
     _append_jobs(lines, jobs)
-    lines.extend(
-        [
-            "",
-            f"CONFIG : {counts['CONFIG']}",
-            f"REPORT : {counts['REPORT']}",
-            f"STO    : {counts['STO']}",
-        ]
-    )
     return "\n".join(lines)
 
 
