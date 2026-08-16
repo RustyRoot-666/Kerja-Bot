@@ -108,7 +108,7 @@ async def post_init(application: Application) -> None:
         application.job_queue.run_daily(
             send_weekly_recaps,
             time=time(hour=20, minute=0, tzinfo=recap_tz),
-            days=(3,),
+            days=(4,),
             name="weekly-technician-recap",
         )
 
