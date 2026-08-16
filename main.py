@@ -31,7 +31,12 @@ from handlers.login import build_login_conversation, start
 from handlers.my_orders import build_my_orders_handlers, orderanku
 from handlers.order_flow import build_order_conversation
 from services.auto_close import install_auto_close
-from services.daily_recap import recap_harian_command, send_daily_recaps
+from services.daily_recap import (
+    recap_harian_command,
+    recap_mingguan_command,
+    send_daily_recaps,
+    send_weekly_recaps,
+)
 from services.google_sheet_reference import (
     get_reference_statuses,
     initialize_sheet_config,
@@ -76,7 +81,7 @@ async def post_init(application: Application) -> None:
 
     if application.job_queue is None:
         logging.warning(
-            "JobQueue unavailable; Google Sheet auto-sync and daily recap are disabled. "
+            "JobQueue unavailable; Google Sheet auto-sync and technician recaps are disabled. "
             "Install python-telegram-bot[job-queue]."
         )
     else:
@@ -92,9 +97,15 @@ async def post_init(application: Application) -> None:
             time=time(hour=23, minute=59, tzinfo=recap_tz),
             name="daily-technician-recap",
         )
+        application.job_queue.run_daily(
+            send_weekly_recaps,
+            time=time(hour=20, minute=0, tzinfo=recap_tz),
+            days=(3,),
+            name="weekly-technician-recap",
+        )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, and daily recap initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, and weekly recap initialized"
     )
 
 
@@ -153,6 +164,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("profile", profile))
     app.add_handler(CommandHandler("settings", settings_menu))
     app.add_handler(CommandHandler("rekapharian", recap_harian_command))
+    app.add_handler(CommandHandler("rekapmingguan", recap_mingguan_command))
 
     for handler in build_excel_status_handlers():
         app.add_handler(handler)
