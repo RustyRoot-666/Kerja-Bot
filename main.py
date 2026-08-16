@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from datetime import time
+from zoneinfo import ZoneInfo
 
 import handlers.order_flow as order_flow_module
 from telegram.ext import (
@@ -29,6 +31,7 @@ from handlers.login import build_login_conversation, start
 from handlers.my_orders import build_my_orders_handlers, orderanku
 from handlers.order_flow import build_order_conversation
 from services.auto_close import install_auto_close
+from services.daily_recap import recap_harian_command, send_daily_recaps
 from services.google_sheet_reference import (
     get_reference_statuses,
     initialize_sheet_config,
@@ -61,7 +64,6 @@ async def auto_sync_google_sheet(context) -> None:
             unchanged,
         )
     except Exception:
-        # A temporary Google/network failure must never stop the Telegram bot.
         logging.exception("Google Sheet auto-sync failed; keeping previous data")
 
 
@@ -74,7 +76,7 @@ async def post_init(application: Application) -> None:
 
     if application.job_queue is None:
         logging.warning(
-            "JobQueue unavailable; Google Sheet auto-sync is disabled. "
+            "JobQueue unavailable; Google Sheet auto-sync and daily recap are disabled. "
             "Install python-telegram-bot[job-queue]."
         )
     else:
@@ -84,9 +86,15 @@ async def post_init(application: Application) -> None:
             first=5,
             name="google-sheet-auto-sync",
         )
+        recap_tz = ZoneInfo(application.bot_data["settings"].timezone)
+        application.job_queue.run_daily(
+            send_daily_recaps,
+            time=time(hour=23, minute=59, tzinfo=recap_tz),
+            name="daily-technician-recap",
+        )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, and auto-sync initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, and daily recap initialized"
     )
 
 
@@ -120,9 +128,6 @@ def build_application() -> Application:
 
     install_auto_close(order_flow_module)
 
-    # Grup hanya dipakai sebagai tujuan CONFIG. Pesan grup dipakai diam-diam
-    # untuk mendeteksi chat ID grup Logic, lalu dihentikan agar handler bot
-    # lainnya tidak pernah membalas di grup.
     app.add_handler(
         MessageHandler(filters.ChatType.GROUPS, detect_logic_group),
         group=-1,
@@ -147,6 +152,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("export", export_history))
     app.add_handler(CommandHandler("profile", profile))
     app.add_handler(CommandHandler("settings", settings_menu))
+    app.add_handler(CommandHandler("rekapharian", recap_harian_command))
 
     for handler in build_excel_status_handlers():
         app.add_handler(handler)
@@ -188,8 +194,6 @@ async def error_handler(update, context) -> None:
     if not update or not update.effective_chat:
         return
 
-    # Grup Logic dan grup lain tidak boleh menerima pesan status/error dari bot.
-    # Error tetap dicatat di log server; pemberitahuan hanya untuk chat pribadi.
     if update.effective_chat.type != "private":
         return
 
