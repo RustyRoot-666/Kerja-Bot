@@ -41,9 +41,11 @@ def _env_logic_group_id() -> int | None:
 
 
 def _ensure_logic_tables(conn: sqlite3.Connection) -> None:
+    # Gunakan tabel khusus agar tidak bentrok dengan tabel bot_settings lama
+    # yang sudah dipakai fitur lain dengan skema berbeda.
     conn.execute(
         """
-        CREATE TABLE IF NOT EXISTS bot_settings (
+        CREATE TABLE IF NOT EXISTS logic_bot_settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL,
             updated_at TEXT NOT NULL
@@ -66,7 +68,7 @@ def _save_logic_group_id(database_path: Path, group_id: int) -> None:
         _ensure_logic_tables(conn)
         conn.execute(
             """
-            INSERT INTO bot_settings (key, value, updated_at)
+            INSERT INTO logic_bot_settings (key, value, updated_at)
             VALUES (?, ?, ?)
             ON CONFLICT(key) DO UPDATE SET
                 value = excluded.value,
@@ -84,7 +86,7 @@ def _stored_logic_group_id(database_path: Path) -> int | None:
     try:
         _ensure_logic_tables(conn)
         row = conn.execute(
-            "SELECT value FROM bot_settings WHERE key = ?",
+            "SELECT value FROM logic_bot_settings WHERE key = ?",
             (LOGIC_GROUP_SETTING_KEY,),
         ).fetchone()
         conn.commit()
