@@ -207,6 +207,19 @@ def _daily_close_rows(database_path: Path, day: date) -> list[tuple[str, int]]:
         conn.close()
 
 
+async def _notify_admins(context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    settings = context.application.bot_data["settings"]
+    if not settings.admin_ids:
+        logging.warning("Tidak ada ADMIN_IDS untuk menerima notifikasi binding REPORT MANYAR")
+        return
+
+    for admin_id in settings.admin_ids:
+        try:
+            await context.bot.send_message(chat_id=admin_id, text=text)
+        except Exception:
+            logging.exception("Gagal mengirim notifikasi binding REPORT MANYAR ke admin_id=%s", admin_id)
+
+
 async def capture_report_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat = update.effective_chat
     message = update.effective_message
@@ -222,10 +235,18 @@ async def capture_report_group_message(update: Update, context: ContextTypes.DEF
     if command in REPORT_BIND_COMMANDS:
         thread_id = message.message_thread_id
         if thread_id is None:
-            await message.reply_text("Perintah ini harus dikirim dari topic REPORT MANYAR.")
+            await _notify_admins(
+                context,
+                "❌ Binding REPORT MANYAR gagal. /setreportmanyar harus dikirim dari topic REPORT MANYAR.",
+            )
             return
         await asyncio.to_thread(_save_report_target, db.db_path, chat.id, thread_id)
-        await message.reply_text("✅ Topic REPORT MANYAR berhasil dikunci untuk leaderboard.")
+        await _notify_admins(
+            context,
+            "✅ Topic REPORT MANYAR berhasil dikunci untuk leaderboard.\n"
+            f"Chat ID: {chat.id}\n"
+            f"Thread ID: {thread_id}",
+        )
         logging.info("REPORT MANYAR bound: chat_id=%s thread_id=%s", chat.id, thread_id)
         return
 
