@@ -17,9 +17,25 @@ MONTH_NAMES = [
     "Juli", "Agustus", "September", "Oktober", "November", "Desember",
 ]
 
+MOTIVATION_MESSAGES = [
+    "💪 Tetap semangat! Setiap order yang selesai adalah satu langkah maju.",
+    "🔥 Kerja bagus hari ini. Jaga ritme, jaga kualitas, dan tetap semangat!",
+    "🚀 Sedikit demi sedikit, hasil besar terbentuk dari konsistensi setiap hari.",
+    "⚡ Tetap fokus dan semangat. Pekerjaan rapi hari ini memudahkan langkah berikutnya.",
+    "🌟 Terima kasih untuk kerja kerasnya. Istirahat yang cukup dan lanjutkan besok dengan semangat baru!",
+    "🛠️ Kerja tuntas, data rapi, hati tenang. Semangat terus!",
+    "🏆 Konsisten lebih penting daripada terburu-buru. Mantap, lanjutkan!",
+]
+
 
 def _format_date(value: date) -> str:
     return f"{value.day} {MONTH_NAMES[value.month - 1]} {value.year}"
+
+
+def _motivation(seed_day: date) -> str:
+    # Deterministik per tanggal agar semua teknisi mendapat pesan yang sama pada hari itu.
+    index = seed_day.toordinal() % len(MOTIVATION_MESSAGES)
+    return MOTIVATION_MESSAGES[index]
 
 
 def _period_bounds(day: date) -> tuple[date, date]:
@@ -100,21 +116,14 @@ def _service_key(row) -> str:
     return f"ROW:{row['created_at']}:{row['kind']}"
 
 
-def _summarize(rows) -> tuple[list[tuple[str, str]], dict[str, int]]:
+def _summarize(rows) -> tuple[list[tuple[str, str]], int]:
     jobs: dict[str, tuple[str, str]] = {}
-    by_kind: dict[str, set[str]] = {"CONFIG": set(), "REPORT": set(), "STO": set()}
-
     for row in rows:
         key = _service_key(row)
         service = (row["service_number"] or "-").strip() or "-"
         ticket = (row["ticket_id"] or "-").strip() or "-"
         jobs.setdefault(key, (service, ticket))
-        if row["kind"] in by_kind:
-            by_kind[row["kind"]].add(key)
-
-    counts = {kind: len(keys) for kind, keys in by_kind.items()}
-    counts["TOTAL"] = len(jobs)
-    return list(jobs.values()), counts
+    return list(jobs.values()), len(jobs)
 
 
 def _append_jobs(lines: list[str], jobs: list[tuple[str, str]]) -> None:
@@ -123,6 +132,10 @@ def _append_jobs(lines: list[str], jobs: list[tuple[str, str]]) -> None:
     lines.append("")
     for index, (service, ticket) in enumerate(jobs, start=1):
         lines.append(f"{index}. {service} | {ticket}")
+
+
+def _append_motivation(lines: list[str], seed_day: date) -> None:
+    lines.extend(["", _motivation(seed_day)])
 
 
 async def build_daily_recap_text(
@@ -135,16 +148,17 @@ async def build_daily_recap_text(
     tz = ZoneInfo(timezone_name)
     day_start, day_end = _local_day_bounds(day, tz)
     rows = await _history_rows(db, telegram_id, day_start, day_end)
-    jobs, counts = _summarize(rows)
+    jobs, total = _summarize(rows)
 
     lines = [
         "📊 REKAP PEKERJAAN HARIAN",
         f"📅 {DAY_NAMES[day.weekday()]}, {_format_date(day)}",
         f"👷 {technician_name}",
         "",
-        f"Total pekerjaan : {counts['TOTAL']}",
+        f"Total pekerjaan : {total}",
     ]
     _append_jobs(lines, jobs)
+    _append_motivation(lines, day)
     return "\n".join(lines)
 
 
@@ -159,16 +173,17 @@ async def build_weekly_recap_text_for_period(
     tz = ZoneInfo(timezone_name)
     start_utc, end_utc = _local_period_bounds(period_start, period_end, tz)
     rows = await _history_rows(db, telegram_id, start_utc, end_utc)
-    jobs, counts = _summarize(rows)
+    jobs, total = _summarize(rows)
 
     lines = [
         "📈 REKAP PEKERJAAN MINGGUAN",
         f"📆 Periode: {_format_date(period_start)} - {_format_date(period_end)}",
         f"👷 {technician_name}",
         "",
-        f"Total pekerjaan : {counts['TOTAL']}",
+        f"Total pekerjaan : {total}",
     ]
     _append_jobs(lines, jobs)
+    _append_motivation(lines, period_end)
     return "\n".join(lines)
 
 
@@ -288,13 +303,7 @@ async def send_weekly_recaps(context: ContextTypes.DEFAULT_TYPE) -> None:
                 settings.timezone,
             )
             await context.bot.send_message(chat_id=telegram_id, text=text)
-            await _mark_recap_sent(
-                db,
-                telegram_id,
-                "WEEKLY",
-                period_start,
-                period_end,
-            )
+            await _mark_recap_sent(db, telegram_id, "WEEKLY", period_start, period_end)
         except Exception:
             logging.exception("Gagal mengirim rekap mingguan ke telegram_id=%s", telegram_id)
 
@@ -310,15 +319,8 @@ async def send_previous_week_recaps_once(application) -> None:
     for technician in technicians:
         telegram_id = int(technician["telegram_id"])
         try:
-            if await _was_recap_sent(
-                db,
-                telegram_id,
-                "WEEKLY",
-                period_start,
-                period_end,
-            ):
+            if await _was_recap_sent(db, telegram_id, "WEEKLY", period_start, period_end):
                 continue
-
             text = await build_weekly_recap_text_for_period(
                 db,
                 telegram_id,
@@ -328,13 +330,7 @@ async def send_previous_week_recaps_once(application) -> None:
                 settings.timezone,
             )
             await application.bot.send_message(chat_id=telegram_id, text=text)
-            await _mark_recap_sent(
-                db,
-                telegram_id,
-                "WEEKLY",
-                period_start,
-                period_end,
-            )
+            await _mark_recap_sent(db, telegram_id, "WEEKLY", period_start, period_end)
             logging.info(
                 "Rekap minggu sebelumnya terkirim otomatis: telegram_id=%s periode=%s..%s",
                 telegram_id,
