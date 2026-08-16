@@ -23,11 +23,17 @@ def _format_date(value: date) -> str:
 
 
 def _period_bounds(day: date) -> tuple[date, date]:
-    # Periode kerja selalu Jumat sampai Kamis.
     days_since_friday = (day.weekday() - 4) % 7
     start = day - timedelta(days=days_since_friday)
     end = start + timedelta(days=6)
     return start, end
+
+
+def _previous_period_bounds(day: date) -> tuple[date, date]:
+    current_start, _ = _period_bounds(day)
+    previous_end = current_start - timedelta(days=1)
+    previous_start = previous_end - timedelta(days=6)
+    return previous_start, previous_end
 
 
 def _utc_iso(value: datetime) -> str:
@@ -44,6 +50,23 @@ def _local_period_bounds(start_day: date, end_day: date, tz: ZoneInfo) -> tuple[
     start_local = datetime.combine(start_day, time.min, tzinfo=tz)
     end_local = datetime.combine(end_day + timedelta(days=1), time.min, tzinfo=tz)
     return _utc_iso(start_local), _utc_iso(end_local)
+
+
+async def initialize_recap_delivery_log(db: Database) -> None:
+    async with db._lock:
+        with db.connection() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS recap_delivery_log (
+                    telegram_id INTEGER NOT NULL,
+                    recap_type TEXT NOT NULL,
+                    period_start TEXT NOT NULL,
+                    period_end TEXT NOT NULL,
+                    sent_at TEXT NOT NULL,
+                    PRIMARY KEY (telegram_id, recap_type, period_start, period_end)
+                )
+                """
+            )
 
 
 async def _history_rows(
@@ -133,15 +156,15 @@ async def build_daily_recap_text(
     return "\n".join(lines)
 
 
-async def build_weekly_recap_text(
+async def build_weekly_recap_text_for_period(
     db: Database,
     telegram_id: int,
     technician_name: str,
-    day: date,
+    period_start: date,
+    period_end: date,
     timezone_name: str,
 ) -> str:
     tz = ZoneInfo(timezone_name)
-    period_start, period_end = _period_bounds(day)
     start_utc, end_utc = _local_period_bounds(period_start, period_end, tz)
     rows = await _history_rows(db, telegram_id, start_utc, end_utc)
     jobs, counts = _summarize(rows)
@@ -163,6 +186,78 @@ async def build_weekly_recap_text(
         ]
     )
     return "\n".join(lines)
+
+
+async def build_weekly_recap_text(
+    db: Database,
+    telegram_id: int,
+    technician_name: str,
+    day: date,
+    timezone_name: str,
+) -> str:
+    period_start, period_end = _period_bounds(day)
+    return await build_weekly_recap_text_for_period(
+        db,
+        telegram_id,
+        technician_name,
+        period_start,
+        period_end,
+        timezone_name,
+    )
+
+
+async def _was_recap_sent(
+    db: Database,
+    telegram_id: int,
+    recap_type: str,
+    period_start: date,
+    period_end: date,
+) -> bool:
+    async with db._lock:
+        with db.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM recap_delivery_log
+                WHERE telegram_id = ?
+                  AND recap_type = ?
+                  AND period_start = ?
+                  AND period_end = ?
+                LIMIT 1
+                """,
+                (
+                    telegram_id,
+                    recap_type,
+                    period_start.isoformat(),
+                    period_end.isoformat(),
+                ),
+            ).fetchone()
+    return row is not None
+
+
+async def _mark_recap_sent(
+    db: Database,
+    telegram_id: int,
+    recap_type: str,
+    period_start: date,
+    period_end: date,
+) -> None:
+    async with db._lock:
+        with db.connection() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO recap_delivery_log (
+                    telegram_id, recap_type, period_start, period_end, sent_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    telegram_id,
+                    recap_type,
+                    period_start.isoformat(),
+                    period_end.isoformat(),
+                    datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+                ),
+            )
 
 
 async def send_daily_recaps(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -194,21 +289,79 @@ async def send_weekly_recaps(context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = app.bot_data["settings"]
     tz = ZoneInfo(settings.timezone)
     today = datetime.now(tz).date()
+    period_start, period_end = _period_bounds(today)
 
     technicians = await db.list_technicians()
     for technician in technicians:
         telegram_id = int(technician["telegram_id"])
         try:
-            text = await build_weekly_recap_text(
+            text = await build_weekly_recap_text_for_period(
                 db,
                 telegram_id,
                 technician["name"],
-                today,
+                period_start,
+                period_end,
                 settings.timezone,
             )
             await context.bot.send_message(chat_id=telegram_id, text=text)
+            await _mark_recap_sent(
+                db,
+                telegram_id,
+                "WEEKLY",
+                period_start,
+                period_end,
+            )
         except Exception:
             logging.exception("Gagal mengirim rekap mingguan ke telegram_id=%s", telegram_id)
+
+
+async def send_previous_week_recaps_once(application) -> None:
+    db: Database = application.bot_data["db"]
+    settings = application.bot_data["settings"]
+    tz = ZoneInfo(settings.timezone)
+    today = datetime.now(tz).date()
+    period_start, period_end = _previous_period_bounds(today)
+
+    technicians = await db.list_technicians()
+    for technician in technicians:
+        telegram_id = int(technician["telegram_id"])
+        try:
+            if await _was_recap_sent(
+                db,
+                telegram_id,
+                "WEEKLY",
+                period_start,
+                period_end,
+            ):
+                continue
+
+            text = await build_weekly_recap_text_for_period(
+                db,
+                telegram_id,
+                technician["name"],
+                period_start,
+                period_end,
+                settings.timezone,
+            )
+            await application.bot.send_message(chat_id=telegram_id, text=text)
+            await _mark_recap_sent(
+                db,
+                telegram_id,
+                "WEEKLY",
+                period_start,
+                period_end,
+            )
+            logging.info(
+                "Rekap minggu sebelumnya terkirim otomatis: telegram_id=%s periode=%s..%s",
+                telegram_id,
+                period_start,
+                period_end,
+            )
+        except Exception:
+            logging.exception(
+                "Gagal mengirim rekap minggu sebelumnya ke telegram_id=%s",
+                telegram_id,
+            )
 
 
 async def recap_harian_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
