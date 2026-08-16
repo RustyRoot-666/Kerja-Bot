@@ -16,6 +16,7 @@ from handlers.common import cancel
 from ocr.reader import OntOcrReader
 from services.auth import require_technician
 from services.formatters import generate_config
+from services.logic_dispatch import send_config_to_logic_once
 from services.photos import download_largest_photo
 from utils.keyboards import MAIN_MENU, cancel_keyboard, main_menu_keyboard
 from utils.telegram_format import pre_block
@@ -208,6 +209,7 @@ async def customer_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data["last_replacement"] = data.copy()
     context.user_data.pop("config", None)
     await update.message.reply_text(pre_block(content), parse_mode="HTML", reply_markup=main_menu_keyboard())
+    await send_config_to_logic_once(context, db, data.get("service_number", ""), content)
     return ConversationHandler.END
 
 
