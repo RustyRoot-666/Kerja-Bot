@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -110,11 +111,13 @@ def _stored_group_id(database_path: Path) -> int | None:
         conn.commit()
     finally:
         conn.close()
+
     if not row:
         return None
     try:
         return int(row[0])
     except (TypeError, ValueError):
+        logging.error("report_group_id tersimpan tidak valid: %r", row[0])
         return None
 
 
@@ -161,11 +164,11 @@ def _leaderboard_rows(database_path: Path, period_start: date) -> list[tuple[str
         _ensure_tables(conn)
         rows = conn.execute(
             """
-            SELECT technician_name, COUNT(*) AS total
+            SELECT MAX(technician_name) AS technician_name, COUNT(*) AS total
             FROM report_group_orders
             WHERE period_start = ?
-            GROUP BY technician_nik, technician_name
-            ORDER BY total DESC, UPPER(technician_name) ASC
+            GROUP BY technician_nik
+            ORDER BY total DESC, UPPER(MAX(technician_name)) ASC
             """,
             (period_start.isoformat(),),
         ).fetchall()
@@ -184,8 +187,7 @@ async def capture_report_group_message(update: Update, context: ContextTypes.DEF
         return
 
     db: Database = context.application.bot_data["db"]
-    await context.application.run_in_executor(None, _save_group_id, db.db_path, chat.id) if False else None
-    _save_group_id(db.db_path, chat.id)
+    await asyncio.to_thread(_save_group_id, db.db_path, chat.id)
 
     text = message.text or message.caption or ""
     service_match = NO_SERVICE_RE.search(text)
@@ -202,7 +204,8 @@ async def capture_report_group_message(update: Update, context: ContextTypes.DEF
     technician_nik = tech_match.group(1).strip()
     technician_name = tech_match.group(2).strip()
 
-    inserted = _store_order(
+    inserted = await asyncio.to_thread(
+        _store_order,
         db.db_path,
         service_number,
         period_start,
@@ -225,7 +228,7 @@ async def capture_report_group_message(update: Update, context: ContextTypes.DEF
 def build_leaderboard_text(rows: list[tuple[str, int]], today: date) -> str:
     period_start, period_end = _period_bounds(today)
     lines = [
-        "🏆 LEADERBOARD PERIODE BERJALAN" if today.weekday() != 3 else "🏆 FINAL LEADERBOARD MINGGUAN",
+        "🏆 LEADERBOARD PERIODE BERJALAN",
         f"📆 {_format_date(period_start)} - {_format_date(period_end)}",
         f"📅 Update: {DAY_NAMES[today.weekday()]}, {_format_date(today)}",
         "",
@@ -255,11 +258,11 @@ async def send_report_leaderboard(context: ContextTypes.DEFAULT_TYPE) -> None:
     today = datetime.now(tz).date()
     period_start, _ = _period_bounds(today)
 
-    group_id = _stored_group_id(db.db_path)
+    group_id = await asyncio.to_thread(_stored_group_id, db.db_path)
     if group_id is None:
         logging.warning("Leaderboard belum dikirim: grup %s belum terdeteksi", _target_group_title())
         return
 
-    rows = _leaderboard_rows(db.db_path, period_start)
+    rows = await asyncio.to_thread(_leaderboard_rows, db.db_path, period_start)
     text = build_leaderboard_text(rows, today)
     await context.bot.send_message(chat_id=group_id, text=text)
