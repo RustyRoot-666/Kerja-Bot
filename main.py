@@ -48,6 +48,7 @@ from services.logic_dispatch import detect_logic_group, ignore_group_message
 from services.order_repository import OrderRepository
 from services.report_leaderboard import (
     capture_report_group_message,
+    send_daily_close,
     send_report_leaderboard,
 )
 from utils.keyboards import MAIN_MENU
@@ -86,14 +87,11 @@ async def post_init(application: Application) -> None:
     await initialize_sheet_config(application.bot_data["settings"].database_path)
     await initialize_recap_delivery_log(db)
 
-    # Saat fitur ini pertama kali aktif (atau bot hidup kembali setelah sempat mati),
-    # kirim periode Jumat-Kamis sebelumnya sekali saja ke masing-masing teknisi.
-    # recap_delivery_log mencegah pengiriman ulang pada restart berikutnya.
     await send_previous_week_recaps_once(application)
 
     if application.job_queue is None:
         logging.warning(
-            "JobQueue unavailable; Google Sheet auto-sync, technician recaps, and leaderboard are disabled. "
+            "JobQueue unavailable; Google Sheet auto-sync, technician recaps, leaderboard, and daily close are disabled. "
             "Install python-telegram-bot[job-queue]."
         )
     else:
@@ -106,8 +104,13 @@ async def post_init(application: Application) -> None:
         recap_tz = ZoneInfo(application.bot_data["settings"].timezone)
         application.job_queue.run_daily(
             send_report_leaderboard,
-            time=time(hour=20, minute=0, tzinfo=recap_tz),
+            time=time(hour=22, minute=0, tzinfo=recap_tz),
             name="daily-report-leaderboard",
+        )
+        application.job_queue.run_daily(
+            send_daily_close,
+            time=time(hour=23, minute=59, tzinfo=recap_tz),
+            name="daily-report-close",
         )
         application.job_queue.run_daily(
             send_daily_recaps,
@@ -122,7 +125,7 @@ async def post_init(application: Application) -> None:
         )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, report leaderboard, and previous-week catch-up initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, report leaderboard, daily close, and previous-week catch-up initialized"
     )
 
 
@@ -156,7 +159,6 @@ def build_application() -> Application:
 
     install_auto_close(order_flow_module)
 
-    # Tangkap pesan Report lebih dulu agar tersimpan sebelum handler grup umum mengabaikannya.
     app.add_handler(
         MessageHandler(filters.ChatType.GROUPS, capture_report_group_message),
         group=-2,
