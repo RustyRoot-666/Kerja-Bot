@@ -32,9 +32,11 @@ from handlers.my_orders import build_my_orders_handlers, orderanku
 from handlers.order_flow import build_order_conversation
 from services.auto_close import install_auto_close
 from services.daily_recap import (
+    initialize_recap_delivery_log,
     recap_harian_command,
     recap_mingguan_command,
     send_daily_recaps,
+    send_previous_week_recaps_once,
     send_weekly_recaps,
 )
 from services.google_sheet_reference import (
@@ -78,6 +80,12 @@ async def post_init(application: Application) -> None:
     await db.initialize()
     await orders.initialize()
     await initialize_sheet_config(application.bot_data["settings"].database_path)
+    await initialize_recap_delivery_log(db)
+
+    # Saat fitur ini pertama kali aktif (atau bot hidup kembali setelah sempat mati),
+    # kirim periode Jumat-Kamis sebelumnya sekali saja ke masing-masing teknisi.
+    # recap_delivery_log mencegah pengiriman ulang pada restart berikutnya.
+    await send_previous_week_recaps_once(application)
 
     if application.job_queue is None:
         logging.warning(
@@ -105,7 +113,7 @@ async def post_init(application: Application) -> None:
         )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, and weekly recap initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, and previous-week catch-up initialized"
     )
 
 
