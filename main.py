@@ -79,6 +79,24 @@ async def auto_sync_google_sheet(context) -> None:
         logging.exception("Google Sheet auto-sync failed; keeping previous data")
 
 
+async def leaderboard_command(update, context) -> None:
+    chat = update.effective_chat
+    user = update.effective_user
+    app_settings = context.application.bot_data["settings"]
+    if not chat or chat.type != "private" or not user or user.id not in app_settings.admin_ids:
+        return
+    await send_report_leaderboard(context)
+
+
+async def closeharian_command(update, context) -> None:
+    chat = update.effective_chat
+    user = update.effective_user
+    app_settings = context.application.bot_data["settings"]
+    if not chat or chat.type != "private" or not user or user.id not in app_settings.admin_ids:
+        return
+    await send_daily_close(context)
+
+
 async def post_init(application: Application) -> None:
     db: Database = application.bot_data["db"]
     orders: OrderRepository = application.bot_data["orders"]
@@ -189,6 +207,8 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("settings", settings_menu))
     app.add_handler(CommandHandler("rekapharian", recap_harian_command))
     app.add_handler(CommandHandler("rekapmingguan", recap_mingguan_command))
+    app.add_handler(CommandHandler("leaderboard", leaderboard_command))
+    app.add_handler(CommandHandler("closeharian", closeharian_command))
 
     for handler in build_excel_status_handlers():
         app.add_handler(handler)
