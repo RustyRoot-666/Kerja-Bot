@@ -185,10 +185,17 @@ def build_application() -> Application:
 
 async def error_handler(update, context) -> None:
     logging.exception("Unhandled bot error", exc_info=context.error)
-    if update and update.effective_chat:
-        await update.effective_chat.send_message(
-            "Terjadi error. Silakan coba lagi atau hubungi admin."
-        )
+    if not update or not update.effective_chat:
+        return
+
+    # Grup Logic dan grup lain tidak boleh menerima pesan status/error dari bot.
+    # Error tetap dicatat di log server; pemberitahuan hanya untuk chat pribadi.
+    if update.effective_chat.type != "private":
+        return
+
+    await update.effective_chat.send_message(
+        "Terjadi error. Silakan coba lagi atau hubungi admin."
+    )
 
 
 def main() -> None:
