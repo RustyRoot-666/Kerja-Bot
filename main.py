@@ -46,6 +46,10 @@ from services.google_sheet_reference import (
 )
 from services.logic_dispatch import detect_logic_group, ignore_group_message
 from services.order_repository import OrderRepository
+from services.report_leaderboard import (
+    capture_report_group_message,
+    send_report_leaderboard,
+)
 from utils.keyboards import MAIN_MENU
 from utils.logging import setup_logging
 
@@ -89,7 +93,7 @@ async def post_init(application: Application) -> None:
 
     if application.job_queue is None:
         logging.warning(
-            "JobQueue unavailable; Google Sheet auto-sync and technician recaps are disabled. "
+            "JobQueue unavailable; Google Sheet auto-sync, technician recaps, and leaderboard are disabled. "
             "Install python-telegram-bot[job-queue]."
         )
     else:
@@ -100,6 +104,11 @@ async def post_init(application: Application) -> None:
             name="google-sheet-auto-sync",
         )
         recap_tz = ZoneInfo(application.bot_data["settings"].timezone)
+        application.job_queue.run_daily(
+            send_report_leaderboard,
+            time=time(hour=20, minute=0, tzinfo=recap_tz),
+            name="daily-report-leaderboard",
+        )
         application.job_queue.run_daily(
             send_daily_recaps,
             time=time(hour=23, minute=59, tzinfo=recap_tz),
@@ -113,7 +122,7 @@ async def post_init(application: Application) -> None:
         )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, and previous-week catch-up initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, report leaderboard, and previous-week catch-up initialized"
     )
 
 
@@ -147,6 +156,11 @@ def build_application() -> Application:
 
     install_auto_close(order_flow_module)
 
+    # Tangkap pesan Report lebih dulu agar tersimpan sebelum handler grup umum mengabaikannya.
+    app.add_handler(
+        MessageHandler(filters.ChatType.GROUPS, capture_report_group_message),
+        group=-2,
+    )
     app.add_handler(
         MessageHandler(filters.ChatType.GROUPS, detect_logic_group),
         group=-1,
