@@ -5,7 +5,7 @@ import re
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from database import Database
+from database import Database, Technician
 
 
 ASSIGN_GROUP_CANONICAL = "REPLACEMENT NTE MANYAR"
@@ -30,8 +30,11 @@ def _extract_inets(text: str) -> list[str]:
     return result
 
 
-def _format_assign(inets: list[str]) -> str:
-    return "\n".join([*inets, "moban assign lensa chat"])
+def _format_assign(inets: list[str], technician: Technician) -> str:
+    return "\n".join([
+        *inets,
+        f"moban assign lensa chat, {technician.name} ({technician.nik})",
+    ])
 
 
 async def handle_assign_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -61,7 +64,7 @@ async def handle_assign_message(update: Update, context: ContextTypes.DEFAULT_TY
 
         if inets:
             context.user_data.pop("assign_waiting_chat_id", None)
-            await message.reply_text(_format_assign(inets))
+            await message.reply_text(_format_assign(inets, technician))
             return
 
         context.user_data["assign_waiting_chat_id"] = chat.id
@@ -81,4 +84,4 @@ async def handle_assign_message(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     context.user_data.pop("assign_waiting_chat_id", None)
-    await message.reply_text(_format_assign(inets))
+    await message.reply_text(_format_assign(inets, technician))
