@@ -145,7 +145,7 @@ async def post_init(application: Application) -> None:
         )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, report leaderboard, daily close, /update kendala, /assign NTE Manyar, and previous-week catch-up initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, report leaderboard, daily close, /update kendala, /assign NTE Manyar, private /tiket, and previous-week catch-up initialized"
     )
 
 
@@ -179,11 +179,9 @@ def build_application() -> Application:
 
     install_auto_close(order_flow_module)
 
-    # Group-specific flows must run before the generic group ignore handler.
-    app.add_handler(
-        MessageHandler(filters.ChatType.GROUPS, handle_assign_message),
-        group=-4,
-    )
+    # /assign is group-only inside the service; /tiket is private-only.
+    # Run before generic handlers so both modes are available.
+    app.add_handler(MessageHandler(filters.ALL, handle_assign_message), group=-4)
     # /update must be able to work in both private chats and the dedicated
     # kendala group before generic group handlers ignore other messages.
     app.add_handler(MessageHandler(filters.ALL, handle_update_message), group=-3)
