@@ -194,12 +194,10 @@ def scan(
 ) -> tuple[dict[str, int], list[dict[str, Any]], Counter[str]]:
     data = json.loads(export_path.read_text(encoding="utf-8"))
     messages = data.get("messages", [])
-    candidates: list[dict[str, Any]] = []
-    unique_inets: set[str] = set()
-    with_evidence = 0
+    latest_by_inet: dict[str, dict[str, Any]] = {}
     messages_in_range = 0
     skipped_done = 0
-    rca_counts: Counter[str] = Counter()
+    raw_kendala = 0
 
     for message in messages:
         if message.get("type") != "message":
@@ -228,37 +226,61 @@ def scan(
                 skipped_done += 1
                 continue
 
-            unique_inets.add(inet)
-            rca_counts[rca] += 1
-            if photo:
-                with_evidence += 1
-            candidates.append(
-                {
-                    "message_id": message.get("id"),
-                    "date": message.get("date", ""),
-                    "from": message.get("from", ""),
-                    "inet": inet,
-                    "description": description,
-                    "status": status,
-                    "rca": rca,
-                    "photo": photo or "",
-                }
-            )
+            raw_kendala += 1
+            candidate = {
+                "message_id": message.get("id"),
+                "date": message.get("date", ""),
+                "date_obj": message_date,
+                "from": message.get("from", ""),
+                "inet": inet,
+                "description": description,
+                "status": status,
+                "rca": rca,
+                "photo": photo or "",
+            }
+
+            previous = latest_by_inet.get(inet)
+            if previous is None:
+                latest_by_inet[inet] = candidate
+                continue
+
+            previous_date = previous.get("date_obj")
+            if previous_date is None or (
+                message_date is not None and message_date >= previous_date
+            ):
+                latest_by_inet[inet] = candidate
+
+    candidates = sorted(
+        latest_by_inet.values(),
+        key=lambda item: (
+            item.get("date_obj") or datetime.min,
+            str(item.get("message_id") or ""),
+        ),
+    )
+
+    with_evidence = sum(1 for item in candidates if item.get("photo"))
+    rca_counts: Counter[str] = Counter(item["rca"] for item in candidates)
+    older_updates_ignored = raw_kendala - len(candidates)
+
+    for item in candidates:
+        item.pop("date_obj", None)
 
     stats = {
         "messages": len(messages),
         "messages_in_range": messages_in_range,
+        "raw_kendala": raw_kendala,
         "candidates": len(candidates),
-        "unique_inets": len(unique_inets),
+        "unique_inets": len(candidates),
         "with_evidence_messages": with_evidence,
         "skipped_done": skipped_done,
+        "older_updates_ignored": older_updates_ignored,
     }
     return stats, candidates, rca_counts
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Dry-run scanner history WORK ORDER MANYAR untuk kandidat Kendala aktif."
+        description="Dry-run scanner history WORK ORDER MANYAR untuk kendala aktif terbaru per INET."
     )
     parser.add_argument("export_json", type=Path)
     parser.add_argument("--dry-run", action="store_true", help="Mode aman; tidak menulis apa pun.")
@@ -283,18 +305,20 @@ def main() -> None:
 
     stats, candidates, rca_counts = scan(args.export_json, since=args.since, until=args.until)
 
-    print("=== PREVIEW KENDALA AKTIF HISTORY ===")
-    print(f"Total pesan export    : {stats['messages']}")
+    print("=== PREVIEW KENDALA AKTIF TERBARU PER INET ===")
+    print(f"Total pesan export        : {stats['messages']}")
     if args.since or args.until:
-        print(f"Pesan dalam rentang   : {stats['messages_in_range']}")
+        print(f"Pesan dalam rentang       : {stats['messages_in_range']}")
     if args.since:
-        print(f"Mulai tanggal         : {args.since.date().isoformat()}")
+        print(f"Mulai tanggal             : {args.since.date().isoformat()}")
     if args.until:
-        print(f"Sebelum tanggal       : {args.until.date().isoformat()}")
-    print(f"DONE/CLOSE diabaikan  : {stats['skipped_done']}")
-    print(f"Kandidat kendala      : {stats['candidates']}")
-    print(f"INET unik             : {stats['unique_inets']}")
-    print(f"Kandidat dgn eviden   : {stats['with_evidence_messages']}")
+        print(f"Sebelum tanggal           : {args.until.date().isoformat()}")
+    print(f"DONE/CLOSE diabaikan      : {stats['skipped_done']}")
+    print(f"Update kendala ditemukan  : {stats['raw_kendala']}")
+    print(f"Update lama diabaikan     : {stats['older_updates_ignored']}")
+    print(f"Kandidat kendala terbaru  : {stats['candidates']}")
+    print(f"INET unik                 : {stats['unique_inets']}")
+    print(f"Kandidat dgn eviden       : {stats['with_evidence_messages']}")
     print()
 
     if rca_counts:
