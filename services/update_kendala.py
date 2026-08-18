@@ -45,8 +45,6 @@ def _canonical_title(value: str | None) -> str:
 
 
 def _group_allowed(chat_id: int, chat_type: str, chat_title: str | None) -> bool:
-    # /update hanya aktif di grup WORK ORDER MANYAR.
-    # Jika KENDALA_GROUP_ID disetel, ID grup juga harus cocok agar lebih aman.
     if chat_type not in {"group", "supergroup"}:
         return False
     if _canonical_title(chat_title) != KENDALA_GROUP_CANONICAL:
@@ -64,29 +62,60 @@ def _group_allowed(chat_id: int, chat_type: str, chat_title: str | None) -> bool
 
 def _classify(description: str) -> tuple[str, str]:
     value = " ".join(description.upper().split())
-    status = "UPDATE"
-    done_keywords = ("SUDAH GANTI", "SELESAI", "DONE", "SUDAH SELESAI")
+    done_keywords = (
+        "SUDAH GANTI",
+        "SUDAH DIGANTI",
+        "SELESAI",
+        "DONE",
+        "SUDAH SELESAI",
+    )
     if any(keyword in value for keyword in done_keywords):
-        return status, "DONE"
-    if "MENOLAK" in value or "TIDAK MAU" in value:
-        return status, "MENOLAK"
-    if "RUKOS" in value or "RUMAH KOSONG" in value:
-        return status, "RUKOS"
-    if "ALAMAT NOK" in value or "ALAMAT TIDAK" in value or "ALAMAT TIDAK DITEMUKAN" in value:
-        return status, "ALAMAT NOK"
+        return "CLOSE", "DONE"
+    if "MENOLAK" in value or "TIDAK MAU" in value or "TIDAK BERKENAN" in value:
+        return "UPDATE", "MENOLAK"
+    if "RUKOS" in value or "RUMAH KOSONG" in value or "TIDAK ADA PENGHUNI" in value:
+        return "UPDATE", "RUKOS"
+    if (
+        "ALAMAT NOK" in value
+        or "ALAMAT TIDAK" in value
+        or "ALAMAT TIDAK DITEMUKAN" in value
+        or "ALAMAT SALAH" in value
+        or "ALAMAT TIDAK SESUAI" in value
+        or "RUMAH TIDAK DITEMUKAN" in value
+    ):
+        return "UPDATE", "ALAMAT NOK"
     if "LEPAS DC" in value:
-        return status, "LEPAS DC"
-    if "CABUT" in value:
-        return status, "CABUT"
-    if "2 VOIP" in value or "ONT 2 VOIP" in value:
-        return status, "ONT 2 VOIP"
-    if "MANJA" in value:
-        return status, "MANJA"
-    if "RNA" in value:
-        return status, "RNA"
+        return "UPDATE", "LEPAS DC"
+    if (
+        "CABUT" in value
+        or "PUTUS LANGGANAN" in value
+        or "PUTUS INTERNET" in value
+    ):
+        return "UPDATE", "CABUT"
+    if "2 VOIP" in value or "ONT 2 VOIP" in value or "VOIP ADA 2" in value:
+        return "UPDATE", "ONT 2 VOIP"
+    if (
+        "MANJA" in value
+        or "RESCHEDULE" in value
+        or "JADWAL" in value
+        or "BESOK" in value
+        or "LUAR KOTA" in value
+    ):
+        return "UPDATE", "MANJA"
+    if (
+        "RNA" in value
+        or "TIDAK RESPON" in value
+        or "NO RESPON" in value
+        or "TIDAK ADA RESPON" in value
+        or "TIDAK BISA DIHUBUNGI" in value
+        or "CP NOK" in value
+        or "CP NO WA" in value
+        or "HISTORY NOK" in value
+    ):
+        return "UPDATE", "RNA"
     if "SALBON" in value:
-        return status, "SALBON"
-    return status, "UNSPEC"
+        return "UPDATE", "SALBON"
+    return "UPDATE", "UNSPEC"
 
 
 def _spreadsheet_id() -> str:
@@ -111,9 +140,7 @@ def _sheet_name() -> str:
 def _append_sheet_row(row: list[str]) -> None:
     credentials_path = _credentials_path()
     if not credentials_path.exists():
-        raise RuntimeError(
-            f"Credential Google Sheets belum ada di {credentials_path}."
-        )
+        raise RuntimeError(f"Credential Google Sheets belum ada di {credentials_path}.")
 
     credentials = service_account.Credentials.from_service_account_file(
         str(credentials_path),
@@ -253,10 +280,17 @@ async def _finalize_update(
         return
 
     try:
+        status, rca = _classify(pending["description"])
+        if rca == "DONE":
+            context.user_data.pop(PENDING_KEY, None)
+            await message.reply_text(
+                "ℹ️ Tidak disimpan ke Sheet Kendala karena pekerjaan sudah selesai/DONE."
+            )
+            return
+
         evidence_path = await _download_evidence(
             message, context, pending["service_number"]
         )
-        status, rca = _classify(pending["description"])
         settings = context.application.bot_data["settings"]
         tz = ZoneInfo(settings.timezone)
         now = datetime.now(tz)
@@ -330,6 +364,14 @@ async def handle_update_message(update: Update, context: ContextTypes.DEFAULT_TY
             await message.reply_text("Format: /update INET KETERANGAN")
             return
 
+        _, preliminary_rca = _classify(description)
+        if preliminary_rca == "DONE":
+            context.user_data.pop(PENDING_KEY, None)
+            await message.reply_text(
+                "ℹ️ Tidak disimpan ke Sheet Kendala karena pekerjaan sudah selesai/DONE."
+            )
+            return
+
         db: Database = context.application.bot_data["db"]
         technician = await db.get_technician(user.id)
         if technician is None:
@@ -346,9 +388,7 @@ async def handle_update_message(update: Update, context: ContextTypes.DEFAULT_TY
             return
 
         if reference is None:
-            await message.reply_text(
-                f"❌ INET {inet} tidak ditemukan di Sheet ORDER."
-            )
+            await message.reply_text(f"❌ INET {inet} tidak ditemukan di Sheet ORDER.")
             return
 
         pending = {
