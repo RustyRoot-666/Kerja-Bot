@@ -24,7 +24,7 @@ from services.google_sheet_reference import (
 PENDING_KEY = "pending_kendala_update"
 UPDATE_RE = re.compile(r"^/update(?:@\w+)?\s+(\d{6,})\s+(.+)$", re.IGNORECASE | re.DOTALL)
 CANCEL_RE = re.compile(r"^/batalupdate(?:@\w+)?$", re.IGNORECASE)
-KENDALA_GROUP_CANONICAL = "WORK ORDER MANYAR"
+KENDALA_GROUP_CANONICAL = "REPLACEMENT 200K MANJA"
 HEADERS = [
     "TANGGAL",
     "INET",
@@ -44,19 +44,43 @@ def _canonical_title(value: str | None) -> str:
     return " ".join(re.sub(r"[^A-Z0-9]+", " ", str(value or "").upper()).split())
 
 
-def _group_allowed(chat_id: int, chat_type: str, chat_title: str | None) -> bool:
+def _group_allowed(
+    chat_id: int,
+    chat_type: str,
+    chat_title: str | None,
+    message_thread_id: int | None,
+    is_topic_message: bool,
+) -> bool:
+    """Allow /update only in the Manyar parent supergroup and a forum topic.
+
+    Telegram exposes the parent group name as chat.title, not the topic name.
+    KENDALA_TOPIC_ID can optionally lock this to one specific topic thread.
+    """
     if chat_type not in {"group", "supergroup"}:
         return False
     if _canonical_title(chat_title) != KENDALA_GROUP_CANONICAL:
         return False
 
-    raw = os.getenv("KENDALA_GROUP_ID", "").strip()
-    if not raw:
+    raw_group_id = os.getenv("KENDALA_GROUP_ID", "").strip()
+    if raw_group_id:
+        try:
+            if chat_id != int(raw_group_id):
+                return False
+        except ValueError:
+            logging.error("KENDALA_GROUP_ID tidak valid: %r", raw_group_id)
+            return False
+
+    # WORK ORDER MANYAR adalah topic/forum, bukan chat.title.
+    if not is_topic_message or not message_thread_id:
+        return False
+
+    raw_topic_id = os.getenv("KENDALA_TOPIC_ID", "").strip()
+    if not raw_topic_id:
         return True
     try:
-        return chat_id == int(raw)
+        return message_thread_id == int(raw_topic_id)
     except ValueError:
-        logging.error("KENDALA_GROUP_ID tidak valid: %r", raw)
+        logging.error("KENDALA_TOPIC_ID tidak valid: %r", raw_topic_id)
         return False
 
 
@@ -289,7 +313,7 @@ async def _finalize_update(update: Update, context: ContextTypes.DEFAULT_TYPE, p
         tz = ZoneInfo(settings.timezone)
         now = datetime.now(tz)
         created_at = now.isoformat(timespec="seconds")
-        date_text = now.strftime("%d/%m/%Y %H:%M:%S")
+        date_text = now.strftime("%d/%m/%Y")
         row = [
             date_text,
             pending["service_number"],
@@ -340,7 +364,13 @@ async def handle_update_message(update: Update, context: ContextTypes.DEFAULT_TY
     user = update.effective_user
     if message is None or chat is None or user is None:
         return
-    if not _group_allowed(chat.id, chat.type, chat.title):
+    if not _group_allowed(
+        chat.id,
+        chat.type,
+        chat.title,
+        message.message_thread_id,
+        bool(message.is_topic_message),
+    ):
         return
 
     text = (message.text or message.caption or "").strip()
