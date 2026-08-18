@@ -64,28 +64,29 @@ def _group_allowed(chat_id: int, chat_type: str, chat_title: str | None) -> bool
 
 def _classify(description: str) -> tuple[str, str]:
     value = " ".join(description.upper().split())
+    status = "UPDATE"
     done_keywords = ("SUDAH GANTI", "SELESAI", "DONE", "SUDAH SELESAI")
     if any(keyword in value for keyword in done_keywords):
-        return "CLOSE", "DONE"
+        return status, "DONE"
     if "MENOLAK" in value or "TIDAK MAU" in value:
-        return "OPEN", "MENOLAK"
+        return status, "MENOLAK"
     if "RUKOS" in value or "RUMAH KOSONG" in value:
-        return "OPEN", "RUKOS"
+        return status, "RUKOS"
     if "ALAMAT NOK" in value or "ALAMAT TIDAK" in value or "ALAMAT TIDAK DITEMUKAN" in value:
-        return "OPEN", "ALAMAT NOK"
+        return status, "ALAMAT NOK"
     if "LEPAS DC" in value:
-        return "OPEN", "LEPAS DC"
+        return status, "LEPAS DC"
     if "CABUT" in value:
-        return "OPEN", "CABUT"
+        return status, "CABUT"
     if "2 VOIP" in value or "ONT 2 VOIP" in value:
-        return "OPEN", "ONT 2 VOIP"
+        return status, "ONT 2 VOIP"
     if "MANJA" in value:
-        return "OPEN", "MANJA"
+        return status, "MANJA"
     if "RNA" in value:
-        return "OPEN", "RNA"
+        return status, "RNA"
     if "SALBON" in value:
-        return "OPEN", "SALBON"
-    return "OPEN", "UNSPEC"
+        return status, "SALBON"
+    return status, "UNSPEC"
 
 
 def _spreadsheet_id() -> str:
