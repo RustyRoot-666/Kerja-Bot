@@ -24,7 +24,7 @@ from services.google_sheet_reference import (
 PENDING_KEY = "pending_kendala_update"
 UPDATE_RE = re.compile(r"^/update(?:@\w+)?\s+(\d{6,})\s+(.+)$", re.IGNORECASE | re.DOTALL)
 CANCEL_RE = re.compile(r"^/batalupdate(?:@\w+)?$", re.IGNORECASE)
-KENDALA_GROUP_CANONICAL = "UPDATE KENDALA WO JAGIR"
+KENDALA_GROUP_CANONICAL = "WORK ORDER MANYAR"
 HEADERS = [
     "TANGGAL",
     "INET",
@@ -45,7 +45,7 @@ def _canonical_title(value: str | None) -> str:
 
 
 def _group_allowed(chat_id: int, chat_type: str, chat_title: str | None) -> bool:
-    # /update hanya aktif di grup khusus UPDATE KENDALA WO JAGIR.
+    # /update hanya aktif di grup WORK ORDER MANYAR.
     # Jika KENDALA_GROUP_ID disetel, ID grup juga harus cocok agar lebih aman.
     if chat_type not in {"group", "supergroup"}:
         return False
