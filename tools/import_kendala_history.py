@@ -41,6 +41,11 @@ KENDALA_KEYWORDS = (
     "TIDAK BISA DIHUBUNGI",
     "PUTUS LANGGANAN",
     "PUTUS INTERNET",
+    "LUAR KOTA",
+    "SUDAH DIGANTI",
+    "SUDAH GANTI",
+    "ONT OFF",
+    "NO INET DAN SN BEDA",
 )
 
 IGNORE_MARKERS = (
@@ -122,7 +127,13 @@ def compact_description(text: str, inet: str) -> str:
 
 def classify(description: str) -> tuple[str, str]:
     value = " ".join(description.upper().split())
-    done_keywords = ("SUDAH GANTI", "SELESAI", "DONE", "SUDAH SELESAI")
+    done_keywords = (
+        "SUDAH GANTI",
+        "SUDAH DIGANTI",
+        "SELESAI",
+        "DONE",
+        "SUDAH SELESAI",
+    )
     if any(keyword in value for keyword in done_keywords):
         return "CLOSE", "DONE"
     if "MENOLAK" in value or "TIDAK MAU" in value or "TIDAK BERKENAN" in value:
@@ -145,7 +156,13 @@ def classify(description: str) -> tuple[str, str]:
         return "OPEN", "CABUT"
     if "2 VOIP" in value or "ONT 2 VOIP" in value or "VOIP ADA 2" in value:
         return "OPEN", "ONT 2 VOIP"
-    if "MANJA" in value or "RESCHEDULE" in value or "JADWAL" in value or "BESOK" in value:
+    if (
+        "MANJA" in value
+        or "RESCHEDULE" in value
+        or "JADWAL" in value
+        or "BESOK" in value
+        or "LUAR KOTA" in value
+    ):
         return "OPEN", "MANJA"
     if (
         "RNA" in value
