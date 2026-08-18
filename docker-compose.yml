@@ -8,3 +8,5 @@ services:
     volumes:
       - ./database:/app/database
       - ./logs:/app/logs
+      - ./evidence:/app/evidence
+      - ./secrets:/app/secrets:ro
