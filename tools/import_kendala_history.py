@@ -127,6 +127,7 @@ def compact_description(text: str, inet: str) -> str:
 
 def classify(description: str) -> tuple[str, str]:
     value = " ".join(description.upper().split())
+    status = "UPDATE"
     done_keywords = (
         "SUDAH GANTI",
         "SUDAH DIGANTI",
@@ -135,27 +136,27 @@ def classify(description: str) -> tuple[str, str]:
         "SUDAH SELESAI",
     )
     if any(keyword in value for keyword in done_keywords):
-        return "CLOSE", "DONE"
+        return status, "DONE"
     if "MENOLAK" in value or "TIDAK MAU" in value or "TIDAK BERKENAN" in value:
-        return "OPEN", "MENOLAK"
+        return status, "MENOLAK"
     if "RUKOS" in value or "RUMAH KOSONG" in value or "TIDAK ADA PENGHUNI" in value:
-        return "OPEN", "RUKOS"
+        return status, "RUKOS"
     if (
         "ALAMAT NOK" in value
         or "ALAMAT TIDAK" in value
         or "ALAMAT TIDAK DITEMUKAN" in value
     ):
-        return "OPEN", "ALAMAT NOK"
+        return status, "ALAMAT NOK"
     if "LEPAS DC" in value:
-        return "OPEN", "LEPAS DC"
+        return status, "LEPAS DC"
     if (
         "CABUT" in value
         or "PUTUS LANGGANAN" in value
         or "PUTUS INTERNET" in value
     ):
-        return "OPEN", "CABUT"
+        return status, "CABUT"
     if "2 VOIP" in value or "ONT 2 VOIP" in value or "VOIP ADA 2" in value:
-        return "OPEN", "ONT 2 VOIP"
+        return status, "ONT 2 VOIP"
     if (
         "MANJA" in value
         or "RESCHEDULE" in value
@@ -163,7 +164,7 @@ def classify(description: str) -> tuple[str, str]:
         or "BESOK" in value
         or "LUAR KOTA" in value
     ):
-        return "OPEN", "MANJA"
+        return status, "MANJA"
     if (
         "RNA" in value
         or "TIDAK RESPON" in value
@@ -174,10 +175,10 @@ def classify(description: str) -> tuple[str, str]:
         or "CP NO WA" in value
         or "HISTORY NOK" in value
     ):
-        return "OPEN", "RNA"
+        return status, "RNA"
     if "SALBON" in value:
-        return "OPEN", "SALBON"
-    return "OPEN", "UNSPEC"
+        return status, "SALBON"
+    return status, "UNSPEC"
 
 
 def _parse_message_date(value: str) -> datetime | None:
