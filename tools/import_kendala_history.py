@@ -126,7 +126,8 @@ def _clean_segment(segment: str, inet: str) -> str:
     # Setelah nomor dibuang, singkirkan label metadata yang tersisa.
     value = re.sub(r"\b(?:ID|I['’]?D|NO)?\s*PELANGGAN\s*[:\-]?", " ", value, flags=re.IGNORECASE)
     value = re.sub(r"\b(?:NO\s*)?(?:INET|SERVICE)\s*[:\-]?", " ", value, flags=re.IGNORECASE)
-    value = re.sub(r"^\s*(?:KENDALA|KETERANGAN)\s*[:\-]?\s*", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"^\s*(?:ID|I['’]?D)\s*[:\-]?\s*", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"^\s*(?:KENDALA|KETERANGAN|VISIT)\s*[:\-]?\s*", "", value, flags=re.IGNORECASE)
     value = re.sub(r"\s+", " ", value).strip(" |,:;-~")
 
     if not value:
@@ -517,7 +518,6 @@ def main() -> None:
     print(f"Baris INET diperbarui  : {updated}")
     print(f"Total aktif diolah     : {inserted + updated}")
     print("Satu INET hanya memiliki satu baris; apply ulang aman karena baris lama akan diperbarui.")
-
 
 if __name__ == "__main__":
     main()
