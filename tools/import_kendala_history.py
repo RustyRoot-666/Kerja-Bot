@@ -36,6 +36,9 @@ KENDALA_KEYWORDS = (
     "TIDAK RESPON",
     "NO RESPON",
     "TIDAK ADA RESPON",
+    "TIDAK BISA DIHUBUNGI",
+    "PUTUS LANGGANAN",
+    "PUTUS INTERNET",
 )
 
 IGNORE_MARKERS = (
@@ -132,13 +135,25 @@ def classify(description: str) -> tuple[str, str]:
         return "OPEN", "ALAMAT NOK"
     if "LEPAS DC" in value:
         return "OPEN", "LEPAS DC"
-    if "CABUT" in value:
+    if (
+        "CABUT" in value
+        or "PUTUS LANGGANAN" in value
+        or "PUTUS INTERNET" in value
+    ):
         return "OPEN", "CABUT"
     if "2 VOIP" in value or "ONT 2 VOIP" in value or "VOIP ADA 2" in value:
         return "OPEN", "ONT 2 VOIP"
     if "MANJA" in value or "RESCHEDULE" in value or "JADWAL" in value or "BESOK" in value:
         return "OPEN", "MANJA"
-    if "RNA" in value or "TIDAK RESPON" in value or "NO RESPON" in value or "TIDAK ADA RESPON" in value:
+    if (
+        "RNA" in value
+        or "TIDAK RESPON" in value
+        or "NO RESPON" in value
+        or "TIDAK ADA RESPON" in value
+        or "TIDAK BISA DIHUBUNGI" in value
+        or "CP NOK" in value
+        or "HISTORY NOK" in value
+    ):
         return "OPEN", "RNA"
     if "SALBON" in value:
         return "OPEN", "SALBON"
