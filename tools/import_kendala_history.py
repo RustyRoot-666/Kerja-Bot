@@ -61,10 +61,8 @@ def flatten_text(value: Any) -> str:
         for item in value:
             if isinstance(item, str):
                 parts.append(item)
-            elif isinstance(item, dict):
-                text = item.get("text")
-                if isinstance(text, str):
-                    parts.append(text)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
         return "".join(parts)
     return ""
 
@@ -100,8 +98,8 @@ def _has_issue_meaning(value: str) -> bool:
 
 def _looks_like_order_metadata(value: str) -> bool:
     upper = f" {' '.join(value.upper().split())} "
-    marker_hits = sum(1 for marker in ORDER_METADATA_MARKERS if marker in upper)
-    if marker_hits >= 2:
+    hits = sum(1 for marker in ORDER_METADATA_MARKERS if marker in upper)
+    if hits >= 2:
         return True
     if re.search(r"\bINC\d{6,}\b", upper) and re.search(r"\b(?:100|150|200|300)\b", upper):
         return True
@@ -126,14 +124,8 @@ def _clean_segment(segment: str, inet: str) -> str:
         return ""
 
     escaped = re.escape(inet)
-    value = re.sub(
-        rf"\b(?:ID|I['’]?D|NO)?\s*PELANGGAN\s*[:\-]?\s*{escaped}\b",
-        " ", original, flags=re.IGNORECASE,
-    )
-    value = re.sub(
-        rf"\b(?:NO\s*)?(?:INET|SERVICE)\s*[:\-]?\s*{escaped}\b",
-        " ", value, flags=re.IGNORECASE,
-    )
+    value = re.sub(rf"\b(?:ID|I['’]?D|NO)?\s*PELANGGAN\s*[:\-]?\s*{escaped}\b", " ", original, flags=re.IGNORECASE)
+    value = re.sub(rf"\b(?:NO\s*)?(?:INET|SERVICE)\s*[:\-]?\s*{escaped}\b", " ", value, flags=re.IGNORECASE)
     value = re.sub(rf"\b{escaped}\b", " ", value)
     value = re.sub(r"\b(?:ID|I['’]?D|NO)?\s*PELANGGAN\s*[:\-]?", " ", value, flags=re.IGNORECASE)
     value = re.sub(r"\b(?:NO\s*)?(?:INET|SERVICE)\s*[:\-]?", " ", value, flags=re.IGNORECASE)
@@ -141,41 +133,23 @@ def _clean_segment(segment: str, inet: str) -> str:
     value = re.sub(r"^\s*(?:KENDALA|KETERANGAN|VISIT)\s*[:\-]?\s*", "", value, flags=re.IGNORECASE)
     value = re.sub(r"\s+", " ", value).strip(" |,:;-~")
 
-    if not value:
+    if not value or _looks_like_order_metadata(value):
         return ""
 
-    # Pesan forward/copy sering berisi satu baris order penuh setelah keterangannya.
-    # Jangan izinkan metadata ORDER masuk ke kolom KETERANGAN.
-    if _looks_like_order_metadata(value):
-        return ""
-
-    # Buang fragmen yang jelas berupa identitas/alamat pelanggan, bukan kendala.
     if not _has_issue_meaning(value):
-        if re.search(
-            r"\b(?:SBY|SURABAYA|JL\.?|JALAN|KEPUTIH|MULYOREJO|KERTAJAYA|NGINDEN|MOJO|SUKOLILO|MANYAR|DHARMA|SUTOREJO|JOJORAN|KEDUNG|KALIWARON|LAGUNA|VILLA|ROYAL)\b",
-            value,
-            flags=re.IGNORECASE,
-        ):
+        if re.search(r"\b(?:SBY|SURABAYA|JL\.?|JALAN|KEPUTIH|MULYOREJO|KERTAJAYA|NGINDEN|MOJO|SUKOLILO|MANYAR|DHARMA|SUTOREJO|JOJORAN|KEDUNG|KALIWARON|LAGUNA|VILLA|ROYAL)\b", value, flags=re.IGNORECASE):
             return ""
         if re.search(r"\b628\d{7,13}\b", value):
             return ""
-
     return value
 
 
 def compact_description(text: str, inet: str) -> str:
     lines = [" ".join(line.split()) for line in text.splitlines() if line.strip()]
     raw_parts: list[str] = []
-
     for line in lines:
         upper = line.upper()
-        if upper.startswith("TYPE :") or upper.startswith("NAMA / CP :"):
-            continue
-        if upper.startswith("ALAMAT :") or upper.startswith("NAMA ODP :"):
-            continue
-        if upper.startswith("REDAMAN :") or upper.startswith("LINK SCC :"):
-            continue
-        if upper.startswith("TEKNISI :"):
+        if upper.startswith(("TYPE :", "NAMA / CP :", "ALAMAT :", "NAMA ODP :", "REDAMAN :", "LINK SCC :", "TEKNISI :")):
             continue
         if "KETERANGAN :" in upper:
             line = re.split(r"KETERANGAN\s*:\s*", line, flags=re.IGNORECASE, maxsplit=1)[-1]
@@ -187,18 +161,14 @@ def compact_description(text: str, inet: str) -> str:
         if value and value not in cleaned:
             cleaned.append(value)
 
-    # Jika ada lebih dari satu fragmen, prioritaskan fragmen yang benar-benar
-    # mengandung makna kendala dan jangan gabungkan metadata lain.
     issue_parts = [part for part in cleaned if _has_issue_meaning(part)]
     selected = issue_parts if issue_parts else cleaned
-    description = " | ".join(selected).strip(" |")
-    return description[:500]
+    return " | ".join(selected).strip(" |")[:500]
 
 
 def classify(description: str) -> tuple[str, str]:
     value = " ".join(description.upper().split())
-    done_keywords = ("SUDAH GANTI", "SUDAH DIGANTI", "SELESAI", "DONE", "SUDAH SELESAI")
-    if any(keyword in value for keyword in done_keywords):
+    if any(keyword in value for keyword in ("SUDAH GANTI", "SUDAH DIGANTI", "SELESAI", "DONE", "SUDAH SELESAI")):
         return "CLOSE", "DONE"
     if "MENOLAK" in value or "TIDAK MAU" in value or "TIDAK BERKENAN" in value:
         return "UPDATE", "MENOLAK"
@@ -214,11 +184,7 @@ def classify(description: str) -> tuple[str, str]:
         return "UPDATE", "ONT 2 VOIP"
     if "MANJA" in value or "RESCHEDULE" in value or "JADWAL" in value or "BESOK" in value or "LUAR KOTA" in value:
         return "UPDATE", "MANJA"
-    if (
-        "RNA" in value or "TIDAK RESPON" in value or "NO RESPON" in value
-        or "TIDAK ADA RESPON" in value or "TIDAK BISA DIHUBUNGI" in value
-        or "CP NOK" in value or "CP NO WA" in value or "HISTORY NOK" in value
-    ):
+    if ("RNA" in value or "TIDAK RESPON" in value or "NO RESPON" in value or "TIDAK ADA RESPON" in value or "TIDAK BISA DIHUBUNGI" in value or "CP NOK" in value or "CP NO WA" in value or "HISTORY NOK" in value):
         return "UPDATE", "RNA"
     if "SALBON" in value:
         return "UPDATE", "SALBON"
@@ -232,11 +198,7 @@ def _parse_message_date(value: str) -> datetime | None:
         return None
 
 
-def scan(
-    export_path: Path,
-    since: datetime | None = None,
-    until: datetime | None = None,
-) -> tuple[dict[str, int], list[dict[str, Any]], Counter[str]]:
+def scan(export_path: Path, since: datetime | None = None, until: datetime | None = None) -> tuple[dict[str, int], list[dict[str, Any]], Counter[str]]:
     data = json.loads(export_path.read_text(encoding="utf-8"))
     messages = data.get("messages", [])
     latest_by_inet: dict[str, dict[str, Any]] = {}
@@ -268,7 +230,6 @@ def scan(
             if rca == "DONE":
                 skipped_done += 1
                 continue
-
             total_active_updates += 1
             item = {
                 "message_id": message.get("id"),
@@ -287,8 +248,6 @@ def scan(
                 latest_by_inet[inet] = item
 
     candidates = sorted(latest_by_inet.values(), key=lambda item: item["date"])
-    rca_counts = Counter(item["rca"] for item in candidates)
-    with_evidence = sum(1 for item in candidates if item["photo"])
     stats = {
         "messages": len(messages),
         "messages_in_range": messages_in_range,
@@ -297,9 +256,9 @@ def scan(
         "older_updates_skipped": total_active_updates - len(candidates),
         "candidates": len(candidates),
         "unique_inets": len(candidates),
-        "with_evidence_messages": with_evidence,
+        "with_evidence_messages": sum(1 for item in candidates if item["photo"]),
     }
-    return stats, candidates, rca_counts
+    return stats, candidates, Counter(item["rca"] for item in candidates)
 
 
 def _repo_root() -> Path:
@@ -311,10 +270,7 @@ def _credentials_path() -> Path:
     options: list[Path] = []
     if raw:
         options.append(Path(raw))
-    options.extend([
-        _repo_root() / "secrets" / "google-service-account.json",
-        Path("/app/secrets/google-service-account.json"),
-    ])
+    options.extend([_repo_root() / "secrets" / "google-service-account.json", Path("/app/secrets/google-service-account.json")])
     for path in options:
         if path.exists():
             return path
@@ -341,12 +297,7 @@ def _registered_technicians() -> dict[int, str]:
 
 def _telegram_id_from_export(value: Any) -> int | None:
     match = re.fullmatch(r"user(\d+)", str(value or "").strip(), flags=re.IGNORECASE)
-    if not match:
-        return None
-    try:
-        return int(match.group(1))
-    except ValueError:
-        return None
+    return int(match.group(1)) if match else None
 
 
 def _sheet_name() -> str:
@@ -361,11 +312,9 @@ def _copy_history_evidence(export_path: Path, item: dict[str, Any]) -> str:
     if not source.exists():
         return "-"
     parsed = _parse_message_date(item["date"]) or datetime.now()
-    root = _repo_root() / "evidence"
-    directory = root / f"{parsed.year:04d}" / f"{parsed.month:02d}" / item["inet"]
+    directory = _repo_root() / "evidence" / f"{parsed.year:04d}" / f"{parsed.month:02d}" / item["inet"]
     directory.mkdir(parents=True, exist_ok=True)
-    suffix = source.suffix.lower() or ".jpg"
-    destination = directory / f"history_{item['message_id']}{suffix}"
+    destination = directory / f"history_{item['message_id']}{source.suffix.lower() or '.jpg'}"
     if not destination.exists():
         shutil.copy2(source, destination)
     return destination.relative_to(_repo_root()).as_posix()
@@ -376,11 +325,28 @@ def _format_date(value: str) -> str:
     return parsed.strftime("%d/%m/%Y") if parsed else value
 
 
-def _build_rows(
-    export_path: Path,
-    candidates: list[dict[str, Any]],
-    apply: bool,
-) -> tuple[list[list[str]], list[str]]:
+def _clean_sheet_description(description: str, customer_name: str) -> str:
+    value = " ".join(str(description or "").split())
+    if not value:
+        return "-"
+
+    # Mention Telegram bukan bagian dari inti kendala.
+    value = re.sub(r"(?<!\w)@[A-Za-z0-9_]+", " ", value)
+
+    # Nama pelanggan sudah memiliki kolom sendiri, jadi buang dari keterangan.
+    name = " ".join(str(customer_name or "").split()).strip()
+    if name:
+        value = re.sub(rf"(?<!\w){re.escape(name)}(?!\w)", " ", value, flags=re.IGNORECASE)
+
+    # Emoji/simbol dekoratif export Telegram tidak perlu disimpan di Sheet.
+    value = "".join(ch for ch in value if ord(ch) < 0x1F000)
+    value = re.sub(r"\s+", " ", value)
+    value = re.sub(r"\s+([,.;:])", r"\1", value)
+    value = value.strip(" |,:;-~")
+    return value or "-"
+
+
+def _build_rows(export_path: Path, candidates: list[dict[str, Any]], apply: bool) -> tuple[list[list[str]], list[str]]:
     statuses = download_statuses()
     technician_names = _registered_technicians()
     rows: list[list[str]] = []
@@ -400,6 +366,7 @@ def _build_rows(
         if not technician_name:
             technician_name = str(item.get("from") or "").strip()
 
+        description = _clean_sheet_description(item["description"], reference.customer_name or "")
         rows.append([
             _format_date(item["date"]),
             item["inet"],
@@ -410,41 +377,28 @@ def _build_rows(
             technician_name,
             "UPDATE",
             item["rca"],
-            item["description"] or "-",
+            description,
             evidence,
         ])
     return rows, missing
 
 
 def _apply_rows(rows: list[list[str]]) -> tuple[int, int]:
-    credentials = service_account.Credentials.from_service_account_file(
-        str(_credentials_path()),
-        scopes=["https://www.googleapis.com/auth/spreadsheets"],
-    )
+    credentials = service_account.Credentials.from_service_account_file(str(_credentials_path()), scopes=["https://www.googleapis.com/auth/spreadsheets"])
     service = build("sheets", "v4", credentials=credentials, cache_discovery=False)
     spreadsheet_id = os.getenv("GOOGLE_SPREADSHEET_ID", DEFAULT_SPREADSHEET_ID).strip() or DEFAULT_SPREADSHEET_ID
     sheet = _sheet_name().replace("'", "''")
     prefix = f"'{sheet}'"
 
-    current = service.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id, range=f"{prefix}!A:K"
-    ).execute().get("values", [])
-
+    current = service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=f"{prefix}!A:K").execute().get("values", [])
     if not current:
-        service.spreadsheets().values().update(
-            spreadsheetId=spreadsheet_id,
-            range=f"{prefix}!A1:K1",
-            valueInputOption="RAW",
-            body={"values": [HEADERS]},
-        ).execute()
+        service.spreadsheets().values().update(spreadsheetId=spreadsheet_id, range=f"{prefix}!A1:K1", valueInputOption="RAW", body={"values": [HEADERS]}).execute()
         current = [HEADERS]
 
     existing_rows: dict[str, int] = {}
     for index, row in enumerate(current[1:], start=2):
-        if len(row) > 1:
-            inet = str(row[1]).strip()
-            if inet:
-                existing_rows[inet] = index
+        if len(row) > 1 and str(row[1]).strip():
+            existing_rows[str(row[1]).strip()] = index
 
     updates: list[dict[str, Any]] = []
     appends: list[list[str]] = []
@@ -456,25 +410,14 @@ def _apply_rows(rows: list[list[str]]) -> tuple[int, int]:
             appends.append(row)
 
     if updates:
-        service.spreadsheets().values().batchUpdate(
-            spreadsheetId=spreadsheet_id,
-            body={"valueInputOption": "RAW", "data": updates},
-        ).execute()
+        service.spreadsheets().values().batchUpdate(spreadsheetId=spreadsheet_id, body={"valueInputOption": "RAW", "data": updates}).execute()
     if appends:
-        service.spreadsheets().values().append(
-            spreadsheetId=spreadsheet_id,
-            range=f"{prefix}!A:K",
-            valueInputOption="RAW",
-            insertDataOption="INSERT_ROWS",
-            body={"values": appends},
-        ).execute()
+        service.spreadsheets().values().append(spreadsheetId=spreadsheet_id, range=f"{prefix}!A:K", valueInputOption="RAW", insertDataOption="INSERT_ROWS", body={"values": appends}).execute()
     return len(appends), len(updates)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Import history WORK ORDER MANYAR ke Sheet Kendala, 1 INET = update terbaru."
-    )
+    parser = argparse.ArgumentParser(description="Import history WORK ORDER MANYAR ke Sheet Kendala, 1 INET = update terbaru.")
     parser.add_argument("export_json", type=Path)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true", help="Preview aman, tidak menulis apa pun.")
@@ -519,12 +462,15 @@ def main() -> None:
         print()
 
     limit = max(0, args.limit)
+    row_by_inet = {row[1]: row for row in rows}
     for idx, item in enumerate(candidates[:limit], 1):
+        preview_row = row_by_inet.get(item["inet"])
+        description = preview_row[9] if preview_row else item["description"] or "-"
         print(f"[{idx}] {item['date']} | {item['from']}")
         print(f"INET    : {item['inet']}")
         print(f"STATUS  : {item['status']}")
         print(f"RCA     : {item['rca']}")
-        print(f"KENDALA : {item['description'] or '-'}")
+        print(f"KENDALA : {description}")
         print(f"EVIDEN  : {item['photo'] or '-'}")
         print()
 
