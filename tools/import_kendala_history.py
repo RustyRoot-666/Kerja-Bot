@@ -34,7 +34,7 @@ KENDALA_KEYWORDS = (
     "RESCHEDULE", "JADWAL", "BESOK", "TIDAK RESPON", "NO RESPON",
     "TIDAK ADA RESPON", "TIDAK BISA DIHUBUNGI", "PUTUS LANGGANAN",
     "PUTUS INTERNET", "LUAR KOTA", "SUDAH DIGANTI", "SUDAH GANTI",
-    "ONT OFF", "NO INET DAN SN BEDA",
+    "ONT OFF", "NO INET DAN SN BEDA", "2 VOIP", "VOIP ADA 2",
 )
 
 IGNORE_MARKERS = (
@@ -47,6 +47,7 @@ HEADERS = [
 ]
 
 
+# ---------- Telegram export parsing ----------
 def flatten_text(value: Any) -> str:
     if isinstance(value, str):
         return value
@@ -82,41 +83,70 @@ def extract_inets(text: str) -> list[str]:
 
 def looks_like_kendala(text: str) -> bool:
     upper = " ".join(text.upper().split())
-    if not upper:
-        return False
-    if any(marker in upper for marker in IGNORE_MARKERS):
+    if not upper or any(marker in upper for marker in IGNORE_MARKERS):
         return False
     return any(keyword in upper for keyword in KENDALA_KEYWORDS)
 
 
-def _clean_history_prefix(value: str, inet: str) -> str:
-    text = value.strip()
+def _has_issue_meaning(value: str) -> bool:
+    upper = " ".join(value.upper().split())
+    return any(keyword in upper for keyword in KENDALA_KEYWORDS)
+
+
+def _clean_segment(segment: str, inet: str) -> str:
+    """Buang metadata history tanpa membuang isi kendalanya."""
+    original = " ".join(segment.split()).strip()
+    if not original:
+        return ""
+
+    upper = original.upper()
+    if re.fullmatch(r"(?:ID|I['’]?D)?\s*PELANGGAN\s*[:\-]?", original, flags=re.IGNORECASE):
+        return ""
+    if re.fullmatch(r"(?:NO\s*)?(?:INET|SERVICE)\s*[:\-]?", original, flags=re.IGNORECASE):
+        return ""
+    if re.match(r"^(?:NAMA|NAMA PELANGGAN|ALAMAT|CP|TEKNISI|TYPE|NAMA ODP|REDAMAN|LINK SCC)\s*:", original, flags=re.IGNORECASE):
+        return ""
+    if upper in {"VISIT", "KENDALA", "KETERANGAN"}:
+        return ""
+
+    had_inet = inet in original
     escaped = re.escape(inet)
-    patterns = (
-        rf"^\s*(?:ID|I['’]?D|NO)?\s*PELANGGAN\s*[:\-]?\s*{escaped}\s*[|,:;\-]*\s*",
-        rf"^\s*(?:NO\s*)?INET\s*[:\-]?\s*{escaped}\s*[|,:;\-]*\s*",
-        rf"^\s*(?:NO\s*)?SERVICE\s*[:\-]?\s*{escaped}\s*[|,:;\-]*\s*",
-        rf"^\s*{escaped}\s*[|,:;\-]*\s*",
+
+    # Hapus label + INET di mana pun posisinya.
+    value = re.sub(
+        rf"\b(?:ID|I['’]?D|NO)?\s*PELANGGAN\s*[:\-]?\s*{escaped}\b",
+        " ", original, flags=re.IGNORECASE,
     )
-    changed = True
-    while changed:
-        changed = False
-        for pattern in patterns:
-            cleaned = re.sub(pattern, "", text, flags=re.IGNORECASE)
-            if cleaned != text:
-                text = cleaned.strip()
-                changed = True
-    text = re.sub(r"^\s*(?:KENDALA|KETERANGAN)\s*[:\-]?\s*", "", text, flags=re.IGNORECASE)
-    return text.strip(" |,:;-")
+    value = re.sub(
+        rf"\b(?:NO\s*)?(?:INET|SERVICE)\s*[:\-]?\s*{escaped}\b",
+        " ", value, flags=re.IGNORECASE,
+    )
+    value = re.sub(rf"\b{escaped}\b", " ", value)
+
+    # Setelah nomor dibuang, singkirkan label metadata yang tersisa.
+    value = re.sub(r"\b(?:ID|I['’]?D|NO)?\s*PELANGGAN\s*[:\-]?", " ", value, flags=re.IGNORECASE)
+    value = re.sub(r"\b(?:NO\s*)?(?:INET|SERVICE)\s*[:\-]?", " ", value, flags=re.IGNORECASE)
+    value = re.sub(r"^\s*(?:KENDALA|KETERANGAN)\s*[:\-]?\s*", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"\s+", " ", value).strip(" |,:;-~")
+
+    if not value:
+        return ""
+
+    # Jika segmen tadinya hanya INET + alamat/nama metadata, jangan ikutkan.
+    if had_inet and not _has_issue_meaning(value):
+        address_like = bool(re.search(r"\b(?:SBY|SURABAYA|JL\.?|JALAN|KEPUTIH|MULYOREJO|KERTAJAYA|NGINDEN|MOJO|SUKOLILO|MANYAR|DHARMA|SUTOREJO|JOJORAN|KEDUNG|KALIWARON)\b", value, flags=re.IGNORECASE))
+        if address_like:
+            return ""
+
+    return value
 
 
 def compact_description(text: str, inet: str) -> str:
     lines = [" ".join(line.split()) for line in text.splitlines() if line.strip()]
-    cleaned: list[str] = []
+    raw_parts: list[str] = []
+
     for line in lines:
         upper = line.upper()
-        if inet in line and ("NO INET" in upper or "INET / VOIP" in upper or "NO SERVICE" in upper):
-            continue
         if upper.startswith("TYPE :") or upper.startswith("NAMA / CP :"):
             continue
         if upper.startswith("ALAMAT :") or upper.startswith("NAMA ODP :"):
@@ -127,9 +157,15 @@ def compact_description(text: str, inet: str) -> str:
             continue
         if "KETERANGAN :" in upper:
             line = re.split(r"KETERANGAN\s*:\s*", line, flags=re.IGNORECASE, maxsplit=1)[-1]
-        cleaned.append(line)
+        raw_parts.extend(part for part in re.split(r"\s*\|\s*", line) if part.strip())
+
+    cleaned: list[str] = []
+    for part in raw_parts:
+        value = _clean_segment(part, inet)
+        if value and value not in cleaned:
+            cleaned.append(value)
+
     description = " | ".join(cleaned).strip(" |")
-    description = _clean_history_prefix(description, inet)
     return description[:500]
 
 
@@ -170,7 +206,11 @@ def _parse_message_date(value: str) -> datetime | None:
         return None
 
 
-def scan(export_path: Path, since: datetime | None = None, until: datetime | None = None) -> tuple[dict[str, int], list[dict[str, Any]], Counter[str]]:
+def scan(
+    export_path: Path,
+    since: datetime | None = None,
+    until: datetime | None = None,
+) -> tuple[dict[str, int], list[dict[str, Any]], Counter[str]]:
     data = json.loads(export_path.read_text(encoding="utf-8"))
     messages = data.get("messages", [])
     latest_by_inet: dict[str, dict[str, Any]] = {}
@@ -202,6 +242,7 @@ def scan(export_path: Path, since: datetime | None = None, until: datetime | Non
             if rca == "DONE":
                 skipped_done += 1
                 continue
+
             total_active_updates += 1
             item = {
                 "message_id": message.get("id"),
@@ -235,13 +276,14 @@ def scan(export_path: Path, since: datetime | None = None, until: datetime | Non
     return stats, candidates, rca_counts
 
 
+# ---------- Enrichment + Google Sheets ----------
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
 def _credentials_path() -> Path:
     raw = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "").strip()
-    options = []
+    options: list[Path] = []
     if raw:
         options.append(Path(raw))
     options.extend([
@@ -257,9 +299,7 @@ def _credentials_path() -> Path:
 def _database_path() -> Path:
     raw = os.getenv("DATABASE_PATH", "/app/database/bot.sqlite3").strip()
     path = Path(raw)
-    if not path.is_absolute():
-        path = _repo_root() / path
-    return path
+    return path if path.is_absolute() else _repo_root() / path
 
 
 def _registered_technicians() -> dict[int, str]:
@@ -311,16 +351,22 @@ def _format_date(value: str) -> str:
     return parsed.strftime("%d/%m/%Y") if parsed else value
 
 
-def _build_rows(export_path: Path, candidates: list[dict[str, Any]], apply: bool) -> tuple[list[list[str]], list[str]]:
+def _build_rows(
+    export_path: Path,
+    candidates: list[dict[str, Any]],
+    apply: bool,
+) -> tuple[list[list[str]], list[str]]:
     statuses = download_statuses()
     technician_names = _registered_technicians()
     rows: list[list[str]] = []
     missing: list[str] = []
+
     for item in candidates:
         reference = status_for_order(statuses, "", item["inet"])
         if reference is None:
             missing.append(item["inet"])
             continue
+
         evidence = _copy_history_evidence(export_path, item) if apply else (item["photo"] or "-")
         telegram_id = _telegram_id_from_export(item.get("from_id"))
         technician_name = technician_names.get(telegram_id or -1, "")
@@ -328,6 +374,7 @@ def _build_rows(export_path: Path, candidates: list[dict[str, Any]], apply: bool
             technician_name = (reference.assigned_technician or "").strip()
         if not technician_name:
             technician_name = str(item.get("from") or "").strip()
+
         rows.append([
             _format_date(item["date"]),
             item["inet"],
@@ -346,7 +393,8 @@ def _build_rows(export_path: Path, candidates: list[dict[str, Any]], apply: bool
 
 def _apply_rows(rows: list[list[str]]) -> tuple[int, int]:
     credentials = service_account.Credentials.from_service_account_file(
-        str(_credentials_path()), scopes=["https://www.googleapis.com/auth/spreadsheets"]
+        str(_credentials_path()),
+        scopes=["https://www.googleapis.com/auth/spreadsheets"],
     )
     service = build("sheets", "v4", credentials=credentials, cache_discovery=False)
     spreadsheet_id = os.getenv("GOOGLE_SPREADSHEET_ID", DEFAULT_SPREADSHEET_ID).strip() or DEFAULT_SPREADSHEET_ID
@@ -373,11 +421,10 @@ def _apply_rows(rows: list[list[str]]) -> tuple[int, int]:
             if inet:
                 existing_rows[inet] = index
 
-    updates = []
-    appends = []
+    updates: list[dict[str, Any]] = []
+    appends: list[list[str]] = []
     for row in rows:
-        inet = row[1]
-        row_number = existing_rows.get(inet)
+        row_number = existing_rows.get(row[1])
         if row_number:
             updates.append({"range": f"{prefix}!A{row_number}:K{row_number}", "values": [row]})
         else:
@@ -399,8 +446,11 @@ def _apply_rows(rows: list[list[str]]) -> tuple[int, int]:
     return len(appends), len(updates)
 
 
+# ---------- CLI ----------
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Import history WORK ORDER MANYAR ke Sheet Kendala, 1 INET = update terbaru.")
+    parser = argparse.ArgumentParser(
+        description="Import history WORK ORDER MANYAR ke Sheet Kendala, 1 INET = update terbaru."
+    )
     parser.add_argument("export_json", type=Path)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true", help="Preview aman, tidak menulis apa pun.")
