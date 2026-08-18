@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from database import Database, Technician
+from database import Database
 
 
 ASSIGN_GROUP_CANONICAL = "REPLACEMENT NTE MANYAR"
@@ -30,11 +32,105 @@ def _extract_inets(text: str) -> list[str]:
     return result
 
 
-def _format_assign(inets: list[str], technician: Technician) -> str:
-    return "\n".join([
-        *inets,
-        f"moban assign lensa chat, {technician.name} ({technician.nik})",
-    ])
+def _format_assign(inets: list[str], technician_name: str, technician_nik: str) -> str:
+    footer = f"moban assign lensa chat, {technician_name.upper()} ({technician_nik})"
+    return "\n".join([*inets, footer])
+
+
+def _utc_iso(value: datetime) -> str:
+    return value.astimezone(timezone.utc).replace(tzinfo=None, microsecond=0).isoformat() + "Z"
+
+
+def _ensure_seen_table(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS assign_group_seen (
+            chat_id INTEGER NOT NULL,
+            service_number TEXT NOT NULL,
+            first_seen_at TEXT NOT NULL,
+            source_message_id INTEGER,
+            PRIMARY KEY (chat_id, service_number)
+        )
+        """
+    )
+
+
+async def _remember_group_inets(
+    db: Database,
+    chat_id: int,
+    inets: list[str],
+    message_id: int | None,
+) -> None:
+    if not inets:
+        return
+    now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    async with db._lock:
+        with db.connection() as conn:
+            _ensure_seen_table(conn)
+            conn.executemany(
+                """
+                INSERT OR IGNORE INTO assign_group_seen (
+                    chat_id, service_number, first_seen_at, source_message_id
+                ) VALUES (?, ?, ?, ?)
+                """,
+                [(chat_id, inet, now, message_id) for inet in inets],
+            )
+
+
+async def _already_seen(db: Database, chat_id: int, inets: list[str]) -> set[str]:
+    if not inets:
+        return set()
+    placeholders = ",".join("?" for _ in inets)
+    async with db._lock:
+        with db.connection() as conn:
+            _ensure_seen_table(conn)
+            rows = conn.execute(
+                f"""
+                SELECT service_number
+                FROM assign_group_seen
+                WHERE chat_id = ?
+                  AND service_number IN ({placeholders})
+                """,
+                [chat_id, *inets],
+            ).fetchall()
+    return {str(row["service_number"]) for row in rows}
+
+
+async def _today_technician_inets(
+    db: Database,
+    telegram_id: int,
+    timezone_name: str,
+) -> list[str]:
+    tz = ZoneInfo(timezone_name)
+    now_local = datetime.now(tz)
+    start_local = datetime.combine(now_local.date(), time.min, tzinfo=tz)
+    end_local = start_local + timedelta(days=1)
+    start_utc = _utc_iso(start_local)
+    end_utc = _utc_iso(end_local)
+
+    async with db._lock:
+        with db.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT service_number, MIN(created_at) AS first_created
+                FROM histories
+                WHERE telegram_id = ?
+                  AND created_at >= ?
+                  AND created_at < ?
+                  AND service_number IS NOT NULL
+                  AND TRIM(service_number) NOT IN ('', '-')
+                GROUP BY service_number
+                ORDER BY first_created ASC
+                """,
+                (telegram_id, start_utc, end_utc),
+            ).fetchall()
+
+    result: list[str] = []
+    for row in rows:
+        service_number = str(row["service_number"] or "").strip()
+        if INET_RE.fullmatch(service_number):
+            result.append(service_number)
+    return result
 
 
 async def handle_assign_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -46,42 +142,37 @@ async def handle_assign_message(update: Update, context: ContextTypes.DEFAULT_TY
     if not _is_assign_group(chat.title):
         return
 
+    db: Database = context.application.bot_data["db"]
     text = (message.text or message.caption or "").strip()
     command = text.split(maxsplit=1)[0].lower().split("@", 1)[0] if text else ""
 
-    db: Database = context.application.bot_data["db"]
+    # Catat semua INET yang terlihat di grup agar /assign tidak mengirim ulang.
+    # Ini juga menangkap posting manual dari anggota grup selama bot aktif.
+    visible_inets = _extract_inets(text)
+    if command != "/assign" and visible_inets:
+        await _remember_group_inets(db, chat.id, visible_inets, message.message_id)
+        return
+
+    if command != "/assign":
+        return
+
     technician = await db.get_technician(user.id)
-
-    if command == "/assign":
-        if technician is None:
-            await message.reply_text("❌ Akun teknisi belum terdaftar di bot.")
-            return
-
-        inets = _extract_inets(text[len(text.split(maxsplit=1)[0]):])
-        if not inets and message.reply_to_message:
-            replied = message.reply_to_message.text or message.reply_to_message.caption or ""
-            inets = _extract_inets(replied)
-
-        if inets:
-            context.user_data.pop("assign_waiting_chat_id", None)
-            await message.reply_text(_format_assign(inets, technician))
-            return
-
-        context.user_data["assign_waiting_chat_id"] = chat.id
-        await message.reply_text("Kirim nomor INET yang mau diminta assign. Bisa lebih dari satu, satu baris satu INET.")
-        return
-
-    if context.user_data.get("assign_waiting_chat_id") != chat.id:
-        return
-
     if technician is None:
-        context.user_data.pop("assign_waiting_chat_id", None)
+        await message.reply_text("❌ Akun teknisi belum terdaftar di bot.")
         return
 
-    inets = _extract_inets(text)
-    if not inets:
-        await message.reply_text("❌ Nomor INET tidak ditemukan. Kirim nomor INET 10-15 digit.")
+    settings = context.application.bot_data["settings"]
+    today_inets = await _today_technician_inets(db, technician.telegram_id, settings.timezone)
+    if not today_inets:
+        await message.reply_text("Belum ada INET pekerjaan hari ini yang tercatat di bot.")
         return
 
-    context.user_data.pop("assign_waiting_chat_id", None)
-    await message.reply_text(_format_assign(inets, technician))
+    seen = await _already_seen(db, chat.id, today_inets)
+    missing = [inet for inet in today_inets if inet not in seen]
+    if not missing:
+        await message.reply_text("✅ Semua INET pekerjaan hari ini sudah ada di grup.")
+        return
+
+    sent = await message.reply_text(_format_assign(missing, technician.name, technician.nik))
+    # Tandai segera setelah bot mengirim supaya /assign berikutnya tidak duplikat.
+    await _remember_group_inets(db, chat.id, missing, sent.message_id)
