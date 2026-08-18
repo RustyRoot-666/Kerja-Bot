@@ -86,21 +86,11 @@ def _classify(description: str) -> tuple[str, str]:
         return "UPDATE", "ALAMAT NOK"
     if "LEPAS DC" in value:
         return "UPDATE", "LEPAS DC"
-    if (
-        "CABUT" in value
-        or "PUTUS LANGGANAN" in value
-        or "PUTUS INTERNET" in value
-    ):
+    if "CABUT" in value or "PUTUS LANGGANAN" in value or "PUTUS INTERNET" in value:
         return "UPDATE", "CABUT"
     if "2 VOIP" in value or "ONT 2 VOIP" in value or "VOIP ADA 2" in value:
         return "UPDATE", "ONT 2 VOIP"
-    if (
-        "MANJA" in value
-        or "RESCHEDULE" in value
-        or "JADWAL" in value
-        or "BESOK" in value
-        or "LUAR KOTA" in value
-    ):
+    if "MANJA" in value or "RESCHEDULE" in value or "JADWAL" in value or "BESOK" in value or "LUAR KOTA" in value:
         return "UPDATE", "MANJA"
     if (
         "RNA" in value
@@ -137,7 +127,7 @@ def _sheet_name() -> str:
     return os.getenv("KENDALA_SHEET_NAME", "Kendala").strip() or "Kendala"
 
 
-def _append_sheet_row(row: list[str]) -> None:
+def _upsert_sheet_row(row: list[str]) -> str:
     credentials_path = _credentials_path()
     if not credentials_path.exists():
         raise RuntimeError(f"Credential Google Sheets belum ada di {credentials_path}.")
@@ -151,13 +141,11 @@ def _append_sheet_row(row: list[str]) -> None:
     sheet_name = _sheet_name().replace("'", "''")
     range_prefix = f"'{sheet_name}'"
 
-    current = (
-        service.spreadsheets()
-        .values()
-        .get(spreadsheetId=spreadsheet_id, range=f"{range_prefix}!A1:K1")
-        .execute()
-        .get("values", [])
-    )
+    current = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"{range_prefix}!A:K",
+    ).execute().get("values", [])
+
     if not current:
         service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
@@ -165,6 +153,19 @@ def _append_sheet_row(row: list[str]) -> None:
             valueInputOption="RAW",
             body={"values": [HEADERS]},
         ).execute()
+        current = [HEADERS]
+
+    target_inet = str(row[1]).strip()
+    for row_number, existing in enumerate(current[1:], start=2):
+        existing_inet = str(existing[1]).strip() if len(existing) > 1 else ""
+        if existing_inet == target_inet:
+            service.spreadsheets().values().update(
+                spreadsheetId=spreadsheet_id,
+                range=f"{range_prefix}!A{row_number}:K{row_number}",
+                valueInputOption="RAW",
+                body={"values": [row]},
+            ).execute()
+            return "UPDATED"
 
     service.spreadsheets().values().append(
         spreadsheetId=spreadsheet_id,
@@ -173,6 +174,7 @@ def _append_sheet_row(row: list[str]) -> None:
         insertDataOption="INSERT_ROWS",
         body={"values": [row]},
     ).execute()
+    return "INSERTED"
 
 
 def _ensure_log_table(database_path: Path) -> None:
@@ -270,11 +272,7 @@ async def _find_reference(inet: str):
     return status_for_order(statuses, "", inet)
 
 
-async def _finalize_update(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    pending: dict[str, str],
-) -> None:
+async def _finalize_update(update: Update, context: ContextTypes.DEFAULT_TYPE, pending: dict[str, str]) -> None:
     message = update.effective_message
     if message is None:
         return
@@ -283,14 +281,10 @@ async def _finalize_update(
         status, rca = _classify(pending["description"])
         if rca == "DONE":
             context.user_data.pop(PENDING_KEY, None)
-            await message.reply_text(
-                "ℹ️ Tidak disimpan ke Sheet Kendala karena pekerjaan sudah selesai/DONE."
-            )
+            await message.reply_text("ℹ️ Tidak disimpan ke Sheet Kendala karena pekerjaan sudah selesai/DONE.")
             return
 
-        evidence_path = await _download_evidence(
-            message, context, pending["service_number"]
-        )
+        evidence_path = await _download_evidence(message, context, pending["service_number"])
         settings = context.application.bot_data["settings"]
         tz = ZoneInfo(settings.timezone)
         now = datetime.now(tz)
@@ -309,23 +303,22 @@ async def _finalize_update(
             pending["description"],
             evidence_path,
         ]
-        await asyncio.to_thread(_append_sheet_row, row)
+        sheet_action = await asyncio.to_thread(_upsert_sheet_row, row)
 
         db: Database = context.application.bot_data["db"]
         log_data = dict(pending)
-        log_data.update(
-            {
-                "status": status,
-                "rca": rca,
-                "evidence_path": evidence_path,
-                "created_at": created_at,
-            }
-        )
+        log_data.update({
+            "status": status,
+            "rca": rca,
+            "evidence_path": evidence_path,
+            "created_at": created_at,
+        })
         await asyncio.to_thread(_save_local_log, db.db_path, log_data)
         context.user_data.pop(PENDING_KEY, None)
 
+        action_text = "BARIS KENDALA DIPERBARUI" if sheet_action == "UPDATED" else "KENDALA BARU DISIMPAN"
         await message.reply_text(
-            "✅ UPDATE BERHASIL DISIMPAN\n\n"
+            f"✅ {action_text}\n\n"
             f"🌐 INET : {pending['service_number']}\n"
             f"🎫 TIKET: {pending['ticket_id'] or '-'}\n"
             f"📌 STATUS: {status}\n"
@@ -367,9 +360,7 @@ async def handle_update_message(update: Update, context: ContextTypes.DEFAULT_TY
         _, preliminary_rca = _classify(description)
         if preliminary_rca == "DONE":
             context.user_data.pop(PENDING_KEY, None)
-            await message.reply_text(
-                "ℹ️ Tidak disimpan ke Sheet Kendala karena pekerjaan sudah selesai/DONE."
-            )
+            await message.reply_text("ℹ️ Tidak disimpan ke Sheet Kendala karena pekerjaan sudah selesai/DONE.")
             return
 
         db: Database = context.application.bot_data["db"]
