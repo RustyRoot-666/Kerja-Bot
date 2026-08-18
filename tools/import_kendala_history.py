@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -114,6 +115,36 @@ def compact_description(text: str, inet: str) -> str:
     return description[:500]
 
 
+def classify(description: str) -> tuple[str, str]:
+    value = " ".join(description.upper().split())
+    done_keywords = ("SUDAH GANTI", "SELESAI", "DONE", "SUDAH SELESAI")
+    if any(keyword in value for keyword in done_keywords):
+        return "CLOSE", "DONE"
+    if "MENOLAK" in value or "TIDAK MAU" in value:
+        return "OPEN", "MENOLAK"
+    if "RUKOS" in value or "RUMAH KOSONG" in value or "TIDAK ADA PENGHUNI" in value:
+        return "OPEN", "RUKOS"
+    if (
+        "ALAMAT NOK" in value
+        or "ALAMAT TIDAK" in value
+        or "ALAMAT TIDAK DITEMUKAN" in value
+    ):
+        return "OPEN", "ALAMAT NOK"
+    if "LEPAS DC" in value:
+        return "OPEN", "LEPAS DC"
+    if "CABUT" in value:
+        return "OPEN", "CABUT"
+    if "2 VOIP" in value or "ONT 2 VOIP" in value or "VOIP ADA 2" in value:
+        return "OPEN", "ONT 2 VOIP"
+    if "MANJA" in value or "RESCHEDULE" in value or "JADWAL" in value or "BESOK" in value:
+        return "OPEN", "MANJA"
+    if "RNA" in value or "TIDAK RESPON" in value or "NO RESPON" in value or "TIDAK ADA RESPON" in value:
+        return "OPEN", "RNA"
+    if "SALBON" in value:
+        return "OPEN", "SALBON"
+    return "OPEN", "UNSPEC"
+
+
 def _parse_message_date(value: str) -> datetime | None:
     try:
         return datetime.fromisoformat(value)
@@ -125,13 +156,14 @@ def scan(
     export_path: Path,
     since: datetime | None = None,
     until: datetime | None = None,
-) -> tuple[dict[str, int], list[dict[str, Any]]]:
+) -> tuple[dict[str, int], list[dict[str, Any]], Counter[str]]:
     data = json.loads(export_path.read_text(encoding="utf-8"))
     messages = data.get("messages", [])
     candidates: list[dict[str, Any]] = []
     unique_inets: set[str] = set()
     with_evidence = 0
     messages_in_range = 0
+    rca_counts: Counter[str] = Counter()
 
     for message in messages:
         if message.get("type") != "message":
@@ -156,14 +188,19 @@ def scan(
             with_evidence += 1
 
         for inet in inets:
+            description = compact_description(text, inet)
+            status, rca = classify(description)
             unique_inets.add(inet)
+            rca_counts[rca] += 1
             candidates.append(
                 {
                     "message_id": message.get("id"),
                     "date": message.get("date", ""),
                     "from": message.get("from", ""),
                     "inet": inet,
-                    "description": compact_description(text, inet),
+                    "description": description,
+                    "status": status,
+                    "rca": rca,
                     "photo": photo or "",
                 }
             )
@@ -175,7 +212,7 @@ def scan(
         "unique_inets": len(unique_inets),
         "with_evidence_messages": with_evidence,
     }
-    return stats, candidates
+    return stats, candidates, rca_counts
 
 
 def main() -> None:
@@ -203,9 +240,9 @@ def main() -> None:
     if not args.dry_run:
         raise SystemExit("Untuk saat ini tool ini hanya mendukung --dry-run. Tidak ada data yang akan ditulis.")
 
-    stats, candidates = scan(args.export_json, since=args.since, until=args.until)
+    stats, candidates, rca_counts = scan(args.export_json, since=args.since, until=args.until)
 
-    print("=== DRY RUN KENDALA HISTORY ===")
+    print("=== PREVIEW FINAL KENDALA HISTORY ===")
     print(f"Total pesan export    : {stats['messages']}")
     if args.since or args.until:
         print(f"Pesan dalam rentang   : {stats['messages_in_range']}")
@@ -218,10 +255,18 @@ def main() -> None:
     print(f"Kandidat dgn eviden   : {stats['with_evidence_messages']}")
     print()
 
+    if rca_counts:
+        print("RCA hasil klasifikasi:")
+        for rca, count in sorted(rca_counts.items(), key=lambda item: (-item[1], item[0])):
+            print(f"  {rca:<12} : {count}")
+        print()
+
     limit = max(0, args.limit)
     for idx, item in enumerate(candidates[:limit], 1):
         print(f"[{idx}] {item['date']} | {item['from']}")
         print(f"INET    : {item['inet']}")
+        print(f"STATUS  : {item['status']}")
+        print(f"RCA     : {item['rca']}")
         print(f"KENDALA : {item['description'] or '-'}")
         print(f"EVIDEN  : {item['photo'] or '-'}")
         print()
