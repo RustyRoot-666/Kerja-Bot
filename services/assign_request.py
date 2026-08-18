@@ -49,6 +49,10 @@ def _format_tiket(inets: list[str]) -> str:
     ])
 
 
+def _format_infotiket(inets: list[str]) -> str:
+    return "\n".join(f"/infotiket {inet}" for inet in inets)
+
+
 def _utc_iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).replace(tzinfo=None, microsecond=0).isoformat() + "Z"
 
@@ -242,6 +246,7 @@ async def handle_assign_message(update: Update, context: ContextTypes.DEFAULT_TY
             return
 
         sent = await message.reply_text(_format_tiket(missing))
+        await message.reply_text(_format_infotiket(missing))
         await _remember_inets(db, "ticket_group_seen", chat.id, missing, sent.message_id)
         return
 
