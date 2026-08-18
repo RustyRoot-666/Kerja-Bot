@@ -41,13 +41,18 @@ IGNORE_MARKERS = (
     "/STO", "/CONFIG", "/REPORT", "#REQOPENTIKET", "MOBAN ASSIGN LENSA CHAT",
 )
 
+ORDER_METADATA_MARKERS = (
+    "DOWN-", "UP-", "ONT DUALBAND", "ONT PREMIUM", "REPLACEMENT",
+    "ONU RX", "SPEED BY TACPRO", "SN ONT", "GANTI KE", "VALIN",
+    "HG8245", "HG8145", "F609", "ZXHN", "GPON", "INC5", " OPEN ",
+)
+
 HEADERS = [
     "TANGGAL", "INET", "NAMA PELANGGAN", "ALAMAT", "CP", "TIKET",
     "TEKNISI", "STATUS", "RCA", "KETERANGAN", "EVIDEN",
 ]
 
 
-# ---------- Telegram export parsing ----------
 def flatten_text(value: Any) -> str:
     if isinstance(value, str):
         return value
@@ -93,8 +98,19 @@ def _has_issue_meaning(value: str) -> bool:
     return any(keyword in upper for keyword in KENDALA_KEYWORDS)
 
 
+def _looks_like_order_metadata(value: str) -> bool:
+    upper = f" {' '.join(value.upper().split())} "
+    marker_hits = sum(1 for marker in ORDER_METADATA_MARKERS if marker in upper)
+    if marker_hits >= 2:
+        return True
+    if re.search(r"\bINC\d{6,}\b", upper) and re.search(r"\b(?:100|150|200|300)\b", upper):
+        return True
+    if re.search(r"\b-?\d{1,2}\.\d{1,2}\b", upper) and ("ONT" in upper or "DOWN-" in upper):
+        return True
+    return False
+
+
 def _clean_segment(segment: str, inet: str) -> str:
-    """Buang metadata history tanpa membuang isi kendalanya."""
     original = " ".join(segment.split()).strip()
     if not original:
         return ""
@@ -109,10 +125,7 @@ def _clean_segment(segment: str, inet: str) -> str:
     if upper in {"VISIT", "KENDALA", "KETERANGAN"}:
         return ""
 
-    had_inet = inet in original
     escaped = re.escape(inet)
-
-    # Hapus label + INET di mana pun posisinya.
     value = re.sub(
         rf"\b(?:ID|I['’]?D|NO)?\s*PELANGGAN\s*[:\-]?\s*{escaped}\b",
         " ", original, flags=re.IGNORECASE,
@@ -122,8 +135,6 @@ def _clean_segment(segment: str, inet: str) -> str:
         " ", value, flags=re.IGNORECASE,
     )
     value = re.sub(rf"\b{escaped}\b", " ", value)
-
-    # Setelah nomor dibuang, singkirkan label metadata yang tersisa.
     value = re.sub(r"\b(?:ID|I['’]?D|NO)?\s*PELANGGAN\s*[:\-]?", " ", value, flags=re.IGNORECASE)
     value = re.sub(r"\b(?:NO\s*)?(?:INET|SERVICE)\s*[:\-]?", " ", value, flags=re.IGNORECASE)
     value = re.sub(r"^\s*(?:ID|I['’]?D)\s*[:\-]?\s*", "", value, flags=re.IGNORECASE)
@@ -133,10 +144,20 @@ def _clean_segment(segment: str, inet: str) -> str:
     if not value:
         return ""
 
-    # Jika segmen tadinya hanya INET + alamat/nama metadata, jangan ikutkan.
-    if had_inet and not _has_issue_meaning(value):
-        address_like = bool(re.search(r"\b(?:SBY|SURABAYA|JL\.?|JALAN|KEPUTIH|MULYOREJO|KERTAJAYA|NGINDEN|MOJO|SUKOLILO|MANYAR|DHARMA|SUTOREJO|JOJORAN|KEDUNG|KALIWARON)\b", value, flags=re.IGNORECASE))
-        if address_like:
+    # Pesan forward/copy sering berisi satu baris order penuh setelah keterangannya.
+    # Jangan izinkan metadata ORDER masuk ke kolom KETERANGAN.
+    if _looks_like_order_metadata(value):
+        return ""
+
+    # Buang fragmen yang jelas berupa identitas/alamat pelanggan, bukan kendala.
+    if not _has_issue_meaning(value):
+        if re.search(
+            r"\b(?:SBY|SURABAYA|JL\.?|JALAN|KEPUTIH|MULYOREJO|KERTAJAYA|NGINDEN|MOJO|SUKOLILO|MANYAR|DHARMA|SUTOREJO|JOJORAN|KEDUNG|KALIWARON|LAGUNA|VILLA|ROYAL)\b",
+            value,
+            flags=re.IGNORECASE,
+        ):
+            return ""
+        if re.search(r"\b628\d{7,13}\b", value):
             return ""
 
     return value
@@ -166,7 +187,11 @@ def compact_description(text: str, inet: str) -> str:
         if value and value not in cleaned:
             cleaned.append(value)
 
-    description = " | ".join(cleaned).strip(" |")
+    # Jika ada lebih dari satu fragmen, prioritaskan fragmen yang benar-benar
+    # mengandung makna kendala dan jangan gabungkan metadata lain.
+    issue_parts = [part for part in cleaned if _has_issue_meaning(part)]
+    selected = issue_parts if issue_parts else cleaned
+    description = " | ".join(selected).strip(" |")
     return description[:500]
 
 
@@ -277,7 +302,6 @@ def scan(
     return stats, candidates, rca_counts
 
 
-# ---------- Enrichment + Google Sheets ----------
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -447,7 +471,6 @@ def _apply_rows(rows: list[list[str]]) -> tuple[int, int]:
     return len(appends), len(updates)
 
 
-# ---------- CLI ----------
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Import history WORK ORDER MANYAR ke Sheet Kendala, 1 INET = update terbaru."
@@ -518,6 +541,7 @@ def main() -> None:
     print(f"Baris INET diperbarui  : {updated}")
     print(f"Total aktif diolah     : {inserted + updated}")
     print("Satu INET hanya memiliki satu baris; apply ulang aman karena baris lama akan diperbarui.")
+
 
 if __name__ == "__main__":
     main()
