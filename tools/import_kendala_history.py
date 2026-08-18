@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -88,6 +89,27 @@ def looks_like_kendala(text: str) -> bool:
     return any(keyword in upper for keyword in KENDALA_KEYWORDS)
 
 
+def _clean_history_prefix(value: str, inet: str) -> str:
+    text = value.strip()
+    escaped = re.escape(inet)
+    patterns = (
+        rf"^\s*(?:ID|I['’]?D|NO)?\s*PELANGGAN\s*[:\-]?\s*{escaped}\s*[|,:;\-]*\s*",
+        rf"^\s*(?:NO\s*)?INET\s*[:\-]?\s*{escaped}\s*[|,:;\-]*\s*",
+        rf"^\s*(?:NO\s*)?SERVICE\s*[:\-]?\s*{escaped}\s*[|,:;\-]*\s*",
+        rf"^\s*{escaped}\s*[|,:;\-]*\s*",
+    )
+    changed = True
+    while changed:
+        changed = False
+        for pattern in patterns:
+            cleaned = re.sub(pattern, "", text, flags=re.IGNORECASE)
+            if cleaned != text:
+                text = cleaned.strip()
+                changed = True
+    text = re.sub(r"^\s*(?:KENDALA|KETERANGAN)\s*[:\-]?\s*", "", text, flags=re.IGNORECASE)
+    return text.strip(" |,:;-")
+
+
 def compact_description(text: str, inet: str) -> str:
     lines = [" ".join(line.split()) for line in text.splitlines() if line.strip()]
     cleaned: list[str] = []
@@ -106,7 +128,9 @@ def compact_description(text: str, inet: str) -> str:
         if "KETERANGAN :" in upper:
             line = re.split(r"KETERANGAN\s*:\s*", line, flags=re.IGNORECASE, maxsplit=1)[-1]
         cleaned.append(line)
-    return " | ".join(cleaned).strip(" |")[:500]
+    description = " | ".join(cleaned).strip(" |")
+    description = _clean_history_prefix(description, inet)
+    return description[:500]
 
 
 def classify(description: str) -> tuple[str, str]:
@@ -183,6 +207,7 @@ def scan(export_path: Path, since: datetime | None = None, until: datetime | Non
                 "message_id": message.get("id"),
                 "date": message.get("date", ""),
                 "from": message.get("from", ""),
+                "from_id": message.get("from_id", ""),
                 "inet": inet,
                 "description": description,
                 "status": status,
@@ -229,6 +254,36 @@ def _credentials_path() -> Path:
     raise RuntimeError("Credential Google Service Account tidak ditemukan.")
 
 
+def _database_path() -> Path:
+    raw = os.getenv("DATABASE_PATH", "/app/database/bot.sqlite3").strip()
+    path = Path(raw)
+    if not path.is_absolute():
+        path = _repo_root() / path
+    return path
+
+
+def _registered_technicians() -> dict[int, str]:
+    path = _database_path()
+    if not path.exists():
+        return {}
+    try:
+        with sqlite3.connect(path) as conn:
+            rows = conn.execute("SELECT telegram_id, name FROM technicians").fetchall()
+    except sqlite3.Error:
+        return {}
+    return {int(telegram_id): str(name or "").strip() for telegram_id, name in rows if name}
+
+
+def _telegram_id_from_export(value: Any) -> int | None:
+    match = re.fullmatch(r"user(\d+)", str(value or "").strip(), flags=re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
 def _sheet_name() -> str:
     return os.getenv("KENDALA_SHEET_NAME", "Kendala").strip() or "Kendala"
 
@@ -258,6 +313,7 @@ def _format_date(value: str) -> str:
 
 def _build_rows(export_path: Path, candidates: list[dict[str, Any]], apply: bool) -> tuple[list[list[str]], list[str]]:
     statuses = download_statuses()
+    technician_names = _registered_technicians()
     rows: list[list[str]] = []
     missing: list[str] = []
     for item in candidates:
@@ -266,6 +322,12 @@ def _build_rows(export_path: Path, candidates: list[dict[str, Any]], apply: bool
             missing.append(item["inet"])
             continue
         evidence = _copy_history_evidence(export_path, item) if apply else (item["photo"] or "-")
+        telegram_id = _telegram_id_from_export(item.get("from_id"))
+        technician_name = technician_names.get(telegram_id or -1, "")
+        if not technician_name:
+            technician_name = (reference.assigned_technician or "").strip()
+        if not technician_name:
+            technician_name = str(item.get("from") or "").strip()
         rows.append([
             _format_date(item["date"]),
             item["inet"],
@@ -273,7 +335,7 @@ def _build_rows(export_path: Path, candidates: list[dict[str, Any]], apply: bool
             reference.address or "",
             reference.customer_phone or "",
             reference.ticket_id or "",
-            str(item["from"] or ""),
+            technician_name,
             "UPDATE",
             item["rca"],
             item["description"] or "-",
