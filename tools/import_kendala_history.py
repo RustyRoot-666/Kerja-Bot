@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -113,16 +114,36 @@ def compact_description(text: str, inet: str) -> str:
     return description[:500]
 
 
-def scan(export_path: Path) -> tuple[dict[str, int], list[dict[str, Any]]]:
+def _parse_message_date(value: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def scan(
+    export_path: Path,
+    since: datetime | None = None,
+    until: datetime | None = None,
+) -> tuple[dict[str, int], list[dict[str, Any]]]:
     data = json.loads(export_path.read_text(encoding="utf-8"))
     messages = data.get("messages", [])
     candidates: list[dict[str, Any]] = []
     unique_inets: set[str] = set()
     with_evidence = 0
+    messages_in_range = 0
 
     for message in messages:
         if message.get("type") != "message":
             continue
+
+        message_date = _parse_message_date(message.get("date", ""))
+        if since is not None and (message_date is None or message_date < since):
+            continue
+        if until is not None and (message_date is None or message_date >= until):
+            continue
+        messages_in_range += 1
+
         text = flatten_text(message.get("text", ""))
         if not looks_like_kendala(text):
             continue
@@ -149,6 +170,7 @@ def scan(export_path: Path) -> tuple[dict[str, int], list[dict[str, Any]]]:
 
     stats = {
         "messages": len(messages),
+        "messages_in_range": messages_in_range,
         "candidates": len(candidates),
         "unique_inets": len(unique_inets),
         "with_evidence_messages": with_evidence,
@@ -163,6 +185,16 @@ def main() -> None:
     parser.add_argument("export_json", type=Path)
     parser.add_argument("--dry-run", action="store_true", help="Mode aman; tidak menulis apa pun.")
     parser.add_argument("--limit", type=int, default=25, help="Jumlah contoh kandidat yang ditampilkan.")
+    parser.add_argument(
+        "--since",
+        type=lambda value: datetime.strptime(value, "%Y-%m-%d"),
+        help="Hanya proses pesan mulai tanggal ini (YYYY-MM-DD).",
+    )
+    parser.add_argument(
+        "--until",
+        type=lambda value: datetime.strptime(value, "%Y-%m-%d"),
+        help="Hanya proses pesan sebelum tanggal ini (YYYY-MM-DD).",
+    )
     args = parser.parse_args()
 
     if not args.export_json.exists():
@@ -171,10 +203,16 @@ def main() -> None:
     if not args.dry_run:
         raise SystemExit("Untuk saat ini tool ini hanya mendukung --dry-run. Tidak ada data yang akan ditulis.")
 
-    stats, candidates = scan(args.export_json)
+    stats, candidates = scan(args.export_json, since=args.since, until=args.until)
 
     print("=== DRY RUN KENDALA HISTORY ===")
-    print(f"Total pesan diperiksa : {stats['messages']}")
+    print(f"Total pesan export    : {stats['messages']}")
+    if args.since or args.until:
+        print(f"Pesan dalam rentang   : {stats['messages_in_range']}")
+    if args.since:
+        print(f"Mulai tanggal         : {args.since.date().isoformat()}")
+    if args.until:
+        print(f"Sebelum tanggal       : {args.until.date().isoformat()}")
     print(f"Kandidat kendala      : {stats['candidates']}")
     print(f"INET unik             : {stats['unique_inets']}")
     print(f"Kandidat dgn eviden   : {stats['with_evidence_messages']}")
