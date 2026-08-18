@@ -30,6 +30,7 @@ from handlers.google_sheet import build_google_sheet_handlers
 from handlers.login import build_login_conversation, start
 from handlers.my_orders import build_my_orders_handlers, orderanku
 from handlers.order_flow import build_order_conversation
+from services.assign_request import handle_assign_message
 from services.auto_close import install_auto_close
 from services.daily_recap import (
     initialize_recap_delivery_log,
@@ -144,7 +145,7 @@ async def post_init(application: Application) -> None:
         )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, report leaderboard, daily close, /update kendala, and previous-week catch-up initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, report leaderboard, daily close, /update kendala, /assign NTE Manyar, and previous-week catch-up initialized"
     )
 
 
@@ -178,6 +179,11 @@ def build_application() -> Application:
 
     install_auto_close(order_flow_module)
 
+    # Group-specific flows must run before the generic group ignore handler.
+    app.add_handler(
+        MessageHandler(filters.ChatType.GROUPS, handle_assign_message),
+        group=-4,
+    )
     # /update must be able to work in both private chats and the dedicated
     # kendala group before generic group handlers ignore other messages.
     app.add_handler(MessageHandler(filters.ALL, handle_update_message), group=-3)
