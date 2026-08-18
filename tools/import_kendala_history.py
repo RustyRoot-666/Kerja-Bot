@@ -127,7 +127,6 @@ def compact_description(text: str, inet: str) -> str:
 
 def classify(description: str) -> tuple[str, str]:
     value = " ".join(description.upper().split())
-    status = "UPDATE"
     done_keywords = (
         "SUDAH GANTI",
         "SUDAH DIGANTI",
@@ -136,27 +135,27 @@ def classify(description: str) -> tuple[str, str]:
         "SUDAH SELESAI",
     )
     if any(keyword in value for keyword in done_keywords):
-        return status, "DONE"
+        return "CLOSE", "DONE"
     if "MENOLAK" in value or "TIDAK MAU" in value or "TIDAK BERKENAN" in value:
-        return status, "MENOLAK"
+        return "UPDATE", "MENOLAK"
     if "RUKOS" in value or "RUMAH KOSONG" in value or "TIDAK ADA PENGHUNI" in value:
-        return status, "RUKOS"
+        return "UPDATE", "RUKOS"
     if (
         "ALAMAT NOK" in value
         or "ALAMAT TIDAK" in value
         or "ALAMAT TIDAK DITEMUKAN" in value
     ):
-        return status, "ALAMAT NOK"
+        return "UPDATE", "ALAMAT NOK"
     if "LEPAS DC" in value:
-        return status, "LEPAS DC"
+        return "UPDATE", "LEPAS DC"
     if (
         "CABUT" in value
         or "PUTUS LANGGANAN" in value
         or "PUTUS INTERNET" in value
     ):
-        return status, "CABUT"
+        return "UPDATE", "CABUT"
     if "2 VOIP" in value or "ONT 2 VOIP" in value or "VOIP ADA 2" in value:
-        return status, "ONT 2 VOIP"
+        return "UPDATE", "ONT 2 VOIP"
     if (
         "MANJA" in value
         or "RESCHEDULE" in value
@@ -164,7 +163,7 @@ def classify(description: str) -> tuple[str, str]:
         or "BESOK" in value
         or "LUAR KOTA" in value
     ):
-        return status, "MANJA"
+        return "UPDATE", "MANJA"
     if (
         "RNA" in value
         or "TIDAK RESPON" in value
@@ -175,10 +174,10 @@ def classify(description: str) -> tuple[str, str]:
         or "CP NO WA" in value
         or "HISTORY NOK" in value
     ):
-        return status, "RNA"
+        return "UPDATE", "RNA"
     if "SALBON" in value:
-        return status, "SALBON"
-    return status, "UNSPEC"
+        return "UPDATE", "SALBON"
+    return "UPDATE", "UNSPEC"
 
 
 def _parse_message_date(value: str) -> datetime | None:
@@ -199,6 +198,7 @@ def scan(
     unique_inets: set[str] = set()
     with_evidence = 0
     messages_in_range = 0
+    skipped_done = 0
     rca_counts: Counter[str] = Counter()
 
     for message in messages:
@@ -220,14 +220,18 @@ def scan(
             continue
 
         photo = message.get("photo")
-        if photo:
-            with_evidence += 1
 
         for inet in inets:
             description = compact_description(text, inet)
             status, rca = classify(description)
+            if rca == "DONE":
+                skipped_done += 1
+                continue
+
             unique_inets.add(inet)
             rca_counts[rca] += 1
+            if photo:
+                with_evidence += 1
             candidates.append(
                 {
                     "message_id": message.get("id"),
@@ -247,13 +251,14 @@ def scan(
         "candidates": len(candidates),
         "unique_inets": len(unique_inets),
         "with_evidence_messages": with_evidence,
+        "skipped_done": skipped_done,
     }
     return stats, candidates, rca_counts
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Dry-run scanner history WORK ORDER MANYAR untuk kandidat Kendala."
+        description="Dry-run scanner history WORK ORDER MANYAR untuk kandidat Kendala aktif."
     )
     parser.add_argument("export_json", type=Path)
     parser.add_argument("--dry-run", action="store_true", help="Mode aman; tidak menulis apa pun.")
@@ -278,7 +283,7 @@ def main() -> None:
 
     stats, candidates, rca_counts = scan(args.export_json, since=args.since, until=args.until)
 
-    print("=== PREVIEW FINAL KENDALA HISTORY ===")
+    print("=== PREVIEW KENDALA AKTIF HISTORY ===")
     print(f"Total pesan export    : {stats['messages']}")
     if args.since or args.until:
         print(f"Pesan dalam rentang   : {stats['messages_in_range']}")
@@ -286,6 +291,7 @@ def main() -> None:
         print(f"Mulai tanggal         : {args.since.date().isoformat()}")
     if args.until:
         print(f"Sebelum tanggal       : {args.until.date().isoformat()}")
+    print(f"DONE/CLOSE diabaikan  : {stats['skipped_done']}")
     print(f"Kandidat kendala      : {stats['candidates']}")
     print(f"INET unik             : {stats['unique_inets']}")
     print(f"Kandidat dgn eviden   : {stats['with_evidence_messages']}")
