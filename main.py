@@ -51,6 +51,7 @@ from services.report_leaderboard import (
     send_daily_close,
     send_report_leaderboard,
 )
+from services.update_kendala import handle_update_message
 from utils.keyboards import MAIN_MENU
 from utils.logging import setup_logging
 
@@ -143,7 +144,7 @@ async def post_init(application: Application) -> None:
         )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, report leaderboard, daily close, and previous-week catch-up initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, report leaderboard, daily close, /update kendala, and previous-week catch-up initialized"
     )
 
 
@@ -177,6 +178,9 @@ def build_application() -> Application:
 
     install_auto_close(order_flow_module)
 
+    # /update must be able to work in both private chats and the dedicated
+    # kendala group before generic group handlers ignore other messages.
+    app.add_handler(MessageHandler(filters.ALL, handle_update_message), group=-3)
     app.add_handler(
         MessageHandler(filters.ChatType.GROUPS, capture_report_group_message),
         group=-2,
