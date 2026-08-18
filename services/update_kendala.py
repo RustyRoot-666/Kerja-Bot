@@ -24,6 +24,7 @@ from services.google_sheet_reference import (
 PENDING_KEY = "pending_kendala_update"
 UPDATE_RE = re.compile(r"^/update(?:@\w+)?\s+(\d{6,})\s+(.+)$", re.IGNORECASE | re.DOTALL)
 CANCEL_RE = re.compile(r"^/batalupdate(?:@\w+)?$", re.IGNORECASE)
+KENDALA_GROUP_CANONICAL = "UPDATE KENDALA WO JAGIR"
 HEADERS = [
     "TANGGAL",
     "INET",
@@ -39,9 +40,18 @@ HEADERS = [
 ]
 
 
-def _group_allowed(chat_id: int, chat_type: str) -> bool:
-    if chat_type == "private":
-        return True
+def _canonical_title(value: str | None) -> str:
+    return " ".join(re.sub(r"[^A-Z0-9]+", " ", str(value or "").upper()).split())
+
+
+def _group_allowed(chat_id: int, chat_type: str, chat_title: str | None) -> bool:
+    # /update hanya aktif di grup khusus UPDATE KENDALA WO JAGIR.
+    # Jika KENDALA_GROUP_ID disetel, ID grup juga harus cocok agar lebih aman.
+    if chat_type not in {"group", "supergroup"}:
+        return False
+    if _canonical_title(chat_title) != KENDALA_GROUP_CANONICAL:
+        return False
+
     raw = os.getenv("KENDALA_GROUP_ID", "").strip()
     if not raw:
         return True
@@ -302,9 +312,7 @@ async def handle_update_message(update: Update, context: ContextTypes.DEFAULT_TY
     user = update.effective_user
     if message is None or chat is None or user is None:
         return
-    if chat.type not in {"private", "group", "supergroup"}:
-        return
-    if not _group_allowed(chat.id, chat.type):
+    if not _group_allowed(chat.id, chat.type, chat.title):
         return
 
     text = (message.text or message.caption or "").strip()
