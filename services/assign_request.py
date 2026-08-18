@@ -37,11 +37,22 @@ def _format_assign(inets: list[str], technician_name: str, technician_nik: str) 
     return "\n".join([*inets, footer])
 
 
+def _format_tiket(inets: list[str]) -> str:
+    return "\n".join([
+        "#REQOPENTIKET",
+        "STO: MYR",
+        "",
+        "NOMER INET:",
+        *inets,
+        "moban create tiket",
+    ])
+
+
 def _utc_iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).replace(tzinfo=None, microsecond=0).isoformat() + "Z"
 
 
-def _ensure_seen_table(conn) -> None:
+def _ensure_seen_tables(conn) -> None:
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS assign_group_seen (
@@ -53,23 +64,37 @@ def _ensure_seen_table(conn) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ticket_group_seen (
+            chat_id INTEGER NOT NULL,
+            service_number TEXT NOT NULL,
+            first_seen_at TEXT NOT NULL,
+            source_message_id INTEGER,
+            PRIMARY KEY (chat_id, service_number)
+        )
+        """
+    )
 
 
-async def _remember_group_inets(
+async def _remember_inets(
     db: Database,
+    table: str,
     chat_id: int,
     inets: list[str],
     message_id: int | None,
 ) -> None:
     if not inets:
         return
+    if table not in {"assign_group_seen", "ticket_group_seen"}:
+        raise ValueError("invalid seen table")
     now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
     async with db._lock:
         with db.connection() as conn:
-            _ensure_seen_table(conn)
+            _ensure_seen_tables(conn)
             conn.executemany(
-                """
-                INSERT OR IGNORE INTO assign_group_seen (
+                f"""
+                INSERT OR IGNORE INTO {table} (
                     chat_id, service_number, first_seen_at, source_message_id
                 ) VALUES (?, ?, ?, ?)
                 """,
@@ -77,17 +102,19 @@ async def _remember_group_inets(
             )
 
 
-async def _already_seen(db: Database, chat_id: int, inets: list[str]) -> set[str]:
+async def _already_seen(db: Database, table: str, chat_id: int, inets: list[str]) -> set[str]:
     if not inets:
         return set()
+    if table not in {"assign_group_seen", "ticket_group_seen"}:
+        raise ValueError("invalid seen table")
     placeholders = ",".join("?" for _ in inets)
     async with db._lock:
         with db.connection() as conn:
-            _ensure_seen_table(conn)
+            _ensure_seen_tables(conn)
             rows = conn.execute(
                 f"""
                 SELECT service_number
-                FROM assign_group_seen
+                FROM {table}
                 WHERE chat_id = ?
                   AND service_number IN ({placeholders})
                 """,
@@ -145,15 +172,19 @@ async def handle_assign_message(update: Update, context: ContextTypes.DEFAULT_TY
     db: Database = context.application.bot_data["db"]
     text = (message.text or message.caption or "").strip()
     command = text.split(maxsplit=1)[0].lower().split("@", 1)[0] if text else ""
-
-    # Catat semua INET yang terlihat di grup agar /assign tidak mengirim ulang.
-    # Ini juga menangkap posting manual dari anggota grup selama bot aktif.
     visible_inets = _extract_inets(text)
-    if command != "/assign" and visible_inets:
-        await _remember_group_inets(db, chat.id, visible_inets, message.message_id)
+
+    # Semua INET yang terlihat di grup dianggap sudah pernah muncul untuk /assign.
+    if command not in {"/assign", "/tiket"} and visible_inets:
+        await _remember_inets(db, "assign_group_seen", chat.id, visible_inets, message.message_id)
+
+        # Untuk /tiket, hanya pesan yang memang berbentuk req open tiket yang dianggap sudah direquest.
+        normalized = text.upper()
+        if "#REQOPENTIKET" in normalized or "MOBAN CREATE TIKET" in normalized:
+            await _remember_inets(db, "ticket_group_seen", chat.id, visible_inets, message.message_id)
         return
 
-    if command != "/assign":
+    if command not in {"/assign", "/tiket"}:
         return
 
     technician = await db.get_technician(user.id)
@@ -167,12 +198,22 @@ async def handle_assign_message(update: Update, context: ContextTypes.DEFAULT_TY
         await message.reply_text("Belum ada INET pekerjaan hari ini yang tercatat di bot.")
         return
 
-    seen = await _already_seen(db, chat.id, today_inets)
-    missing = [inet for inet in today_inets if inet not in seen]
-    if not missing:
-        await message.reply_text("✅ Semua INET pekerjaan hari ini sudah ada di grup.")
+    if command == "/assign":
+        seen = await _already_seen(db, "assign_group_seen", chat.id, today_inets)
+        missing = [inet for inet in today_inets if inet not in seen]
+        if not missing:
+            await message.reply_text("✅ Semua INET pekerjaan hari ini sudah ada di grup.")
+            return
+
+        sent = await message.reply_text(_format_assign(missing, technician.name, technician.nik))
+        await _remember_inets(db, "assign_group_seen", chat.id, missing, sent.message_id)
         return
 
-    sent = await message.reply_text(_format_assign(missing, technician.name, technician.nik))
-    # Tandai segera setelah bot mengirim supaya /assign berikutnya tidak duplikat.
-    await _remember_group_inets(db, chat.id, missing, sent.message_id)
+    seen = await _already_seen(db, "ticket_group_seen", chat.id, today_inets)
+    missing = [inet for inet in today_inets if inet not in seen]
+    if not missing:
+        await message.reply_text("✅ Semua INET pekerjaan hari ini sudah pernah direquest open tiket.")
+        return
+
+    sent = await message.reply_text(_format_tiket(missing))
+    await _remember_inets(db, "ticket_group_seen", chat.id, missing, sent.message_id)
