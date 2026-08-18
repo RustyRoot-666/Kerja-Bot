@@ -50,7 +50,7 @@ def _format_tiket(inets: list[str]) -> str:
 
 
 def _format_infotiket(inets: list[str]) -> str:
-    return "\n".join(f"/infotiket {inet}" for inet in inets)
+    return "\n".join(["/infotiket", *inets])
 
 
 def _utc_iso(value: datetime) -> str:
