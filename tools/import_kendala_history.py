@@ -20,6 +20,7 @@ KENDALA_KEYWORDS = (
     "MANJA",
     "MENOLAK",
     "TIDAK MAU",
+    "TIDAK BERKENAN",
     "RUKOS",
     "RUMAH KOSONG",
     "RNA",
@@ -29,6 +30,7 @@ KENDALA_KEYWORDS = (
     "SALBON",
     "HISTORY NOK",
     "CP NOK",
+    "CP NO WA",
     "KENDALA",
     "RESCHEDULE",
     "JADWAL",
@@ -123,7 +125,7 @@ def classify(description: str) -> tuple[str, str]:
     done_keywords = ("SUDAH GANTI", "SELESAI", "DONE", "SUDAH SELESAI")
     if any(keyword in value for keyword in done_keywords):
         return "CLOSE", "DONE"
-    if "MENOLAK" in value or "TIDAK MAU" in value:
+    if "MENOLAK" in value or "TIDAK MAU" in value or "TIDAK BERKENAN" in value:
         return "OPEN", "MENOLAK"
     if "RUKOS" in value or "RUMAH KOSONG" in value or "TIDAK ADA PENGHUNI" in value:
         return "OPEN", "RUKOS"
@@ -152,6 +154,7 @@ def classify(description: str) -> tuple[str, str]:
         or "TIDAK ADA RESPON" in value
         or "TIDAK BISA DIHUBUNGI" in value
         or "CP NOK" in value
+        or "CP NO WA" in value
         or "HISTORY NOK" in value
     ):
         return "OPEN", "RNA"
