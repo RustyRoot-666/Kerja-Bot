@@ -308,7 +308,7 @@ def _copy_history_evidence(export_path: Path, item: dict[str, Any]) -> str:
 
 def _format_date(value: str) -> str:
     parsed = _parse_message_date(value)
-    return parsed.strftime("%d/%m/%Y %H:%M:%S") if parsed else value
+    return parsed.strftime("%d/%m/%Y") if parsed else value
 
 
 def _build_rows(export_path: Path, candidates: list[dict[str, Any]], apply: bool) -> tuple[list[list[str]], list[str]]:
