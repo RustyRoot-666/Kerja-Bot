@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#111827" />
+  <title>Kerja Bot - Pendapatan</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">KERJA BOT</p>
+        <h1>Monitoring Pendapatan</h1>
+        <p id="technicianName" class="subtle">Teknisi</p>
+      </div>
+      <div class="avatar">💼</div>
+    </header>
+
+    <section class="summary-grid" aria-label="Ringkasan pendapatan">
+      <article class="summary-card primary">
+        <span>Total Pendapatan</span>
+        <strong id="totalIncome">Rp0</strong>
+        <small id="totalOrders">0 order</small>
+      </article>
+      <article class="summary-card">
+        <span>Sudah Terbayar</span>
+        <strong id="paidIncome">Rp0</strong>
+        <small id="paidCount">0 order</small>
+      </article>
+      <article class="summary-card">
+        <span>Belum Terbayar</span>
+        <strong id="unpaidIncome">Rp0</strong>
+        <small id="unpaidCount">0 order</small>
+      </article>
+    </section>
+
+    <section class="toolbar">
+      <div class="filter-row">
+        <button class="filter active" data-filter="all">Semua</button>
+        <button class="filter" data-filter="paid">Terbayar</button>
+        <button class="filter" data-filter="unpaid">Belum Bayar</button>
+      </div>
+      <input id="searchInput" type="search" placeholder="Cari nomor INET..." autocomplete="off" />
+    </section>
+
+    <section>
+      <div class="section-heading">
+        <h2>Daftar INET</h2>
+        <span id="resultCount">0 data</span>
+      </div>
+      <div id="paymentList" class="payment-list"></div>
+      <div id="emptyState" class="empty hidden">
+        <div>📭</div>
+        <p>Belum ada data pendapatan.</p>
+      </div>
+    </section>
+  </main>
+
+  <template id="paymentTemplate">
+    <article class="payment-card">
+      <div class="payment-top">
+        <div>
+          <span class="label">NO INET</span>
+          <strong class="inet"></strong>
+        </div>
+        <span class="badge"></span>
+      </div>
+      <div class="payment-meta">
+        <div><span>Status pekerjaan</span><strong class="work-status"></strong></div>
+        <div><span>Task payment</span><strong class="task-payment"></strong></div>
+        <div><span>Nominal</span><strong class="amount"></strong></div>
+      </div>
+    </article>
+  </template>
+
+  <script src="/app.js"></script>
+</body>
+</html>
