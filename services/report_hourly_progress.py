@@ -83,7 +83,6 @@ def _today_progress_rows(
     conn = sqlite3.connect(database_path)
     conn.row_factory = sqlite3.Row
     try:
-        # CLOSE berasal dari report/STO yang sudah terekap. Satu INET dihitung sekali.
         try:
             close_rows = conn.execute(
                 """
@@ -99,7 +98,6 @@ def _today_progress_rows(
         except sqlite3.OperationalError:
             close_rows = []
 
-        # UPDATE berasal dari /update kendala. Satu INET per teknisi dihitung sekali per hari.
         try:
             update_rows = conn.execute(
                 """
@@ -116,8 +114,6 @@ def _today_progress_rows(
         except sqlite3.OperationalError:
             update_rows = []
 
-        # Gabungkan berdasarkan nama teknisi karena sumber CLOSE menyimpan NIK,
-        # sedangkan log /update menyimpan Telegram ID.
         combined: dict[str, dict[str, object]] = {}
 
         for row in close_rows:
@@ -139,20 +135,6 @@ def _today_progress_rows(
         return rows
     finally:
         conn.close()
-
-
-async def remember_report_manyar_group(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-) -> None:
-    chat = update.effective_chat
-    if not chat or chat.type not in {"group", "supergroup"}:
-        return
-    if _normalized(chat.title) != _target_title():
-        return
-
-    db: Database = context.application.bot_data["db"]
-    await asyncio.to_thread(_save_target, db.db_path, chat.id)
 
 
 def build_hourly_progress_text(
@@ -177,11 +159,7 @@ def build_hourly_progress_text(
                 ]
             )
     else:
-        lines.extend(
-            [
-                "Belum ada laporan hari ini.",
-            ]
-        )
+        lines.append("Belum ada laporan hari ini.")
 
     lines.extend(
         [
@@ -195,6 +173,36 @@ def build_hourly_progress_text(
         ]
     )
     return "\n".join(lines)
+
+
+async def remember_report_manyar_group(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    chat = update.effective_chat
+    message = update.effective_message
+    if not chat or not message or chat.type not in {"group", "supergroup"}:
+        return
+    if _normalized(chat.title) != _target_title():
+        return
+
+    db: Database = context.application.bot_data["db"]
+    await asyncio.to_thread(_save_target, db.db_path, chat.id)
+
+    text = (message.text or message.caption or "").strip()
+    command = text.split(maxsplit=1)[0].lower().split("@", 1)[0] if text else ""
+    if command != "/progres":
+        return
+
+    settings = context.application.bot_data["settings"]
+    tz = ZoneInfo(settings.timezone)
+    now = datetime.now(tz)
+    rows = await asyncio.to_thread(
+        _today_progress_rows,
+        db.db_path,
+        now.date().isoformat(),
+    )
+    await message.reply_text(build_hourly_progress_text(rows, now))
 
 
 async def send_hourly_report_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
