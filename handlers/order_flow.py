@@ -26,7 +26,7 @@ from utils.keyboards import MAIN_MENU, cancel_keyboard, main_menu_keyboard
 from utils.telegram_format import pre_block
 
 
-SEARCH_ORDER, CHOOSE_ORDER, FILL_MISSING, WAIT_EXCEL = range(500, 504)
+SEARCH_ORDER, CHOOSE_ORDER, FILL_MISSING, WAIT_EXCEL, CHECK_CONTACT_CHANGE = range(500, 505)
 
 
 FIELD_LABELS = {
@@ -90,6 +90,9 @@ REQUIRED_FIELDS["lengkap"] = list(
     )
 )
 
+CONTACT_CHANGE_ACTIONS = {"lengkap", "report", "sto"}
+NO_CHANGE_VALUES = {"-", "TIDAK", "TIDAK ADA", "TIDAKADA", "NO", "N", "TETAP"}
+
 
 def repository(context: ContextTypes.DEFAULT_TYPE) -> OrderRepository:
     return context.application.bot_data["orders"]
@@ -113,6 +116,13 @@ def command_action(update: Update) -> str:
     text = (update.effective_message.text or "").strip()
     command = text.split(maxsplit=1)[0].lower().split("@", 1)[0]
     return command.removeprefix("/")
+
+
+def clear_order_state(context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data.pop("active_order_id", None)
+    context.user_data.pop("missing_fields", None)
+    context.user_data.pop("order_choices", None)
+    context.user_data.pop("order_action", None)
 
 
 async def start_output(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -208,6 +218,30 @@ async def choose_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return await continue_order(update, context, order)
 
 
+async def maybe_ask_contact_change(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    order: Order,
+    action: str,
+) -> int:
+    if action not in CONTACT_CHANGE_ACTIONS:
+        await send_outputs(update, context, order, action)
+        clear_order_state(context)
+        return ConversationHandler.END
+
+    context.user_data["active_order_id"] = order.id
+    await update.effective_message.reply_text(
+        "Apakah ada perubahan CP atau ALAMAT pelanggan?\n\n"
+        "Jika tidak ada, kirim:\n"
+        "-\n\n"
+        "Jika ada, kirim salah satu atau keduanya seperti ini:\n"
+        "CP: 628xxxxxxxxxx\n"
+        "ALAMAT: alamat terbaru pelanggan\n\n"
+        "Data yang diisi akan menggantikan CP/ALAMAT lama pada hasil /report, /sto, dan /lengkap."
+    )
+    return CHECK_CONTACT_CHANGE
+
+
 async def continue_order(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -234,18 +268,12 @@ async def continue_order(
     database_closed = normalize(order.result) in CLOSED_STATUSES
     reference_closed = is_reference_closed(reference)
     if database_closed or reference_closed:
-        await send_outputs(update, context, order, action)
-        context.user_data.pop("active_order_id", None)
-        context.user_data.pop("missing_fields", None)
-        context.user_data.pop("order_choices", None)
-        context.user_data.pop("order_action", None)
-        return ConversationHandler.END
+        return await maybe_ask_contact_change(update, context, order, action)
 
     missing = missing_fields(order, action)
 
     if not missing:
-        await send_outputs(update, context, order, action)
-        return ConversationHandler.END
+        return await maybe_ask_contact_change(update, context, order, action)
 
     context.user_data["missing_fields"] = missing
 
@@ -265,6 +293,14 @@ async def continue_order(
             f"Jumlah jawaban harus {len(missing)} baris.",
         ]
     )
+
+    if action in CONTACT_CHANGE_ACTIONS:
+        lines.extend(
+            [
+                "",
+                "Setelah data ini lengkap, bot akan menanyakan apakah ada perubahan CP atau ALAMAT pelanggan.",
+            ]
+        )
 
     await update.effective_message.reply_text("\n".join(lines))
     return FILL_MISSING
@@ -293,12 +329,76 @@ async def fill_missing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     order_id = context.user_data.get("active_order_id")
     order = await repository(context).update_fields(order_id, updates)
     action = context.user_data["order_action"]
-
-    await send_outputs(update, context, order, action)
-    context.user_data.pop("active_order_id", None)
     context.user_data.pop("missing_fields", None)
-    context.user_data.pop("order_choices", None)
-    context.user_data.pop("order_action", None)
+
+    return await maybe_ask_contact_change(update, context, order, action)
+
+
+async def receive_contact_change(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> int:
+    if update.effective_message is None or not update.effective_message.text:
+        return CHECK_CONTACT_CHANGE
+
+    raw = update.effective_message.text.strip()
+    normalized = " ".join(raw.upper().split())
+    order_id = context.user_data.get("active_order_id")
+    action = context.user_data.get("order_action")
+
+    if not order_id or action not in REQUIRED_FIELDS:
+        await update.effective_message.reply_text("Sesi order sudah berakhir. Silakan mulai ulang perintah.")
+        clear_order_state(context)
+        return ConversationHandler.END
+
+    order = await repository(context).get(order_id)
+    if order is None:
+        await update.effective_message.reply_text("Order tidak ditemukan.")
+        clear_order_state(context)
+        return ConversationHandler.END
+
+    if normalized in NO_CHANGE_VALUES:
+        await send_outputs(update, context, order, action)
+        clear_order_state(context)
+        return ConversationHandler.END
+
+    changes: dict[str, str] = {}
+    for line_text in raw.splitlines():
+        line = line_text.strip()
+        if not line or ":" not in line:
+            continue
+        label, value = line.split(":", 1)
+        label = " ".join(label.upper().split())
+        value = value.strip()
+        if not value or value == "-":
+            continue
+        if label in {"CP", "NO HP", "NO. HP", "HP", "CUSTOMER PHONE"}:
+            changes["customer_phone"] = value
+        elif label in {"ALAMAT", "ADDRESS"}:
+            changes["address"] = value
+
+    if not changes:
+        await update.effective_message.reply_text(
+            "Format perubahan belum dikenali.\n\n"
+            "Jika tidak ada perubahan, kirim: -\n"
+            "Jika ada, gunakan contoh:\n"
+            "CP: 628xxxxxxxxxx\n"
+            "ALAMAT: alamat terbaru pelanggan"
+        )
+        return CHECK_CONTACT_CHANGE
+
+    order = await repository(context).update_fields(order.id, changes)
+    changed_labels = []
+    if "customer_phone" in changes:
+        changed_labels.append(f"CP → {changes['customer_phone']}")
+    if "address" in changes:
+        changed_labels.append(f"ALAMAT → {changes['address']}")
+
+    await update.effective_message.reply_text(
+        "✅ Data pelanggan diperbarui:\n" + "\n".join(changed_labels)
+    )
+    await send_outputs(update, context, order, action)
+    clear_order_state(context)
     return ConversationHandler.END
 
 
@@ -421,6 +521,9 @@ def build_order_conversation() -> ConversationHandler:
             SEARCH_ORDER: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_search)],
             CHOOSE_ORDER: [MessageHandler(filters.TEXT & ~filters.COMMAND, choose_order)],
             FILL_MISSING: [MessageHandler(filters.TEXT & ~filters.COMMAND, fill_missing)],
+            CHECK_CONTACT_CHANGE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_contact_change)
+            ],
             WAIT_EXCEL: [MessageHandler(filters.Document.ALL, receive_excel)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
