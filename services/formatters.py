@@ -58,6 +58,8 @@ def generate_report(technician: Technician, data: dict, timezone: str) -> str:
         line("VALINS ID", value(data, "valins_id")),
         line("RESULT", value(data, "result")),
         line("KETERANGAN", value(data, "report_description")),
+        line("ALAMAT", value(data, "address")),
+        line("CP", value(data, "customer_phone")),
         "=============================",
     ]
     return "\n".join(rows)
