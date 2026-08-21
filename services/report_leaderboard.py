@@ -16,6 +16,7 @@ from database import Database
 
 
 DEFAULT_REPORT_GROUP_TITLE = "REPLACEMENT 200K | MANJA"
+DEFAULT_STO_RECAP_GROUP_TITLE = "REPORT MANYAR"
 REPORT_GROUP_SETTING_KEY = "report_group_id"
 REPORT_THREAD_SETTING_KEY = "report_thread_id"
 REPORT_BIND_COMMANDS = {"/setreport", "/setreportmanyar"}
@@ -40,6 +41,12 @@ def _normalized_title(value: str | None) -> str:
 
 def _target_group_title() -> str:
     return _normalized_title(os.getenv("REPORT_GROUP_TITLE", DEFAULT_REPORT_GROUP_TITLE))
+
+
+def _sto_recap_group_title() -> str:
+    return _normalized_title(
+        os.getenv("STO_RECAP_GROUP_TITLE", DEFAULT_STO_RECAP_GROUP_TITLE)
+    )
 
 
 def _period_bounds(day: date) -> tuple[date, date]:
@@ -168,6 +175,28 @@ def _store_order(
         conn.close()
 
 
+def _technician_period_total(
+    database_path: Path,
+    period_start: date,
+    technician_nik: str,
+) -> int:
+    conn = sqlite3.connect(database_path)
+    try:
+        _ensure_tables(conn)
+        row = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM report_group_orders
+            WHERE period_start = ? AND technician_nik = ?
+            """,
+            (period_start.isoformat(), technician_nik),
+        ).fetchone()
+        conn.commit()
+        return int(row[0] or 0)
+    finally:
+        conn.close()
+
+
 def _leaderboard_rows(database_path: Path, period_start: date) -> list[tuple[str, int]]:
     conn = sqlite3.connect(database_path)
     try:
@@ -219,6 +248,79 @@ async def _notify_admins(context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
             await context.bot.send_message(chat_id=admin_id, text=text)
         except Exception:
             logging.exception("Gagal mengirim notifikasi binding REPORT MANYAR ke admin_id=%s", admin_id)
+
+
+async def capture_sto_recap_group_message(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    chat = update.effective_chat
+    message = update.effective_message
+    if not chat or not message or chat.type not in {"group", "supergroup"}:
+        return
+    if _normalized_title(chat.title) != _sto_recap_group_title():
+        return
+
+    text = (message.text or message.caption or "").strip()
+    if not text:
+        return
+    command = text.split(maxsplit=1)[0].lower().split("@", 1)[0]
+    if command != "/sto":
+        return
+
+    service_match = NO_SERVICE_RE.search(text)
+    tech_match = TECH_RE.search(text)
+    if not service_match or not tech_match:
+        await message.reply_text(
+            "❌ STO belum bisa direkap. Pastikan ada NO SERVICE dan NIK NAMA TEKNISI."
+        )
+        return
+
+    db: Database = context.application.bot_data["db"]
+    settings = context.application.bot_data["settings"]
+    tz = ZoneInfo(settings.timezone)
+    message_dt = message.date.astimezone(tz)
+    period_start, period_end = _period_bounds(message_dt.date())
+
+    service_number = service_match.group(1).strip()
+    technician_nik = tech_match.group(1).strip()
+    technician_name = tech_match.group(2).strip()
+
+    inserted = await asyncio.to_thread(
+        _store_order,
+        db.db_path,
+        service_number,
+        period_start,
+        technician_nik,
+        technician_name,
+        message_dt,
+        chat.id,
+        message.message_id,
+    )
+    total = await asyncio.to_thread(
+        _technician_period_total,
+        db.db_path,
+        period_start,
+        technician_nik,
+    )
+
+    status = "✅ STO TEREKAP" if inserted else "ℹ️ STO SUDAH TEREKAP"
+    await message.reply_text(
+        f"{status}\n"
+        f"🌐 INET : {service_number}\n"
+        f"👷 TEKNISI : {technician_name.upper()}\n"
+        f"📊 TOTAL PERIODE : {total} order\n"
+        f"📅 PERIODE : {_format_date(period_start)} - {_format_date(period_end)}"
+    )
+
+    logging.info(
+        "STO recap group: inet=%s teknisi=%s (%s) inserted=%s total=%s",
+        service_number,
+        technician_name,
+        technician_nik,
+        inserted,
+        total,
+    )
 
 
 async def capture_report_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
