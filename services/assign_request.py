@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import re
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -33,9 +34,25 @@ def _extract_inets(text: str) -> list[str]:
     return result
 
 
-def _format_assign(inets: list[str], technician_name: str, technician_nik: str) -> str:
-    footer = f"moban assign lensa chat, {technician_name.upper()} ({technician_nik})"
-    return "\n".join([*inets, footer])
+def _technician_tag(user_id: int, username: str | None, display_name: str) -> str:
+    if username:
+        return f"@{html.escape(username)}"
+    safe_name = html.escape(display_name or "TEKNISI")
+    return f'<a href="tg://user?id={user_id}">{safe_name}</a>'
+
+
+def _format_assign(
+    inets: list[str],
+    technician_name: str,
+    technician_nik: str,
+    user_id: int,
+    username: str | None,
+) -> str:
+    safe_name = html.escape(technician_name.upper())
+    safe_nik = html.escape(technician_nik)
+    tag = _technician_tag(user_id, username, technician_name)
+    footer = f"moban assign lensa chat, {safe_name} ({safe_nik})"
+    return "\n".join([*inets, footer, f"TAG : {tag}"])
 
 
 def _format_tiket(inets: list[str]) -> str:
@@ -279,5 +296,14 @@ async def handle_assign_message(update: Update, context: ContextTypes.DEFAULT_TY
         await message.reply_text("✅ Semua INET pekerjaan hari ini sudah ada di grup.")
         return
 
-    sent = await message.reply_text(_format_assign(missing, technician.name, technician.nik))
+    sent = await message.reply_text(
+        _format_assign(
+            missing,
+            technician.name,
+            technician.nik,
+            user.id,
+            user.username,
+        ),
+        parse_mode="HTML",
+    )
     await _remember_inets(db, "assign_group_seen", chat.id, missing, sent.message_id)
