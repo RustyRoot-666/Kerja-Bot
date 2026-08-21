@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 import sqlite3
-from datetime import date, datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -17,12 +17,6 @@ from database import Database
 DEFAULT_GROUP_TITLE = "REPORT MANYAR"
 TARGET_SETTING_KEY = "report_manyar_progress_group_id"
 
-MONTH_NAMES = [
-    "Januari", "Februari", "Maret", "April", "Mei", "Juni",
-    "Juli", "Agustus", "September", "Oktober", "November", "Desember",
-]
-DAY_NAMES = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
-
 
 def _normalized(value: str | None) -> str:
     return " ".join(str(value or "").strip().upper().split())
@@ -30,16 +24,6 @@ def _normalized(value: str | None) -> str:
 
 def _target_title() -> str:
     return _normalized(os.getenv("STO_RECAP_GROUP_TITLE", DEFAULT_GROUP_TITLE))
-
-
-def _period_bounds(day: date) -> tuple[date, date]:
-    days_since_friday = (day.weekday() - 4) % 7
-    start = day - timedelta(days=days_since_friday)
-    return start, start + timedelta(days=6)
-
-
-def _format_date(day: date) -> str:
-    return f"{day.day} {MONTH_NAMES[day.month - 1]} {day.year}"
 
 
 def _ensure_settings_table(conn: sqlite3.Connection) -> None:
@@ -91,22 +75,68 @@ def _get_target(database_path: Path) -> int | None:
         return None
 
 
-def _leaderboard_rows(database_path: Path, period_start: date) -> list[tuple[str, int]]:
+def _today_progress_rows(
+    database_path: Path,
+    day_iso: str,
+) -> list[tuple[str, int, int]]:
+    """Return technician name, CLOSE count and UPDATE count for one local day."""
     conn = sqlite3.connect(database_path)
+    conn.row_factory = sqlite3.Row
     try:
-        rows = conn.execute(
-            """
-            SELECT MAX(technician_name) AS technician_name, COUNT(*) AS total
-            FROM report_group_orders
-            WHERE period_start = ?
-            GROUP BY technician_nik
-            ORDER BY total DESC, UPPER(MAX(technician_name)) ASC
-            """,
-            (period_start.isoformat(),),
-        ).fetchall()
-        return [(str(name), int(total)) for name, total in rows]
-    except sqlite3.OperationalError:
-        return []
+        # CLOSE berasal dari report/STO yang sudah terekap. Satu INET dihitung sekali.
+        try:
+            close_rows = conn.execute(
+                """
+                SELECT technician_nik,
+                       MAX(technician_name) AS technician_name,
+                       COUNT(DISTINCT service_number) AS total
+                FROM report_group_orders
+                WHERE substr(message_date, 1, 10) = ?
+                GROUP BY technician_nik
+                """,
+                (day_iso,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            close_rows = []
+
+        # UPDATE berasal dari /update kendala. Satu INET per teknisi dihitung sekali per hari.
+        try:
+            update_rows = conn.execute(
+                """
+                SELECT telegram_id,
+                       MAX(technician_name) AS technician_name,
+                       COUNT(DISTINCT service_number) AS total
+                FROM kendala_updates
+                WHERE substr(created_at, 1, 10) = ?
+                  AND UPPER(TRIM(status)) = 'UPDATE'
+                GROUP BY telegram_id
+                """,
+                (day_iso,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            update_rows = []
+
+        # Gabungkan berdasarkan nama teknisi karena sumber CLOSE menyimpan NIK,
+        # sedangkan log /update menyimpan Telegram ID.
+        combined: dict[str, dict[str, object]] = {}
+
+        for row in close_rows:
+            name = str(row["technician_name"] or "-").strip().upper()
+            key = _normalized(name)
+            combined[key] = {"name": name, "close": int(row["total"] or 0), "update": 0}
+
+        for row in update_rows:
+            name = str(row["technician_name"] or "-").strip().upper()
+            key = _normalized(name)
+            item = combined.setdefault(key, {"name": name, "close": 0, "update": 0})
+            item["update"] = int(row["total"] or 0)
+
+        rows = [
+            (str(item["name"]), int(item["close"]), int(item["update"]))
+            for item in combined.values()
+        ]
+        rows.sort(key=lambda item: (-(item[1] + item[2]), -item[1], item[0]))
+        return rows
     finally:
         conn.close()
 
@@ -125,24 +155,45 @@ async def remember_report_manyar_group(
     await asyncio.to_thread(_save_target, db.db_path, chat.id)
 
 
-def build_hourly_progress_text(rows: list[tuple[str, int]], now: datetime) -> str:
-    period_start, period_end = _period_bounds(now.date())
-    total = sum(count for _, count in rows)
-    lines = [
-        "📈 AUTO PROGRESS REPORT MANYAR",
-        f"🕐 Update: {DAY_NAMES[now.weekday()]}, {_format_date(now.date())} {now.strftime('%H:%M')}",
-        f"📅 Periode: {_format_date(period_start)} - {_format_date(period_end)}",
-        "",
-    ]
+def build_hourly_progress_text(
+    rows: list[tuple[str, int, int]],
+    now: datetime,
+) -> str:
+    total_close = sum(close for _, close, _ in rows)
+    total_update = sum(update for _, _, update in rows)
+    total_reports = total_close + total_update
+
+    lines = ["📊 PROGRESS MANYAR", ""]
 
     if rows:
-        width = max(len(name.upper()) for name, _ in rows)
-        for index, (name, count) in enumerate(rows, start=1):
-            lines.append(f"{index}. {name.upper().ljust(width)} : {count} order")
-        lines.extend(["", f"📊 TOTAL PROGRESS : {total} order"])
+        for index, (name, close, update) in enumerate(rows):
+            if index:
+                lines.append("")
+            lines.extend(
+                [
+                    f"👨 {name.upper()}",
+                    f"✅ Close : {close}",
+                    f"🔄 Update : {update}",
+                ]
+            )
     else:
-        lines.append("Belum ada order yang terekap pada periode ini.")
+        lines.extend(
+            [
+                "Belum ada laporan hari ini.",
+            ]
+        )
 
+    lines.extend(
+        [
+            "",
+            "============================",
+            f"📌 TOTAL CLOSE : {total_close}",
+            f"📌 TOTAL UPDATE : {total_update}",
+            f"📌 TOTAL LAPORAN : {total_reports}",
+            "",
+            f"⏰ Auto update {now.strftime('%H:%M')} WIB",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -152,7 +203,6 @@ async def send_hourly_report_progress(context: ContextTypes.DEFAULT_TYPE) -> Non
     settings = app.bot_data["settings"]
     tz = ZoneInfo(settings.timezone)
     now = datetime.now(tz)
-    period_start, _ = _period_bounds(now.date())
 
     chat_id = await asyncio.to_thread(_get_target, db.db_path)
     if chat_id is None:
@@ -161,7 +211,7 @@ async def send_hourly_report_progress(context: ContextTypes.DEFAULT_TYPE) -> Non
         )
         return
 
-    rows = await asyncio.to_thread(_leaderboard_rows, db.db_path, period_start)
+    rows = await asyncio.to_thread(_today_progress_rows, db.db_path, now.date().isoformat())
     await context.bot.send_message(
         chat_id=chat_id,
         text=build_hourly_progress_text(rows, now),
