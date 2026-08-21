@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import time
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import handlers.order_flow as order_flow_module
@@ -128,13 +128,16 @@ async def post_init(application: Application) -> None:
             first=5,
             name="google-sheet-auto-sync",
         )
+        recap_tz = ZoneInfo(application.bot_data["settings"].timezone)
+        now = datetime.now(recap_tz)
+        next_hour = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+        first_progress = max(1, int((next_hour - now).total_seconds()))
         application.job_queue.run_repeating(
             send_hourly_report_progress,
             interval=REPORT_PROGRESS_SECONDS,
-            first=REPORT_PROGRESS_SECONDS,
+            first=first_progress,
             name="hourly-report-manyar-progress",
         )
-        recap_tz = ZoneInfo(application.bot_data["settings"].timezone)
         application.job_queue.run_daily(
             send_report_leaderboard,
             time=time(hour=22, minute=0, tzinfo=recap_tz),
