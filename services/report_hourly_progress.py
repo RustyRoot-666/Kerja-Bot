@@ -18,6 +18,8 @@ DEFAULT_GROUP_TITLE = "REPORT MANYAR"
 TARGET_SETTING_KEY = "report_manyar_progress_group_id"
 REPORT_GROUP_SETTING_KEY = "report_group_id"
 REPORT_THREAD_SETTING_KEY = "report_thread_id"
+AUTO_PROGRESS_START_HOUR = 6
+AUTO_PROGRESS_END_HOUR = 23
 
 
 def _normalized(value: str | None) -> str:
@@ -229,6 +231,15 @@ async def send_hourly_report_progress(context: ContextTypes.DEFAULT_TYPE) -> Non
     settings = app.bot_data["settings"]
     tz = ZoneInfo(settings.timezone)
     now = datetime.now(tz)
+
+    # Auto progress hanya aktif setiap hari pukul 06:00 sampai sebelum 24:00.
+    # Job tetap berdetak per jam, tetapi pengiriman 00:00-05:59 dilewati.
+    if now.hour < AUTO_PROGRESS_START_HOUR or now.hour > AUTO_PROGRESS_END_HOUR:
+        logging.debug(
+            "Auto progress REPORT MANYAR dilewati di luar jam aktif: %s",
+            now.strftime("%H:%M"),
+        )
+        return
 
     bound_group_id = await asyncio.to_thread(_get_setting, db.db_path, REPORT_GROUP_SETTING_KEY)
     bound_thread_id = await asyncio.to_thread(_get_setting, db.db_path, REPORT_THREAD_SETTING_KEY)
