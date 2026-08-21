@@ -16,6 +16,8 @@ from database import Database
 
 DEFAULT_GROUP_TITLE = "REPORT MANYAR"
 TARGET_SETTING_KEY = "report_manyar_progress_group_id"
+REPORT_GROUP_SETTING_KEY = "report_group_id"
+REPORT_THREAD_SETTING_KEY = "report_thread_id"
 
 
 def _normalized(value: str | None) -> str:
@@ -56,13 +58,13 @@ def _save_target(database_path: Path, chat_id: int) -> None:
         conn.close()
 
 
-def _get_target(database_path: Path) -> int | None:
+def _get_setting(database_path: Path, key: str) -> int | None:
     conn = sqlite3.connect(database_path)
     try:
         _ensure_settings_table(conn)
         row = conn.execute(
             "SELECT value FROM report_bot_settings WHERE key = ?",
-            (TARGET_SETTING_KEY,),
+            (key,),
         ).fetchone()
         conn.commit()
     finally:
@@ -73,6 +75,10 @@ def _get_target(database_path: Path) -> int | None:
         return int(row[0])
     except (TypeError, ValueError):
         return None
+
+
+def _get_target(database_path: Path) -> int | None:
+    return _get_setting(database_path, TARGET_SETTING_KEY)
 
 
 def _today_progress_rows(
@@ -183,14 +189,26 @@ async def remember_report_manyar_group(
     message = update.effective_message
     if not chat or not message or chat.type not in {"group", "supergroup"}:
         return
-    if _normalized(chat.title) != _target_title():
-        return
 
     db: Database = context.application.bot_data["db"]
-    await asyncio.to_thread(_save_target, db.db_path, chat.id)
-
     text = (message.text or message.caption or "").strip()
     command = text.split(maxsplit=1)[0].lower().split("@", 1)[0] if text else ""
+
+    standalone_report_group = _normalized(chat.title) == _target_title()
+    bound_group_id = await asyncio.to_thread(_get_setting, db.db_path, REPORT_GROUP_SETTING_KEY)
+    bound_thread_id = await asyncio.to_thread(_get_setting, db.db_path, REPORT_THREAD_SETTING_KEY)
+    bound_report_topic = (
+        bound_group_id is not None
+        and bound_thread_id is not None
+        and chat.id == bound_group_id
+        and message.message_thread_id == bound_thread_id
+    )
+
+    if not standalone_report_group and not bound_report_topic:
+        return
+
+    await asyncio.to_thread(_save_target, db.db_path, chat.id)
+
     if command != "/progres":
         return
 
@@ -212,15 +230,27 @@ async def send_hourly_report_progress(context: ContextTypes.DEFAULT_TYPE) -> Non
     tz = ZoneInfo(settings.timezone)
     now = datetime.now(tz)
 
-    chat_id = await asyncio.to_thread(_get_target, db.db_path)
+    bound_group_id = await asyncio.to_thread(_get_setting, db.db_path, REPORT_GROUP_SETTING_KEY)
+    bound_thread_id = await asyncio.to_thread(_get_setting, db.db_path, REPORT_THREAD_SETTING_KEY)
+
+    chat_id = bound_group_id
+    thread_id = bound_thread_id
+    if chat_id is None:
+        chat_id = await asyncio.to_thread(_get_target, db.db_path)
+        thread_id = None
+
     if chat_id is None:
         logging.warning(
-            "Auto progress REPORT MANYAR belum dikirim: bot belum melihat pesan di grup REPORT MANYAR."
+            "Auto progress REPORT MANYAR belum dikirim: target REPORT MANYAR belum tersimpan."
         )
         return
 
     rows = await asyncio.to_thread(_today_progress_rows, db.db_path, now.date().isoformat())
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=build_hourly_progress_text(rows, now),
-    )
+    send_kwargs = {
+        "chat_id": chat_id,
+        "text": build_hourly_progress_text(rows, now),
+    }
+    if thread_id is not None:
+        send_kwargs["message_thread_id"] = thread_id
+
+    await context.bot.send_message(**send_kwargs)
