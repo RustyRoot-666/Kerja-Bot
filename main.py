@@ -25,6 +25,7 @@ from handlers.common import (
     search,
     settings_menu,
 )
+from handlers.customer_format import format_customer_command
 from handlers.excel_status import build_excel_status_handlers
 from handlers.google_sheet import build_google_sheet_handlers
 from handlers.login import build_login_conversation, start
@@ -145,7 +146,7 @@ async def post_init(application: Application) -> None:
         )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, report leaderboard, daily close, /update kendala, /assign NTE Manyar, private /tiket, and previous-week catch-up initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, report leaderboard, daily close, /update kendala, /assign NTE Manyar, private /tiket, /format WhatsApp customer, and previous-week catch-up initialized"
     )
 
 
@@ -213,6 +214,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("export", export_history))
     app.add_handler(CommandHandler("profile", profile))
     app.add_handler(CommandHandler("settings", settings_menu))
+    app.add_handler(CommandHandler("format", format_customer_command))
     app.add_handler(CommandHandler("rekapharian", recap_harian_command))
     app.add_handler(CommandHandler("rekapmingguan", recap_mingguan_command))
     app.add_handler(CommandHandler("leaderboard", leaderboard_command))
