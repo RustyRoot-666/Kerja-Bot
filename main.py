@@ -58,7 +58,7 @@ from services.report_leaderboard import (
     send_daily_close,
     send_report_leaderboard,
 )
-from services.update_kendala import handle_update_message
+from services.update_kendala import handle_update_message, migrate_existing_evidence_urls
 from utils.keyboards import MAIN_MENU
 from utils.logging import setup_logging
 
@@ -114,6 +114,12 @@ async def post_init(application: Application) -> None:
     await initialize_sheet_config(application.bot_data["settings"].database_path)
     await initialize_recap_delivery_log(db)
 
+    try:
+        migrated = await migrate_existing_evidence_urls()
+        logging.info("Kendala evidence URL migration complete: updated=%s", migrated)
+    except Exception:
+        logging.exception("Kendala evidence URL migration failed; bot startup continues")
+
     await send_previous_week_recaps_once(application)
 
     if application.job_queue is None:
@@ -161,7 +167,7 @@ async def post_init(application: Application) -> None:
         )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, report leaderboard, daily close, hourly REPORT MANYAR progress, /update kendala, /assign NTE Manyar, private /tiket, /format WhatsApp customer, STO recap replies in REPORT MANYAR, and previous-week catch-up initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, report leaderboard, daily close, hourly REPORT MANYAR progress, /update kendala, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, STO recap replies in REPORT MANYAR, and previous-week catch-up initialized"
     )
 
 
@@ -195,21 +201,15 @@ def build_application() -> Application:
 
     install_auto_close(order_flow_module)
 
-    # Silently remember the dedicated REPORT MANYAR chat for hourly progress.
     app.add_handler(
         MessageHandler(filters.ChatType.GROUPS, remember_report_manyar_group),
         group=-6,
     )
-    # Dedicated REPORT MANYAR group: acknowledge and recap /STO messages.
     app.add_handler(
         MessageHandler(filters.ChatType.GROUPS, capture_sto_recap_group_message),
         group=-5,
     )
-    # /assign is group-only inside the service; /tiket is private-only.
-    # Run before generic handlers so both modes are available.
     app.add_handler(MessageHandler(filters.ALL, handle_assign_message), group=-4)
-    # /update must be able to work in both private chats and the dedicated
-    # kendala group before generic group handlers ignore other messages.
     app.add_handler(MessageHandler(filters.ALL, handle_update_message), group=-3)
     app.add_handler(
         MessageHandler(filters.ChatType.GROUPS, capture_report_group_message),
