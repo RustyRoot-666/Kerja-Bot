@@ -25,6 +25,7 @@ PENDING_KEY = "pending_kendala_update"
 UPDATE_RE = re.compile(r"^/update(?:@\w+)?\s+(\d{6,})\s+(.+)$", re.IGNORECASE | re.DOTALL)
 CANCEL_RE = re.compile(r"^/batalupdate(?:@\w+)?$", re.IGNORECASE)
 KENDALA_GROUP_CANONICAL = "REPLACEMENT 200K MANJA"
+DEFAULT_EVIDENCE_BASE_URL = "https://app.botkerja.web.id"
 HEADERS = [
     "TANGGAL",
     "INET",
@@ -70,7 +71,6 @@ def _group_allowed(
             logging.error("KENDALA_GROUP_ID tidak valid: %r", raw_group_id)
             return False
 
-    # WORK ORDER MANYAR adalah topic/forum, bukan chat.title.
     if not is_topic_message or not message_thread_id:
         return False
 
@@ -151,16 +151,40 @@ def _sheet_name() -> str:
     return os.getenv("KENDALA_SHEET_NAME", "Kendala").strip() or "Kendala"
 
 
-def _upsert_sheet_row(row: list[str]) -> str:
+def _evidence_base_url() -> str:
+    return os.getenv("EVIDENCE_BASE_URL", DEFAULT_EVIDENCE_BASE_URL).strip().rstrip("/")
+
+
+def _evidence_public_url(path_or_url: str) -> str:
+    value = str(path_or_url or "").strip().replace("\\", "/")
+    if not value:
+        return value
+    if value.startswith("http://") or value.startswith("https://"):
+        return value
+
+    marker = "evidence/"
+    lowered = value.lower()
+    marker_index = lowered.find(marker)
+    if marker_index >= 0:
+        relative = value[marker_index:].lstrip("/")
+    else:
+        relative = value.lstrip("/")
+    return f"{_evidence_base_url()}/{relative}"
+
+
+def _google_service():
     credentials_path = _credentials_path()
     if not credentials_path.exists():
         raise RuntimeError(f"Credential Google Sheets belum ada di {credentials_path}.")
-
     credentials = service_account.Credentials.from_service_account_file(
         str(credentials_path),
         scopes=["https://www.googleapis.com/auth/spreadsheets"],
     )
-    service = build("sheets", "v4", credentials=credentials, cache_discovery=False)
+    return build("sheets", "v4", credentials=credentials, cache_discovery=False)
+
+
+def _upsert_sheet_row(row: list[str]) -> str:
+    service = _google_service()
     spreadsheet_id = _spreadsheet_id()
     sheet_name = _sheet_name().replace("'", "''")
     range_prefix = f"'{sheet_name}'"
@@ -199,6 +223,46 @@ def _upsert_sheet_row(row: list[str]) -> str:
         body={"values": [row]},
     ).execute()
     return "INSERTED"
+
+
+def _migrate_existing_sheet_evidence_urls() -> int:
+    """Convert old local evidence paths in Sheet Kendala column K to public URLs."""
+    service = _google_service()
+    spreadsheet_id = _spreadsheet_id()
+    sheet_name = _sheet_name().replace("'", "''")
+    range_prefix = f"'{sheet_name}'"
+    current = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"{range_prefix}!K2:K",
+    ).execute().get("values", [])
+
+    updates = []
+    for row_number, row in enumerate(current, start=2):
+        value = str(row[0]).strip() if row else ""
+        if not value or value.startswith("http://") or value.startswith("https://"):
+            continue
+        new_value = _evidence_public_url(value)
+        if new_value == value:
+            continue
+        updates.append(
+            {
+                "range": f"{range_prefix}!K{row_number}",
+                "values": [[new_value]],
+            }
+        )
+
+    if not updates:
+        return 0
+
+    service.spreadsheets().values().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={"valueInputOption": "RAW", "data": updates},
+    ).execute()
+    return len(updates)
+
+
+async def migrate_existing_evidence_urls() -> int:
+    return await asyncio.to_thread(_migrate_existing_sheet_evidence_urls)
 
 
 def _ensure_log_table(database_path: Path) -> None:
@@ -309,6 +373,7 @@ async def _finalize_update(update: Update, context: ContextTypes.DEFAULT_TYPE, p
             return
 
         evidence_path = await _download_evidence(message, context, pending["service_number"])
+        evidence_url = _evidence_public_url(evidence_path)
         settings = context.application.bot_data["settings"]
         tz = ZoneInfo(settings.timezone)
         now = datetime.now(tz)
@@ -325,7 +390,7 @@ async def _finalize_update(update: Update, context: ContextTypes.DEFAULT_TYPE, p
             status,
             rca,
             pending["description"],
-            evidence_path,
+            evidence_url,
         ]
         sheet_action = await asyncio.to_thread(_upsert_sheet_row, row)
 
@@ -348,7 +413,7 @@ async def _finalize_update(update: Update, context: ContextTypes.DEFAULT_TYPE, p
             f"📌 STATUS: {status}\n"
             f"🧩 RCA   : {rca}\n"
             f"📝 KET   : {pending['description']}\n"
-            f"📎 EVIDEN: {evidence_path}"
+            f"📎 EVIDEN: {evidence_url}"
         )
     except Exception as exc:
         logging.exception("Gagal menyimpan /update kendala")
