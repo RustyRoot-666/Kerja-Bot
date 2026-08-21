@@ -50,6 +50,7 @@ from services.logic_dispatch import detect_logic_group, ignore_group_message
 from services.order_repository import OrderRepository
 from services.report_leaderboard import (
     capture_report_group_message,
+    capture_sto_recap_group_message,
     send_daily_close,
     send_report_leaderboard,
 )
@@ -146,7 +147,7 @@ async def post_init(application: Application) -> None:
         )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, report leaderboard, daily close, /update kendala, /assign NTE Manyar, private /tiket, /format WhatsApp customer, and previous-week catch-up initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, report leaderboard, daily close, /update kendala, /assign NTE Manyar, private /tiket, /format WhatsApp customer, STO recap replies in REPORT MANYAR, and previous-week catch-up initialized"
     )
 
 
@@ -180,6 +181,11 @@ def build_application() -> Application:
 
     install_auto_close(order_flow_module)
 
+    # Dedicated REPORT MANYAR group: acknowledge and recap /STO messages.
+    app.add_handler(
+        MessageHandler(filters.ChatType.GROUPS, capture_sto_recap_group_message),
+        group=-5,
+    )
     # /assign is group-only inside the service; /tiket is private-only.
     # Run before generic handlers so both modes are available.
     app.add_handler(MessageHandler(filters.ALL, handle_assign_message), group=-4)
