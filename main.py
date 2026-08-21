@@ -48,6 +48,10 @@ from services.google_sheet_reference import (
 )
 from services.logic_dispatch import detect_logic_group, ignore_group_message
 from services.order_repository import OrderRepository
+from services.report_hourly_progress import (
+    remember_report_manyar_group,
+    send_hourly_report_progress,
+)
 from services.report_leaderboard import (
     capture_report_group_message,
     capture_sto_recap_group_message,
@@ -60,6 +64,7 @@ from utils.logging import setup_logging
 
 
 AUTO_SHEET_SYNC_SECONDS = 180
+REPORT_PROGRESS_SECONDS = 3600
 
 
 async def auto_sync_google_sheet(context) -> None:
@@ -113,7 +118,7 @@ async def post_init(application: Application) -> None:
 
     if application.job_queue is None:
         logging.warning(
-            "JobQueue unavailable; Google Sheet auto-sync, technician recaps, leaderboard, and daily close are disabled. "
+            "JobQueue unavailable; Google Sheet auto-sync, technician recaps, leaderboard, daily close, and hourly REPORT MANYAR progress are disabled. "
             "Install python-telegram-bot[job-queue]."
         )
     else:
@@ -122,6 +127,12 @@ async def post_init(application: Application) -> None:
             interval=AUTO_SHEET_SYNC_SECONDS,
             first=5,
             name="google-sheet-auto-sync",
+        )
+        application.job_queue.run_repeating(
+            send_hourly_report_progress,
+            interval=REPORT_PROGRESS_SECONDS,
+            first=REPORT_PROGRESS_SECONDS,
+            name="hourly-report-manyar-progress",
         )
         recap_tz = ZoneInfo(application.bot_data["settings"].timezone)
         application.job_queue.run_daily(
@@ -147,7 +158,7 @@ async def post_init(application: Application) -> None:
         )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, report leaderboard, daily close, /update kendala, /assign NTE Manyar, private /tiket, /format WhatsApp customer, STO recap replies in REPORT MANYAR, and previous-week catch-up initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, report leaderboard, daily close, hourly REPORT MANYAR progress, /update kendala, /assign NTE Manyar, private /tiket, /format WhatsApp customer, STO recap replies in REPORT MANYAR, and previous-week catch-up initialized"
     )
 
 
@@ -181,6 +192,11 @@ def build_application() -> Application:
 
     install_auto_close(order_flow_module)
 
+    # Silently remember the dedicated REPORT MANYAR chat for hourly progress.
+    app.add_handler(
+        MessageHandler(filters.ChatType.GROUPS, remember_report_manyar_group),
+        group=-6,
+    )
     # Dedicated REPORT MANYAR group: acknowledge and recap /STO messages.
     app.add_handler(
         MessageHandler(filters.ChatType.GROUPS, capture_sto_recap_group_message),
