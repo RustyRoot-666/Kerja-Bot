@@ -147,30 +147,79 @@ def _store_order(
     message_date: datetime,
     chat_id: int,
     message_id: int | None,
-) -> bool:
+) -> str:
+    """Store one /sto per INET/period and let the latest real /sto correct ownership."""
     conn = sqlite3.connect(database_path)
     try:
         _ensure_tables(conn)
-        cursor = conn.execute(
+        period_iso = period_start.isoformat()
+        clean_name = technician_name.strip()
+        message_iso = message_date.isoformat()
+        existing = conn.execute(
             """
-            INSERT OR IGNORE INTO report_group_orders (
-                service_number, period_start, technician_nik, technician_name,
-                message_date, chat_id, message_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            SELECT technician_nik, technician_name, message_date, chat_id, message_id
+            FROM report_group_orders
+            WHERE service_number = ? AND period_start = ?
+            """,
+            (service_number, period_iso),
+        ).fetchone()
+
+        if existing is None:
+            conn.execute(
+                """
+                INSERT INTO report_group_orders (
+                    service_number, period_start, technician_nik, technician_name,
+                    message_date, chat_id, message_id, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    service_number,
+                    period_iso,
+                    technician_nik,
+                    clean_name,
+                    message_iso,
+                    chat_id,
+                    message_id,
+                    _utc_now(),
+                ),
+            )
+            conn.commit()
+            return "INSERTED"
+
+        same_report = (
+            str(existing[0]) == technician_nik
+            and str(existing[1]).strip() == clean_name
+            and str(existing[2]) == message_iso
+            and int(existing[3]) == chat_id
+            and existing[4] == message_id
+        )
+        if same_report:
+            return "UNCHANGED"
+
+        conn.execute(
+            """
+            UPDATE report_group_orders
+            SET technician_nik = ?,
+                technician_name = ?,
+                message_date = ?,
+                chat_id = ?,
+                message_id = ?,
+                created_at = ?
+            WHERE service_number = ? AND period_start = ?
             """,
             (
-                service_number,
-                period_start.isoformat(),
                 technician_nik,
-                technician_name.strip(),
-                message_date.isoformat(),
+                clean_name,
+                message_iso,
                 chat_id,
                 message_id,
                 _utc_now(),
+                service_number,
+                period_iso,
             ),
         )
         conn.commit()
-        return cursor.rowcount > 0
+        return "UPDATED"
     finally:
         conn.close()
 
@@ -190,6 +239,28 @@ def _technician_period_total(
             WHERE period_start = ? AND technician_nik = ?
             """,
             (period_start.isoformat(), technician_nik),
+        ).fetchone()
+        conn.commit()
+        return int(row[0] or 0)
+    finally:
+        conn.close()
+
+
+def _technician_daily_total(
+    database_path: Path,
+    day: date,
+    technician_nik: str,
+) -> int:
+    conn = sqlite3.connect(database_path)
+    try:
+        _ensure_tables(conn)
+        row = conn.execute(
+            """
+            SELECT COUNT(DISTINCT service_number)
+            FROM report_group_orders
+            WHERE substr(message_date, 1, 10) = ? AND technician_nik = ?
+            """,
+            (day.isoformat(), technician_nik),
         ).fetchone()
         conn.commit()
         return int(row[0] or 0)
@@ -223,7 +294,8 @@ def _daily_close_rows(database_path: Path, day: date) -> list[tuple[str, int]]:
         _ensure_tables(conn)
         rows = conn.execute(
             """
-            SELECT MAX(technician_name) AS technician_name, COUNT(*) AS total
+            SELECT MAX(technician_name) AS technician_name,
+                   COUNT(DISTINCT service_number) AS total
             FROM report_group_orders
             WHERE substr(message_date, 1, 10) = ?
             GROUP BY technician_nik
@@ -286,7 +358,7 @@ async def capture_sto_recap_group_message(
     technician_nik = tech_match.group(1).strip()
     technician_name = tech_match.group(2).strip()
 
-    inserted = await asyncio.to_thread(
+    action = await asyncio.to_thread(
         _store_order,
         db.db_path,
         service_number,
@@ -297,29 +369,43 @@ async def capture_sto_recap_group_message(
         chat.id,
         message.message_id,
     )
-    total = await asyncio.to_thread(
+    total_today = await asyncio.to_thread(
+        _technician_daily_total,
+        db.db_path,
+        message_dt.date(),
+        technician_nik,
+    )
+    total_period = await asyncio.to_thread(
         _technician_period_total,
         db.db_path,
         period_start,
         technician_nik,
     )
 
-    status = "✅ STO TEREKAP" if inserted else "ℹ️ STO SUDAH TEREKAP"
+    if action == "INSERTED":
+        status = "✅ STO TEREKAP"
+    elif action == "UPDATED":
+        status = "♻️ STO DIPERBARUI"
+    else:
+        status = "ℹ️ STO SUDAH TEREKAP"
+
     await message.reply_text(
         f"{status}\n"
         f"🌐 INET : {service_number}\n"
         f"👷 TEKNISI : {technician_name.upper()}\n"
-        f"📊 TOTAL PERIODE : {total} order\n"
+        f"📊 HARI INI : {total_today} order\n"
+        f"📊 TOTAL PERIODE : {total_period} order\n"
         f"📅 PERIODE : {_format_date(period_start)} - {_format_date(period_end)}"
     )
 
     logging.info(
-        "STO recap group: inet=%s teknisi=%s (%s) inserted=%s total=%s",
+        "STO recap group: inet=%s teknisi=%s (%s) action=%s today=%s period=%s",
         service_number,
         technician_name,
         technician_nik,
-        inserted,
-        total,
+        action,
+        total_today,
+        total_period,
     )
 
 
@@ -371,20 +457,28 @@ async def capture_report_group_message(update: Update, context: ContextTypes.DEF
             await send_daily_close(context)
         return
 
+    # Hanya /sto yang boleh menambah/memperbarui hitungan report.
+    # Pesan /report, reply bot, atau teks lain yang kebetulan punya INET/TEKNISI diabaikan.
+    if command != "/sto":
+        return
+
     service_match = NO_SERVICE_RE.search(text)
     tech_match = TECH_RE.search(text)
     if not service_match or not tech_match:
+        await message.reply_text(
+            "❌ REPORT belum bisa disimpan. Pastikan /sto berisi NO SERVICE dan NIK NAMA TEKNISI."
+        )
         return
 
     tz = ZoneInfo(settings.timezone)
     message_dt = message.date.astimezone(tz)
-    period_start, _ = _period_bounds(message_dt.date())
+    period_start, period_end = _period_bounds(message_dt.date())
 
     service_number = service_match.group(1).strip()
     technician_nik = tech_match.group(1).strip()
     technician_name = tech_match.group(2).strip()
 
-    inserted = await asyncio.to_thread(
+    action = await asyncio.to_thread(
         _store_order,
         db.db_path,
         service_number,
@@ -395,15 +489,46 @@ async def capture_report_group_message(update: Update, context: ContextTypes.DEF
         chat.id,
         message.message_id,
     )
-    if inserted:
-        logging.info(
-            "Report order captured: inet=%s teknisi=%s (%s) periode=%s thread_id=%s",
-            service_number,
-            technician_name,
-            technician_nik,
-            period_start,
-            message.message_thread_id,
-        )
+    total_today = await asyncio.to_thread(
+        _technician_daily_total,
+        db.db_path,
+        message_dt.date(),
+        technician_nik,
+    )
+    total_period = await asyncio.to_thread(
+        _technician_period_total,
+        db.db_path,
+        period_start,
+        technician_nik,
+    )
+
+    if action == "INSERTED":
+        status = "✅ REPORT SUDAH TERSIMPAN"
+    elif action == "UPDATED":
+        status = "♻️ REPORT DIPERBARUI"
+    else:
+        status = "ℹ️ REPORT SUDAH TERSIMPAN"
+
+    await message.reply_text(
+        f"{status}\n"
+        f"🌐 INET : {service_number}\n"
+        f"👷 TEKNISI : {technician_name.upper()}\n"
+        f"📊 HARI INI : {total_today} order\n"
+        f"📊 TOTAL PERIODE : {total_period} order"
+    )
+
+    logging.info(
+        "Report /sto captured: inet=%s teknisi=%s (%s) action=%s today=%s period=%s range=%s..%s thread_id=%s",
+        service_number,
+        technician_name,
+        technician_nik,
+        action,
+        total_today,
+        total_period,
+        period_start,
+        period_end,
+        message.message_thread_id,
+    )
 
 
 def build_leaderboard_text(rows: list[tuple[str, int]], today: date) -> str:
