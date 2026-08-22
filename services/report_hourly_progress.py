@@ -12,7 +12,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from database import Database
-from services.report_multi_topic import list_registered_topics
+from services.report_multi_topic import get_topic_identity, list_registered_topics
 
 
 DEFAULT_GROUP_TITLE = "REPORT MANYAR"
@@ -169,6 +169,11 @@ def _progress_identity_for_topic(
     chat_id: int,
     thread_id: int | None,
 ) -> tuple[str, str]:
+    if thread_id is not None:
+        identity = get_topic_identity(database_path, chat_id, thread_id)
+        if identity:
+            return identity
+
     primary_group = _get_setting(database_path, REPORT_GROUP_SETTING_KEY)
     primary_thread = _get_setting(database_path, REPORT_THREAD_SETTING_KEY)
     if (
