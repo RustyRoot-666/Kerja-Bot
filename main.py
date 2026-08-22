@@ -58,6 +58,7 @@ from services.report_leaderboard import (
     send_daily_close,
     send_report_leaderboard,
 )
+from services.report_multi_topic import handle_multi_report_topic
 from services.update_kendala import handle_update_message, migrate_existing_evidence_urls
 from utils.keyboards import MAIN_MENU
 from utils.logging import setup_logging
@@ -167,7 +168,7 @@ async def post_init(application: Application) -> None:
         )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, report leaderboard, daily close, hourly REPORT MANYAR progress, /update kendala, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, STO recap replies in REPORT MANYAR, and previous-week catch-up initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, report leaderboard, daily close, hourly REPORT MANYAR progress, multi-topic /sto report, /update kendala, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, STO recap replies in REPORT MANYAR, and previous-week catch-up initialized"
     )
 
 
@@ -201,6 +202,12 @@ def build_application() -> Application:
 
     install_auto_close(order_flow_module)
 
+    # Multi-topic REPORT harus diproses paling awal. Handler ini hanya mengambil
+    # topic tambahan; topic utama tetap diteruskan ke handler report lama.
+    app.add_handler(
+        MessageHandler(filters.ChatType.GROUPS, handle_multi_report_topic),
+        group=-7,
+    )
     app.add_handler(
         MessageHandler(filters.ChatType.GROUPS, remember_report_manyar_group),
         group=-6,
