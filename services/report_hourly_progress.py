@@ -23,6 +23,8 @@ AUTO_PROGRESS_START_HOUR = 6
 AUTO_PROGRESS_END_HOUR = 23
 PRIMARY_PROGRESS_LABEL = "MANYAR"
 SECONDARY_PROGRESS_LABEL = "JAGIR"
+PRIMARY_STO_CODE = "MYR"
+SECONDARY_STO_CODE = "JGR"
 
 
 def _normalized(value: str | None) -> str:
@@ -89,22 +91,30 @@ def _get_target(database_path: Path) -> int | None:
 def _today_progress_rows(
     database_path: Path,
     day_iso: str,
+    sto_code: str,
 ) -> list[tuple[str, int, int]]:
-    """Return technician name, CLOSE count and UPDATE count for one local day."""
+    """Return CLOSE/UPDATE per technician for one local day and one STO."""
     conn = sqlite3.connect(database_path)
     conn.row_factory = sqlite3.Row
+    sto_code = _normalized(sto_code)
     try:
         try:
             close_rows = conn.execute(
                 """
-                SELECT technician_nik,
-                       MAX(technician_name) AS technician_name,
-                       COUNT(DISTINCT service_number) AS total
-                FROM report_group_orders
-                WHERE substr(message_date, 1, 10) = ?
-                GROUP BY technician_nik
+                SELECT r.technician_nik,
+                       MAX(r.technician_name) AS technician_name,
+                       COUNT(DISTINCT r.service_number) AS total
+                FROM report_group_orders r
+                WHERE substr(r.message_date, 1, 10) = ?
+                  AND EXISTS (
+                      SELECT 1
+                      FROM orders o
+                      WHERE o.service_number = r.service_number
+                        AND UPPER(TRIM(o.sto)) = ?
+                  )
+                GROUP BY r.technician_nik
                 """,
-                (day_iso,),
+                (day_iso, sto_code),
             ).fetchall()
         except sqlite3.OperationalError:
             close_rows = []
@@ -112,15 +122,21 @@ def _today_progress_rows(
         try:
             update_rows = conn.execute(
                 """
-                SELECT telegram_id,
-                       MAX(technician_name) AS technician_name,
-                       COUNT(DISTINCT service_number) AS total
-                FROM kendala_updates
-                WHERE substr(created_at, 1, 10) = ?
-                  AND UPPER(TRIM(status)) = 'UPDATE'
-                GROUP BY telegram_id
+                SELECT k.telegram_id,
+                       MAX(k.technician_name) AS technician_name,
+                       COUNT(DISTINCT k.service_number) AS total
+                FROM kendala_updates k
+                WHERE substr(k.created_at, 1, 10) = ?
+                  AND UPPER(TRIM(k.status)) = 'UPDATE'
+                  AND EXISTS (
+                      SELECT 1
+                      FROM orders o
+                      WHERE o.service_number = k.service_number
+                        AND UPPER(TRIM(o.sto)) = ?
+                  )
+                GROUP BY k.telegram_id
                 """,
-                (day_iso,),
+                (day_iso, sto_code),
             ).fetchall()
         except sqlite3.OperationalError:
             update_rows = []
@@ -148,11 +164,11 @@ def _today_progress_rows(
         conn.close()
 
 
-def _progress_label_for_topic(
+def _progress_identity_for_topic(
     database_path: Path,
     chat_id: int,
     thread_id: int | None,
-) -> str:
+) -> tuple[str, str]:
     primary_group = _get_setting(database_path, REPORT_GROUP_SETTING_KEY)
     primary_thread = _get_setting(database_path, REPORT_THREAD_SETTING_KEY)
     if (
@@ -160,8 +176,8 @@ def _progress_label_for_topic(
         and primary_group == chat_id
         and primary_thread == thread_id
     ):
-        return PRIMARY_PROGRESS_LABEL
-    return SECONDARY_PROGRESS_LABEL
+        return PRIMARY_PROGRESS_LABEL, PRIMARY_STO_CODE
+    return SECONDARY_PROGRESS_LABEL, SECONDARY_STO_CODE
 
 
 def build_hourly_progress_text(
@@ -232,16 +248,17 @@ async def remember_report_manyar_group(
     settings = context.application.bot_data["settings"]
     tz = ZoneInfo(settings.timezone)
     now = datetime.now(tz)
+    area_label, sto_code = await asyncio.to_thread(
+        _progress_identity_for_topic,
+        db.db_path,
+        chat.id,
+        message.message_thread_id,
+    )
     rows = await asyncio.to_thread(
         _today_progress_rows,
         db.db_path,
         now.date().isoformat(),
-    )
-    area_label = await asyncio.to_thread(
-        _progress_label_for_topic,
-        db.db_path,
-        chat.id,
-        message.message_thread_id,
+        sto_code,
     )
     await message.reply_text(build_hourly_progress_text(rows, now, area_label))
 
@@ -260,17 +277,21 @@ async def send_hourly_report_progress(context: ContextTypes.DEFAULT_TYPE) -> Non
         )
         return
 
-    rows = await asyncio.to_thread(_today_progress_rows, db.db_path, now.date().isoformat())
-
     topics = await asyncio.to_thread(list_registered_topics, db.db_path)
     if topics:
         sent = 0
         for chat_id, thread_id in topics:
-            area_label = await asyncio.to_thread(
-                _progress_label_for_topic,
+            area_label, sto_code = await asyncio.to_thread(
+                _progress_identity_for_topic,
                 db.db_path,
                 chat_id,
                 thread_id,
+            )
+            rows = await asyncio.to_thread(
+                _today_progress_rows,
+                db.db_path,
+                now.date().isoformat(),
+                sto_code,
             )
             try:
                 await context.bot.send_message(
@@ -281,8 +302,9 @@ async def send_hourly_report_progress(context: ContextTypes.DEFAULT_TYPE) -> Non
                 sent += 1
             except Exception:
                 logging.exception(
-                    "Gagal mengirim auto progress %s ke chat_id=%s thread_id=%s",
+                    "Gagal mengirim auto progress %s (%s) ke chat_id=%s thread_id=%s",
                     area_label,
+                    sto_code,
                     chat_id,
                     thread_id,
                 )
@@ -296,6 +318,12 @@ async def send_hourly_report_progress(context: ContextTypes.DEFAULT_TYPE) -> Non
         )
         return
 
+    rows = await asyncio.to_thread(
+        _today_progress_rows,
+        db.db_path,
+        now.date().isoformat(),
+        PRIMARY_STO_CODE,
+    )
     await context.bot.send_message(
         chat_id=chat_id,
         text=build_hourly_progress_text(rows, now, PRIMARY_PROGRESS_LABEL),
