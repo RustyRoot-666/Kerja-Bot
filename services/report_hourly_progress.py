@@ -12,6 +12,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from database import Database
+from services.report_multi_topic import list_registered_topics
 
 
 DEFAULT_GROUP_TITLE = "REPORT MANYAR"
@@ -197,14 +198,9 @@ async def remember_report_manyar_group(
     command = text.split(maxsplit=1)[0].lower().split("@", 1)[0] if text else ""
 
     standalone_report_group = _normalized(chat.title) == _target_title()
-    bound_group_id = await asyncio.to_thread(_get_setting, db.db_path, REPORT_GROUP_SETTING_KEY)
-    bound_thread_id = await asyncio.to_thread(_get_setting, db.db_path, REPORT_THREAD_SETTING_KEY)
-    bound_report_topic = (
-        bound_group_id is not None
-        and bound_thread_id is not None
-        and chat.id == bound_group_id
-        and message.message_thread_id == bound_thread_id
-    )
+    registered_topics = await asyncio.to_thread(list_registered_topics, db.db_path)
+    current_topic = (chat.id, message.message_thread_id) if message.message_thread_id is not None else None
+    bound_report_topic = current_topic in registered_topics if current_topic is not None else False
 
     if not standalone_report_group and not bound_report_topic:
         return
@@ -232,8 +228,6 @@ async def send_hourly_report_progress(context: ContextTypes.DEFAULT_TYPE) -> Non
     tz = ZoneInfo(settings.timezone)
     now = datetime.now(tz)
 
-    # Auto progress hanya aktif setiap hari pukul 06:00 sampai sebelum 24:00.
-    # Job tetap berdetak per jam, tetapi pengiriman 00:00-05:59 dilewati.
     if now.hour < AUTO_PROGRESS_START_HOUR or now.hour > AUTO_PROGRESS_END_HOUR:
         logging.debug(
             "Auto progress REPORT MANYAR dilewati di luar jam aktif: %s",
@@ -241,27 +235,34 @@ async def send_hourly_report_progress(context: ContextTypes.DEFAULT_TYPE) -> Non
         )
         return
 
-    bound_group_id = await asyncio.to_thread(_get_setting, db.db_path, REPORT_GROUP_SETTING_KEY)
-    bound_thread_id = await asyncio.to_thread(_get_setting, db.db_path, REPORT_THREAD_SETTING_KEY)
+    rows = await asyncio.to_thread(_today_progress_rows, db.db_path, now.date().isoformat())
+    text = build_hourly_progress_text(rows, now)
 
-    chat_id = bound_group_id
-    thread_id = bound_thread_id
-    if chat_id is None:
-        chat_id = await asyncio.to_thread(_get_target, db.db_path)
-        thread_id = None
+    topics = await asyncio.to_thread(list_registered_topics, db.db_path)
+    if topics:
+        sent = 0
+        for chat_id, thread_id in topics:
+            try:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    message_thread_id=thread_id,
+                    text=text,
+                )
+                sent += 1
+            except Exception:
+                logging.exception(
+                    "Gagal mengirim auto progress ke REPORT topic chat_id=%s thread_id=%s",
+                    chat_id,
+                    thread_id,
+                )
+        logging.info("Auto progress REPORT MANYAR terkirim ke %s/%s topic", sent, len(topics))
+        return
 
+    chat_id = await asyncio.to_thread(_get_target, db.db_path)
     if chat_id is None:
         logging.warning(
             "Auto progress REPORT MANYAR belum dikirim: target REPORT MANYAR belum tersimpan."
         )
         return
 
-    rows = await asyncio.to_thread(_today_progress_rows, db.db_path, now.date().isoformat())
-    send_kwargs = {
-        "chat_id": chat_id,
-        "text": build_hourly_progress_text(rows, now),
-    }
-    if thread_id is not None:
-        send_kwargs["message_thread_id"] = thread_id
-
-    await context.bot.send_message(**send_kwargs)
+    await context.bot.send_message(chat_id=chat_id, text=text)
