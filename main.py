@@ -48,7 +48,6 @@ from services.google_sheet_reference import (
 )
 from services.logic_dispatch import detect_logic_group, ignore_group_message
 from services.order_repository import OrderRepository
-from services.report_ack import acknowledge_report_sto
 from services.report_hourly_progress import (
     remember_report_manyar_group,
     send_hourly_report_progress,
@@ -223,10 +222,6 @@ def build_application() -> Application:
     app.add_handler(
         MessageHandler(filters.ChatType.GROUPS, ignore_group_message),
         group=0,
-    )
-    app.add_handler(
-        MessageHandler(filters.ChatType.GROUPS, acknowledge_report_sto),
-        group=1,
     )
 
     login_conv = build_login_conversation()
