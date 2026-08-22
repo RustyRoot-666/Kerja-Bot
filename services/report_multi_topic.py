@@ -27,7 +27,11 @@ from services.report_leaderboard import (
 )
 
 MAX_REPORT_TOPICS = 2
-BIND_COMMANDS = {"/setreport", "/setreportmanyar"}
+BIND_COMMANDS = {"/setreport", "/setreportmanyar", "/setreportjagir"}
+AREA_BY_COMMAND = {
+    "/setreportmanyar": ("MANYAR", "MYR"),
+    "/setreportjagir": ("JAGIR", "JGR"),
+}
 
 
 def _utc_now() -> str:
@@ -41,10 +45,20 @@ def _ensure_topic_table(conn: sqlite3.Connection) -> None:
             chat_id INTEGER NOT NULL,
             thread_id INTEGER NOT NULL,
             added_at TEXT NOT NULL,
+            area_label TEXT NOT NULL DEFAULT '',
+            sto_code TEXT NOT NULL DEFAULT '',
             PRIMARY KEY (chat_id, thread_id)
         )
         """
     )
+    columns = {
+        str(row[1])
+        for row in conn.execute("PRAGMA table_info(report_topics)").fetchall()
+    }
+    if "area_label" not in columns:
+        conn.execute("ALTER TABLE report_topics ADD COLUMN area_label TEXT NOT NULL DEFAULT ''")
+    if "sto_code" not in columns:
+        conn.execute("ALTER TABLE report_topics ADD COLUMN sto_code TEXT NOT NULL DEFAULT ''")
 
 
 def _seed_legacy_target(database_path: Path) -> None:
@@ -56,15 +70,82 @@ def _seed_legacy_target(database_path: Path) -> None:
         _ensure_topic_table(conn)
         conn.execute(
             """
-            INSERT OR IGNORE INTO report_topics (chat_id, thread_id, added_at)
-            VALUES (?, ?, ?)
+            INSERT OR IGNORE INTO report_topics (
+                chat_id, thread_id, added_at, area_label, sto_code
+            ) VALUES (?, ?, ?, 'MANYAR', 'MYR')
             """,
             (group_id, thread_id, _utc_now()),
         )
+        conn.execute(
+            """
+            UPDATE report_topics
+            SET area_label = CASE WHEN TRIM(area_label) = '' THEN 'MANYAR' ELSE area_label END,
+                sto_code = CASE WHEN TRIM(sto_code) = '' THEN 'MYR' ELSE sto_code END
+            WHERE chat_id = ? AND thread_id = ?
+            """,
+            (group_id, thread_id),
+        )
 
 
-def _add_topic(database_path: Path, chat_id: int, thread_id: int) -> tuple[str, int]:
+def _topic_identity(
+    database_path: Path,
+    chat_id: int,
+    thread_id: int,
+) -> tuple[str, str] | None:
     _seed_legacy_target(database_path)
+    with sqlite3.connect(database_path) as conn:
+        _ensure_topic_table(conn)
+        row = conn.execute(
+            """
+            SELECT area_label, sto_code
+            FROM report_topics
+            WHERE chat_id = ? AND thread_id = ?
+            """,
+            (chat_id, thread_id),
+        ).fetchone()
+    if not row:
+        return None
+    area_label = str(row[0] or "").strip().upper()
+    sto_code = str(row[1] or "").strip().upper()
+    if not area_label or not sto_code:
+        return None
+    return area_label, sto_code
+
+
+def get_topic_identity(
+    database_path: Path,
+    chat_id: int,
+    thread_id: int,
+) -> tuple[str, str] | None:
+    return _topic_identity(database_path, chat_id, thread_id)
+
+
+def _default_identity_for_topic(
+    database_path: Path,
+    chat_id: int,
+    thread_id: int,
+) -> tuple[str, str]:
+    existing = _topic_identity(database_path, chat_id, thread_id)
+    if existing:
+        return existing
+
+    primary_group = _stored_setting(database_path, REPORT_GROUP_SETTING_KEY)
+    primary_thread = _stored_setting(database_path, REPORT_THREAD_SETTING_KEY)
+    if primary_group == chat_id and primary_thread == thread_id:
+        return "MANYAR", "MYR"
+    return "JAGIR", "JGR"
+
+
+def _add_topic(
+    database_path: Path,
+    chat_id: int,
+    thread_id: int,
+    area_label: str,
+    sto_code: str,
+) -> tuple[str, int]:
+    _seed_legacy_target(database_path)
+    area_label = area_label.strip().upper()
+    sto_code = sto_code.strip().upper()
     with sqlite3.connect(database_path) as conn:
         _ensure_topic_table(conn)
         exists = conn.execute(
@@ -72,16 +153,28 @@ def _add_topic(database_path: Path, chat_id: int, thread_id: int) -> tuple[str, 
             (chat_id, thread_id),
         ).fetchone()
         if exists:
+            conn.execute(
+                """
+                UPDATE report_topics
+                SET area_label = ?, sto_code = ?
+                WHERE chat_id = ? AND thread_id = ?
+                """,
+                (area_label, sto_code, chat_id, thread_id),
+            )
             total = int(conn.execute("SELECT COUNT(*) FROM report_topics").fetchone()[0])
-            return "EXISTS", total
+            return "UPDATED", total
 
         total = int(conn.execute("SELECT COUNT(*) FROM report_topics").fetchone()[0])
         if total >= MAX_REPORT_TOPICS:
             return "FULL", total
 
         conn.execute(
-            "INSERT INTO report_topics (chat_id, thread_id, added_at) VALUES (?, ?, ?)",
-            (chat_id, thread_id, _utc_now()),
+            """
+            INSERT INTO report_topics (
+                chat_id, thread_id, added_at, area_label, sto_code
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (chat_id, thread_id, _utc_now(), area_label, sto_code),
         )
         total += 1
         return "ADDED", total
@@ -114,7 +207,7 @@ def list_registered_topics(database_path: Path) -> list[tuple[int, int]]:
 
 
 async def handle_multi_report_topic(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Add a second REPORT topic and accept /sto there without double-counting the primary."""
+    """Bind up to two REPORT topics and accept /sto without double-counting."""
     chat = update.effective_chat
     message = update.effective_message
     if not chat or not message or chat.type not in {"group", "supergroup"}:
@@ -134,7 +227,24 @@ async def handle_multi_report_topic(update: Update, context: ContextTypes.DEFAUL
             await message.reply_text("❌ /setreport harus dikirim dari dalam topic REPORT.")
             raise ApplicationHandlerStop
 
-        action, total = await asyncio.to_thread(_add_topic, db.db_path, chat.id, thread_id)
+        identity = AREA_BY_COMMAND.get(command)
+        if identity is None:
+            identity = await asyncio.to_thread(
+                _default_identity_for_topic,
+                db.db_path,
+                chat.id,
+                thread_id,
+            )
+        area_label, sto_code = identity
+
+        action, total = await asyncio.to_thread(
+            _add_topic,
+            db.db_path,
+            chat.id,
+            thread_id,
+            area_label,
+            sto_code,
+        )
         primary_group = await asyncio.to_thread(_stored_setting, db.db_path, REPORT_GROUP_SETTING_KEY)
         primary_thread = await asyncio.to_thread(_stored_setting, db.db_path, REPORT_THREAD_SETTING_KEY)
         if primary_group is None or primary_thread is None:
@@ -144,16 +254,29 @@ async def handle_multi_report_topic(update: Update, context: ContextTypes.DEFAUL
             await message.reply_text(
                 f"❌ Maksimal {MAX_REPORT_TOPICS} topic REPORT. Saat ini sudah terdaftar {total} topic."
             )
-        elif action == "EXISTS":
+        elif action == "UPDATED":
             await message.reply_text(
-                f"ℹ️ Topic ini sudah terdaftar sebagai REPORT.\n📌 TOTAL TOPIC : {total}/{MAX_REPORT_TOPICS}"
+                "✅ TOPIC REPORT DIPERBARUI\n"
+                f"📍 AREA : {area_label}\n"
+                f"🏢 STO : {sto_code}\n"
+                f"📌 TOTAL TOPIC : {total}/{MAX_REPORT_TOPICS}"
             )
         else:
             await message.reply_text(
                 "✅ TOPIC REPORT BERHASIL DITAMBAHKAN\n"
+                f"📍 AREA : {area_label}\n"
+                f"🏢 STO : {sto_code}\n"
                 f"📌 TOTAL TOPIC : {total}/{MAX_REPORT_TOPICS}"
             )
-        logging.info("REPORT topic bind: chat_id=%s thread_id=%s action=%s total=%s", chat.id, thread_id, action, total)
+        logging.info(
+            "REPORT topic bind: chat_id=%s thread_id=%s area=%s sto=%s action=%s total=%s",
+            chat.id,
+            thread_id,
+            area_label,
+            sto_code,
+            action,
+            total,
+        )
         raise ApplicationHandlerStop
 
     if command != "/sto" or message.message_thread_id is None:
