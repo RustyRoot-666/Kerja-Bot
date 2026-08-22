@@ -21,6 +21,8 @@ REPORT_GROUP_SETTING_KEY = "report_group_id"
 REPORT_THREAD_SETTING_KEY = "report_thread_id"
 AUTO_PROGRESS_START_HOUR = 6
 AUTO_PROGRESS_END_HOUR = 23
+PRIMARY_PROGRESS_LABEL = "MANYAR"
+SECONDARY_PROGRESS_LABEL = "JAGIR"
 
 
 def _normalized(value: str | None) -> str:
@@ -146,15 +148,32 @@ def _today_progress_rows(
         conn.close()
 
 
+def _progress_label_for_topic(
+    database_path: Path,
+    chat_id: int,
+    thread_id: int | None,
+) -> str:
+    primary_group = _get_setting(database_path, REPORT_GROUP_SETTING_KEY)
+    primary_thread = _get_setting(database_path, REPORT_THREAD_SETTING_KEY)
+    if (
+        thread_id is not None
+        and primary_group == chat_id
+        and primary_thread == thread_id
+    ):
+        return PRIMARY_PROGRESS_LABEL
+    return SECONDARY_PROGRESS_LABEL
+
+
 def build_hourly_progress_text(
     rows: list[tuple[str, int, int]],
     now: datetime,
+    area_label: str = PRIMARY_PROGRESS_LABEL,
 ) -> str:
     total_close = sum(close for _, close, _ in rows)
     total_update = sum(update for _, _, update in rows)
     total_reports = total_close + total_update
 
-    lines = ["📊 PROGRESS MANYAR", ""]
+    lines = [f"📊 PROGRESS {area_label.upper()}", ""]
 
     if rows:
         for index, (name, close, update) in enumerate(rows):
@@ -218,7 +237,13 @@ async def remember_report_manyar_group(
         db.db_path,
         now.date().isoformat(),
     )
-    await message.reply_text(build_hourly_progress_text(rows, now))
+    area_label = await asyncio.to_thread(
+        _progress_label_for_topic,
+        db.db_path,
+        chat.id,
+        message.message_thread_id,
+    )
+    await message.reply_text(build_hourly_progress_text(rows, now, area_label))
 
 
 async def send_hourly_report_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -230,39 +255,48 @@ async def send_hourly_report_progress(context: ContextTypes.DEFAULT_TYPE) -> Non
 
     if now.hour < AUTO_PROGRESS_START_HOUR or now.hour > AUTO_PROGRESS_END_HOUR:
         logging.debug(
-            "Auto progress REPORT MANYAR dilewati di luar jam aktif: %s",
+            "Auto progress REPORT dilewati di luar jam aktif: %s",
             now.strftime("%H:%M"),
         )
         return
 
     rows = await asyncio.to_thread(_today_progress_rows, db.db_path, now.date().isoformat())
-    text = build_hourly_progress_text(rows, now)
 
     topics = await asyncio.to_thread(list_registered_topics, db.db_path)
     if topics:
         sent = 0
         for chat_id, thread_id in topics:
+            area_label = await asyncio.to_thread(
+                _progress_label_for_topic,
+                db.db_path,
+                chat_id,
+                thread_id,
+            )
             try:
                 await context.bot.send_message(
                     chat_id=chat_id,
                     message_thread_id=thread_id,
-                    text=text,
+                    text=build_hourly_progress_text(rows, now, area_label),
                 )
                 sent += 1
             except Exception:
                 logging.exception(
-                    "Gagal mengirim auto progress ke REPORT topic chat_id=%s thread_id=%s",
+                    "Gagal mengirim auto progress %s ke chat_id=%s thread_id=%s",
+                    area_label,
                     chat_id,
                     thread_id,
                 )
-        logging.info("Auto progress REPORT MANYAR terkirim ke %s/%s topic", sent, len(topics))
+        logging.info("Auto progress REPORT terkirim ke %s/%s topic", sent, len(topics))
         return
 
     chat_id = await asyncio.to_thread(_get_target, db.db_path)
     if chat_id is None:
         logging.warning(
-            "Auto progress REPORT MANYAR belum dikirim: target REPORT MANYAR belum tersimpan."
+            "Auto progress REPORT belum dikirim: target REPORT belum tersimpan."
         )
         return
 
-    await context.bot.send_message(chat_id=chat_id, text=text)
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=build_hourly_progress_text(rows, now, PRIMARY_PROGRESS_LABEL),
+    )
