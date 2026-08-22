@@ -99,10 +99,18 @@ def _is_registered_topic(database_path: Path, chat_id: int, thread_id: int) -> b
 
 
 def _topic_count(database_path: Path) -> int:
+    return len(list_registered_topics(database_path))
+
+
+def list_registered_topics(database_path: Path) -> list[tuple[int, int]]:
+    """Return all active REPORT topics, including the legacy primary target."""
     _seed_legacy_target(database_path)
     with sqlite3.connect(database_path) as conn:
         _ensure_topic_table(conn)
-        return int(conn.execute("SELECT COUNT(*) FROM report_topics").fetchone()[0])
+        rows = conn.execute(
+            "SELECT chat_id, thread_id FROM report_topics ORDER BY added_at ASC, chat_id ASC, thread_id ASC"
+        ).fetchall()
+    return [(int(chat_id), int(thread_id)) for chat_id, thread_id in rows]
 
 
 async def handle_multi_report_topic(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -160,7 +168,6 @@ async def handle_multi_report_topic(update: Update, context: ContextTypes.DEFAUL
     if not registered:
         return
 
-    # Primary topic tetap diproses handler lama agar tidak terjadi double-processing.
     primary_group = await asyncio.to_thread(_stored_setting, db.db_path, REPORT_GROUP_SETTING_KEY)
     primary_thread = await asyncio.to_thread(_stored_setting, db.db_path, REPORT_THREAD_SETTING_KEY)
     if chat.id == primary_group and message.message_thread_id == primary_thread:
