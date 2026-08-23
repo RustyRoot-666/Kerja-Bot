@@ -48,6 +48,7 @@ from services.google_sheet_reference import (
 )
 from services.logic_dispatch import detect_logic_group, ignore_group_message
 from services.order_repository import OrderRepository
+from services.report_area_leaderboard import send_daily_close, send_report_leaderboard
 from services.report_hourly_progress import (
     remember_report_manyar_group,
     send_hourly_report_progress,
@@ -55,8 +56,6 @@ from services.report_hourly_progress import (
 from services.report_leaderboard import (
     capture_report_group_message,
     capture_sto_recap_group_message,
-    send_daily_close,
-    send_report_leaderboard,
 )
 from services.report_multi_topic import handle_multi_report_topic
 from services.update_kendala import handle_update_message, migrate_existing_evidence_urls
@@ -168,7 +167,7 @@ async def post_init(application: Application) -> None:
         )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, report leaderboard, daily close, hourly REPORT MANYAR progress, multi-topic /sto report, /update kendala, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, STO recap replies in REPORT MANYAR, and previous-week catch-up initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, area leaderboard, area daily close, hourly REPORT progress, multi-topic /sto report, /update kendala, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, STO recap replies in REPORT MANYAR, and previous-week catch-up initialized"
     )
 
 
@@ -202,8 +201,6 @@ def build_application() -> Application:
 
     install_auto_close(order_flow_module)
 
-    # Multi-topic REPORT harus diproses paling awal. Handler ini hanya mengambil
-    # topic tambahan; topic utama tetap diteruskan ke handler report lama.
     app.add_handler(
         MessageHandler(filters.ChatType.GROUPS, handle_multi_report_topic),
         group=-7,
