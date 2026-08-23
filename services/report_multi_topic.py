@@ -61,30 +61,62 @@ def _ensure_topic_table(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE report_topics ADD COLUMN sto_code TEXT NOT NULL DEFAULT ''")
 
 
-def _seed_legacy_target(database_path: Path) -> None:
-    group_id = _stored_setting(database_path, REPORT_GROUP_SETTING_KEY)
-    thread_id = _stored_setting(database_path, REPORT_THREAD_SETTING_KEY)
-    if group_id is None or thread_id is None:
+def _repair_legacy_topic_identities(conn: sqlite3.Connection) -> None:
+    """Backfill old two-topic rows that predate area_label/sto_code columns."""
+    _ensure_topic_table(conn)
+    rows = conn.execute(
+        """
+        SELECT chat_id, thread_id, UPPER(TRIM(area_label)), UPPER(TRIM(sto_code))
+        FROM report_topics
+        ORDER BY added_at ASC, chat_id ASC, thread_id ASC
+        """
+    ).fetchall()
+    if not rows:
         return
-    with sqlite3.connect(database_path) as conn:
-        _ensure_topic_table(conn)
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO report_topics (
-                chat_id, thread_id, added_at, area_label, sto_code
-            ) VALUES (?, ?, ?, 'MANYAR', 'MYR')
-            """,
-            (group_id, thread_id, _utc_now()),
-        )
+
+    used = {str(sto or "").strip().upper() for _, _, _, sto in rows if str(sto or "").strip()}
+    missing = [row for row in rows if not str(row[2] or "").strip() or not str(row[3] or "").strip()]
+
+    for chat_id, thread_id, _, _ in missing:
+        if "MYR" not in used:
+            area_label, sto_code = "MANYAR", "MYR"
+        elif "JGR" not in used:
+            area_label, sto_code = "JAGIR", "JGR"
+        else:
+            break
         conn.execute(
             """
             UPDATE report_topics
-            SET area_label = CASE WHEN TRIM(area_label) = '' THEN 'MANYAR' ELSE area_label END,
-                sto_code = CASE WHEN TRIM(sto_code) = '' THEN 'MYR' ELSE sto_code END
+            SET area_label = ?, sto_code = ?
             WHERE chat_id = ? AND thread_id = ?
             """,
-            (group_id, thread_id),
+            (area_label, sto_code, chat_id, thread_id),
         )
+        used.add(sto_code)
+        logging.info(
+            "Legacy REPORT topic identity repaired: chat_id=%s thread_id=%s area=%s sto=%s",
+            chat_id,
+            thread_id,
+            area_label,
+            sto_code,
+        )
+
+
+def _seed_legacy_target(database_path: Path) -> None:
+    group_id = _stored_setting(database_path, REPORT_GROUP_SETTING_KEY)
+    thread_id = _stored_setting(database_path, REPORT_THREAD_SETTING_KEY)
+    with sqlite3.connect(database_path) as conn:
+        _ensure_topic_table(conn)
+        if group_id is not None and thread_id is not None:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO report_topics (
+                    chat_id, thread_id, added_at, area_label, sto_code
+                ) VALUES (?, ?, ?, '', '')
+                """,
+                (group_id, thread_id, _utc_now()),
+            )
+        _repair_legacy_topic_identities(conn)
 
 
 def _topic_identity(
