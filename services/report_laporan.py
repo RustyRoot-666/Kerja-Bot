@@ -11,6 +11,7 @@ from telegram import Update
 from telegram.ext import ApplicationHandlerStop, ContextTypes
 
 from database import Database
+from services.google_sheet_reference import get_reference_statuses, unique_reference_orders
 from services.report_leaderboard import NO_SERVICE_RE, _period_bounds
 from services.report_multi_topic import get_topic_identity
 
@@ -61,6 +62,82 @@ def _save_ticket_metadata(
                 datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
             ),
         )
+
+
+def _backfill_sheet_ticket_metadata(
+    database_path: Path,
+    sheet_tickets: dict[str, str],
+) -> int:
+    """Fill missing report ticket metadata using ticket values from Order Sheet.
+
+    ReferenceStatus.ticket_id already falls back to the INSERA TODAY column when
+    the primary ticket column is empty, so old MANUAL rows can repair themselves.
+    Existing non-empty metadata is never overwritten.
+    """
+    if not sheet_tickets:
+        return 0
+
+    updated = 0
+    now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    with sqlite3.connect(database_path) as conn:
+        _ensure_metadata_table(conn)
+        rows = conn.execute(
+            """
+            SELECT r.service_number, r.period_start,
+                   COALESCE(TRIM(m.ticket_id), '') AS metadata_ticket
+            FROM report_group_orders r
+            LEFT JOIN report_ticket_metadata m
+              ON m.service_number = r.service_number
+             AND m.period_start = r.period_start
+            GROUP BY r.service_number, r.period_start
+            """
+        ).fetchall()
+
+        for service_number, period_start, metadata_ticket in rows:
+            if str(metadata_ticket or "").strip():
+                continue
+            ticket = sheet_tickets.get(str(service_number or "").strip(), "").strip()
+            if not ticket or ticket.upper() in {"-", "MANUAL", "N/A", "NA", "NONE"}:
+                continue
+            conn.execute(
+                """
+                INSERT INTO report_ticket_metadata(service_number, period_start, ticket_id, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(service_number, period_start) DO UPDATE SET
+                    ticket_id = CASE
+                        WHEN TRIM(report_ticket_metadata.ticket_id) = '' THEN excluded.ticket_id
+                        ELSE report_ticket_metadata.ticket_id
+                    END,
+                    updated_at = CASE
+                        WHEN TRIM(report_ticket_metadata.ticket_id) = '' THEN excluded.updated_at
+                        ELSE report_ticket_metadata.updated_at
+                    END
+                """,
+                (str(service_number).strip(), str(period_start), ticket, now),
+            )
+            updated += 1
+    return updated
+
+
+async def _sync_manual_tickets_from_sheet(db: Database) -> int:
+    """Best-effort repair of MANUAL tickets from the latest Order Sheet cache."""
+    try:
+        statuses = await get_reference_statuses()
+    except Exception:
+        return 0
+
+    sheet_tickets: dict[str, str] = {}
+    for reference in unique_reference_orders(statuses):
+        service = reference.service_number.strip()
+        ticket = reference.ticket_id.strip()
+        if service and ticket and ticket.upper() not in {"-", "MANUAL", "N/A", "NA", "NONE"}:
+            sheet_tickets[service] = ticket
+
+    return await asyncio.to_thread(
+        _backfill_sheet_ticket_metadata,
+        db.db_path,
+        sheet_tickets,
+    )
 
 
 async def capture_report_ticket_metadata(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -227,6 +304,10 @@ async def _send_laporan(message, db: Database, query: str) -> None:
         lines.extend(f"{nik} | {name}" for nik, name in matches)
         await message.reply_text("\n".join(lines))
         return
+
+    # Sebelum laporan ditampilkan, isi ticket MANUAL yang masih kosong dari
+    # Order Sheet. Kolom ticket referensi sudah fallback ke INSERA TODAY.
+    await _sync_manual_tickets_from_sheet(db)
 
     nik, name = matches[0]
     periods = await asyncio.to_thread(_report_rows, db.db_path, nik, 3)
