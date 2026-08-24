@@ -8,7 +8,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from telegram import Update
-from telegram.ext import ContextTypes
+from telegram.ext import ApplicationHandlerStop, ContextTypes
 
 from database import Database
 from services.report_leaderboard import NO_SERVICE_RE, _period_bounds
@@ -217,23 +217,7 @@ def _build_report_text(nik: str, name: str, periods: list[tuple[str, list[tuple[
     return "\n".join(lines)
 
 
-async def laporan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    chat = update.effective_chat
-    user = update.effective_user
-    message = update.effective_message
-    if not chat or chat.type != "private" or not user or not message:
-        return
-
-    db: Database = context.application.bot_data["db"]
-    technician = await db.get_technician(user.id)
-    if technician is None:
-        await message.reply_text("❌ Perintah /laporan hanya untuk teknisi yang sudah terdaftar di bot.")
-        return
-
-    query = " ".join(context.args).strip()
-    if not query:
-        query = technician.nik.strip() or technician.name.strip()
-
+async def _send_laporan(message, db: Database, query: str) -> None:
     matches = await asyncio.to_thread(_find_technicians, db.db_path, query)
     if not matches:
         await message.reply_text(f"❌ Teknisi tidak ditemukan untuk: {query}")
@@ -265,3 +249,59 @@ async def laporan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         chunks.append(current)
     for chunk in chunks:
         await message.reply_text(chunk)
+
+
+async def laporan_group_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Allow anyone in a registered REPORT topic to check technician report history."""
+    chat = update.effective_chat
+    message = update.effective_message
+    if not chat or not message or chat.type not in {"group", "supergroup"}:
+        return
+
+    text = (message.text or message.caption or "").strip()
+    if not text or _command_from_text(text) != "/laporan":
+        return
+    if message.message_thread_id is None:
+        return
+
+    db: Database = context.application.bot_data["db"]
+    identity = await asyncio.to_thread(
+        get_topic_identity,
+        db.db_path,
+        chat.id,
+        message.message_thread_id,
+    )
+    if identity is None:
+        return
+
+    parts = text.split(maxsplit=1)
+    query = parts[1].strip() if len(parts) > 1 else ""
+    if not query:
+        await message.reply_text(
+            "Format:\n/laporan NIK\n/laporan NAMA TEKNISI\n\n"
+            "Contoh:\n/laporan 268800163\n/laporan Agam Rizky"
+        )
+        raise ApplicationHandlerStop
+
+    await _send_laporan(message, db, query)
+    raise ApplicationHandlerStop
+
+
+async def laporan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat = update.effective_chat
+    user = update.effective_user
+    message = update.effective_message
+    if not chat or chat.type != "private" or not user or not message:
+        return
+
+    db: Database = context.application.bot_data["db"]
+    technician = await db.get_technician(user.id)
+    if technician is None:
+        await message.reply_text("❌ Perintah /laporan hanya untuk teknisi yang sudah terdaftar di bot.")
+        return
+
+    query = " ".join(context.args).strip()
+    if not query:
+        query = technician.nik.strip() or technician.name.strip()
+
+    await _send_laporan(message, db, query)
