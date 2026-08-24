@@ -21,6 +21,12 @@ from services.report_multi_topic import get_topic_identity
 NAME_TECH_RE = re.compile(r"NAMA\s*TEKNISI\s*:\s*([^\n\r]+)", re.IGNORECASE)
 
 
+def _command_from_text(text: str) -> str:
+    """Normalize Telegram-style commands, including `/STO:` and `/STO :`."""
+    token = text.split(maxsplit=1)[0].lower().split("@", 1)[0]
+    return token.rstrip(":")
+
+
 async def handle_name_only_sto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Accept /sto messages that only contain `NAMA TEKNISI : <name>`.
 
@@ -36,7 +42,7 @@ async def handle_name_only_sto(update: Update, context: ContextTypes.DEFAULT_TYP
     text = (message.text or message.caption or "").strip()
     if not text:
         return
-    command = text.split(maxsplit=1)[0].lower().split("@", 1)[0]
+    command = _command_from_text(text)
     if command != "/sto":
         return
 
