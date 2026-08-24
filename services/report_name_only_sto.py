@@ -8,6 +8,7 @@ from telegram import Update
 from telegram.ext import ApplicationHandlerStop, ContextTypes
 
 from database import Database
+from services.report_area_tracking import record_area_order
 from services.report_leaderboard import (
     NO_SERVICE_RE,
     TECH_RE,
@@ -96,6 +97,17 @@ async def handle_name_only_sto(update: Update, context: ContextTypes.DEFAULT_TYP
         chat.id,
         message.message_id,
     )
+
+    area_label, sto_code = identity
+    await asyncio.to_thread(
+        record_area_order,
+        db.db_path,
+        service_number,
+        period_start.isoformat(),
+        sto_code,
+        area_label,
+    )
+
     total_today = await asyncio.to_thread(
         _technician_daily_total,
         db.db_path,
@@ -116,7 +128,6 @@ async def handle_name_only_sto(update: Update, context: ContextTypes.DEFAULT_TYP
     else:
         status = "ℹ️ REPORT SUDAH TERSIMPAN"
 
-    area_label, sto_code = identity
     await message.reply_text(
         f"{status}\n"
         f"📍 AREA : {area_label}\n"
