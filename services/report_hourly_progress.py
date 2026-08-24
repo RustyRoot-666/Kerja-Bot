@@ -12,6 +12,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from database import Database
+from services.report_area_tracking import area_order_matches_sql, ensure_area_tracking_table
 from services.report_multi_topic import get_topic_identity, list_registered_topics
 
 
@@ -98,23 +99,20 @@ def _today_progress_rows(
     conn.row_factory = sqlite3.Row
     sto_code = _normalized(sto_code)
     try:
+        ensure_area_tracking_table(conn)
         try:
+            area_predicate = area_order_matches_sql("r")
             close_rows = conn.execute(
-                """
+                f"""
                 SELECT r.technician_nik,
                        MAX(r.technician_name) AS technician_name,
                        COUNT(DISTINCT r.service_number) AS total
                 FROM report_group_orders r
                 WHERE substr(r.message_date, 1, 10) = ?
-                  AND EXISTS (
-                      SELECT 1
-                      FROM orders o
-                      WHERE o.service_number = r.service_number
-                        AND UPPER(TRIM(o.sto)) = ?
-                  )
+                  AND {area_predicate}
                 GROUP BY r.technician_nik
                 """,
-                (day_iso, sto_code),
+                (day_iso, sto_code, sto_code),
             ).fetchall()
         except sqlite3.OperationalError:
             close_rows = []
