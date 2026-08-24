@@ -39,8 +39,6 @@ BACK_TO_MAIN = "⬅️ Kembali ke Menu Utama"
 COPY_CALLBACK_PATTERN = r"^copy_(inet|cp):"
 AREA_CALLBACK_PATTERN = r"^myarea:"
 
-# Alias khusus diletakkan sebelum fallback otomatis. Tambahkan pola baru di sini
-# jika ditemukan variasi alamat yang perlu digabung ke satu cluster.
 AREA_ALIASES: dict[str, tuple[str, ...]] = {
     "KERTAJAYA": (
         "KERTAJAYA INDAH TIMUR",
@@ -132,7 +130,6 @@ def normalize_address(address: str) -> str:
 
 
 def classify_area(address: str) -> str:
-    """Kelompokkan alamat ke nama area yang stabil dan mudah dibaca."""
     text = normalize_address(address)
     if not text:
         return "LAINNYA"
@@ -141,8 +138,6 @@ def classify_area(address: str) -> str:
         if any(alias in text for alias in aliases):
             return area
 
-    # Fallback: ambil kata lokasi pertama yang bermakna. Dengan cara ini
-    # 'KERTAJAYA INDAH ...' tetap menjadi KERTAJAYA meski belum ada alias.
     tokens = text.split()
     while tokens and (tokens[0] in ADDRESS_PREFIXES or tokens[0].isdigit()):
         tokens.pop(0)
@@ -153,6 +148,44 @@ def classify_area(address: str) -> str:
             continue
         return token
     return "LAINNYA"
+
+
+def _natural_parts(value: str) -> tuple:
+    parts = re.findall(r"\d+|[A-Z]+", value.upper())
+    return tuple((0, int(part)) if part.isdigit() else (1, part) for part in parts)
+
+
+def address_sort_key(address: str) -> tuple:
+    """Kelompokkan gang/jalan dan blok yang sama sebelum nomor rumah berikutnya."""
+    text = normalize_address(address)
+    if not text:
+        return ("~", "~", 10**9, ())
+
+    block = ""
+    house_number = 10**9
+    stem = text
+
+    # Contoh: SEMOLO WARU INDAH 1 NO 4Q -> stem sama, blok Q, nomor 4.
+    match = re.search(r"\b(?:NO|NOMOR)?\s*(\d+)\s*([A-Z])\b", text)
+    if match:
+        house_number = int(match.group(1))
+        block = match.group(2)
+        stem = text[: match.start()].strip()
+    else:
+        block_match = re.search(r"\b(?:BLOK|BLOCK)\s*([A-Z]+)\b", text)
+        if block_match:
+            block = block_match.group(1)
+            stem = text[: block_match.start()].strip()
+            trailing = re.search(r"\b(?:NO|NOMOR)?\s*(\d+)\b", text[block_match.end():])
+            if trailing:
+                house_number = int(trailing.group(1))
+        else:
+            number_match = re.search(r"\b(?:NO|NOMOR)\s*(\d+)\b", text)
+            if number_match:
+                house_number = int(number_match.group(1))
+                stem = text[: number_match.start()].strip()
+
+    return (_natural_parts(stem), block or "~", house_number, _natural_parts(text))
 
 
 def sheet_status_bucket(reference: ReferenceStatus) -> str:
@@ -183,6 +216,12 @@ def area_summary(references: list[ReferenceStatus]) -> dict[str, dict[str, int]]
         area = classify_area(reference.address)
         summary[area][sheet_status_bucket(reference)] += 1
     return dict(summary)
+
+
+def active_area_summary(references: list[ReferenceStatus]) -> dict[str, dict[str, int]]:
+    """Hanya tampilkan area yang masih memiliki minimal satu order OPEN."""
+    summary = area_summary(references)
+    return {area: counts for area, counts in summary.items() if counts["open"] > 0}
 
 
 def area_rca_summary(references: list[ReferenceStatus]) -> dict[str, dict[str, int]]:
@@ -307,17 +346,21 @@ async def show_area_open(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     references = technician_sheet_orders(statuses, technician.name)
-    areas = sorted(area_summary(references))
+    summary = active_area_summary(references)
+    areas = sorted(summary)
     if area_index < 0 or area_index >= len(areas):
         await query.message.reply_text("Daftar area berubah. Buka /orderanku lagi.")
         return
 
     area = areas[area_index]
-    open_orders = [
-        reference for reference in references
-        if classify_area(reference.address) == area
-        and sheet_status_bucket(reference) == "open"
-    ]
+    open_orders = sorted(
+        [
+            reference for reference in references
+            if classify_area(reference.address) == area
+            and sheet_status_bucket(reference) == "open"
+        ],
+        key=lambda reference: address_sort_key(reference.address),
+    )
 
     await query.message.reply_text(
         f"🟢 ORDER OPEN — {escape(area)}\n{escape(technician.name.upper())}\n\n"
@@ -326,7 +369,7 @@ async def show_area_open(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
     if not open_orders:
         await query.message.reply_text(
-            "✅ Tidak ada order OPEN di daerah ini.",
+            "✅ Tidak ada order OPEN di daerah ini. Buka /orderanku lagi untuk memperbarui daftar area.",
             reply_markup=orderanku_menu(),
         )
         return
@@ -383,7 +426,6 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     mode = context.args[0].lower().strip() if context.args else "ringkas"
 
-    # Dashboard utama mengambil data Google Sheets terbaru.
     if mode in {"ringkas", "menu", "statistik", "stats"}:
         try:
             statuses = await get_reference_statuses(force=True, raise_errors=True)
@@ -403,7 +445,8 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             return
 
-        summary = area_summary(references)
+        full_summary = area_summary(references)
+        summary = {area: counts for area, counts in full_summary.items() if counts["open"] > 0}
         rca_summary = area_rca_summary(references)
         areas = sorted(summary, key=lambda area: (-summary[area]["open"], area))
         total = len(references)
@@ -440,7 +483,13 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 area_lines.append("RCA: -")
             area_blocks.append("\n".join(area_lines))
 
-        # Pecah dashboard bila rekap RCA membuat teks melebihi batas Telegram.
+        if not area_blocks:
+            header_lines.extend([
+                "",
+                "✅ Semua area yang ter-assign saat ini sudah tidak memiliki order OPEN.",
+                "Area akan muncul lagi otomatis jika ada order OPEN baru yang di-assign.",
+            ])
+
         messages: list[str] = []
         current = "\n".join(header_lines)
         for block in area_blocks:
@@ -453,14 +502,17 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if current:
             messages.append(current)
 
-        # Callback memakai index dari urutan alfabet agar stabil saat tombol ditekan.
+        # Callback harus memakai daftar area aktif yang sama dengan show_area_open.
         callback_areas = sorted(summary)
         for index, message in enumerate(messages):
-            reply_markup = area_keyboard(callback_areas) if index == len(messages) - 1 else None
+            reply_markup = (
+                area_keyboard(callback_areas)
+                if callback_areas and index == len(messages) - 1
+                else None
+            )
             await update.effective_message.reply_text(message, reply_markup=reply_markup)
         return
 
-    # Command lama tetap dipertahankan untuk kompatibilitas.
     all_orders = await repository(context).list_for_technician(
         technician.name, status="all", limit=5000
     )
@@ -491,6 +543,14 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if status == "open":
         orders = [o for o in all_orders if not is_effectively_closed(o, references.get(o.id))]
+        orders.sort(
+            key=lambda order: address_sort_key(
+                displayed_value(
+                    order.address,
+                    references[order.id].address if references.get(order.id) else "",
+                )
+            )
+        )
     elif status == "close":
         orders = [o for o in all_orders if is_effectively_closed(o, references.get(o.id))]
     else:
