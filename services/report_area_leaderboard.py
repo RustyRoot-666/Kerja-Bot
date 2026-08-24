@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from telegram.ext import ContextTypes
 
 from database import Database
-from services.report_area_tracking import area_order_matches_sql, ensure_area_tracking_table
+from services.report_area_tracking import area_order_condition, ensure_area_tracking_table
 
 MONTH_NAMES = [
     "Januari", "Februari", "Maret", "April", "Mei", "Juni",
@@ -57,7 +57,7 @@ def _leaderboard_rows(
 ) -> list[tuple[str, int]]:
     with sqlite3.connect(database_path) as conn:
         ensure_area_tracking_table(conn)
-        predicate = area_order_matches_sql("r")
+        predicate, params = area_order_condition(sto_code, "r")
         rows = conn.execute(
             f"""
             SELECT MAX(r.technician_name) AS technician_name,
@@ -68,7 +68,7 @@ def _leaderboard_rows(
             GROUP BY r.technician_nik
             ORDER BY total DESC, UPPER(MAX(r.technician_name)) ASC
             """,
-            (period_start.isoformat(), sto_code.upper().strip(), sto_code.upper().strip()),
+            (period_start.isoformat(), *params),
         ).fetchall()
     return [(str(name), int(total)) for name, total in rows]
 
@@ -80,7 +80,7 @@ def _daily_close_rows(
 ) -> list[tuple[str, int]]:
     with sqlite3.connect(database_path) as conn:
         ensure_area_tracking_table(conn)
-        predicate = area_order_matches_sql("r")
+        predicate, params = area_order_condition(sto_code, "r")
         rows = conn.execute(
             f"""
             SELECT MAX(r.technician_name) AS technician_name,
@@ -91,7 +91,7 @@ def _daily_close_rows(
             GROUP BY r.technician_nik
             ORDER BY total DESC, UPPER(MAX(r.technician_name)) ASC
             """,
-            (day.isoformat(), sto_code.upper().strip(), sto_code.upper().strip()),
+            (day.isoformat(), *params),
         ).fetchall()
     return [(str(name), int(total)) for name, total in rows]
 
