@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from telegram.ext import ContextTypes
 
 from database import Database
+from services.report_area_tracking import area_order_matches_sql, ensure_area_tracking_table
 
 MONTH_NAMES = [
     "Januari", "Februari", "Maret", "April", "Mei", "Juni",
@@ -55,21 +56,19 @@ def _leaderboard_rows(
     sto_code: str,
 ) -> list[tuple[str, int]]:
     with sqlite3.connect(database_path) as conn:
+        ensure_area_tracking_table(conn)
+        predicate = area_order_matches_sql("r")
         rows = conn.execute(
-            """
+            f"""
             SELECT MAX(r.technician_name) AS technician_name,
                    COUNT(DISTINCT r.service_number) AS total
             FROM report_group_orders r
             WHERE r.period_start = ?
-              AND EXISTS (
-                  SELECT 1 FROM orders o
-                  WHERE o.service_number = r.service_number
-                    AND UPPER(TRIM(o.sto)) = ?
-              )
+              AND {predicate}
             GROUP BY r.technician_nik
             ORDER BY total DESC, UPPER(MAX(r.technician_name)) ASC
             """,
-            (period_start.isoformat(), sto_code.upper().strip()),
+            (period_start.isoformat(), sto_code.upper().strip(), sto_code.upper().strip()),
         ).fetchall()
     return [(str(name), int(total)) for name, total in rows]
 
@@ -80,21 +79,19 @@ def _daily_close_rows(
     sto_code: str,
 ) -> list[tuple[str, int]]:
     with sqlite3.connect(database_path) as conn:
+        ensure_area_tracking_table(conn)
+        predicate = area_order_matches_sql("r")
         rows = conn.execute(
-            """
+            f"""
             SELECT MAX(r.technician_name) AS technician_name,
                    COUNT(DISTINCT r.service_number) AS total
             FROM report_group_orders r
             WHERE substr(r.message_date, 1, 10) = ?
-              AND EXISTS (
-                  SELECT 1 FROM orders o
-                  WHERE o.service_number = r.service_number
-                    AND UPPER(TRIM(o.sto)) = ?
-              )
+              AND {predicate}
             GROUP BY r.technician_nik
             ORDER BY total DESC, UPPER(MAX(r.technician_name)) ASC
             """,
-            (day.isoformat(), sto_code.upper().strip()),
+            (day.isoformat(), sto_code.upper().strip(), sto_code.upper().strip()),
         ).fetchall()
     return [(str(name), int(total)) for name, total in rows]
 
