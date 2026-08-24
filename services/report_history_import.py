@@ -45,7 +45,6 @@ def _messages_from_export(payload: Any) -> list[dict[str, Any]]:
         if isinstance(messages, list):
             return [item for item in messages if isinstance(item, dict)]
 
-        # Beberapa export Telegram membungkus chat/group di dalam list_chats.
         chats = payload.get("chats") or payload.get("list")
         if isinstance(chats, list):
             result: list[dict[str, Any]] = []
@@ -125,54 +124,69 @@ def _resolve_name_only_key(database_path, technician_name: str) -> str:
     return f"NAME-{normalized}"
 
 
-async def importhistory_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def _private_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> tuple[int, Any] | None:
     chat = update.effective_chat
     user = update.effective_user
     message = update.effective_message
     settings = context.application.bot_data["settings"]
     if not chat or chat.type != "private" or not user or not message:
-        return
+        return None
     if user.id not in settings.admin_ids:
-        await message.reply_text("Perintah admin saja.")
+        return None
+    return user.id, message
+
+
+async def _dm(context: ContextTypes.DEFAULT_TYPE, admin_id: int, text: str) -> None:
+    await context.bot.send_message(chat_id=admin_id, text=text)
+
+
+async def importhistory_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    private = await _private_admin(update, context)
+    if private is None:
         return
+    admin_id, _ = private
 
     sto = (context.args[0] if context.args else "").strip().upper()
     if sto not in AREA_BY_STO:
-        await message.reply_text(
+        await _dm(
+            context,
+            admin_id,
             "Format:\n/importhistory JGR\n/importhistory MYR\n\n"
-            "Setelah itu kirim file JSON hasil Export Telegram ke chat ini."
+            "Setelah itu kirim file JSON hasil Export Telegram ke chat pribadi bot ini.",
         )
         return
 
     context.user_data[PENDING_KEY] = sto
-    await message.reply_text(
+    await _dm(
+        context,
+        admin_id,
         "📥 IMPORT HISTORY SIAP\n"
         f"📍 AREA : {AREA_BY_STO[sto]}\n"
         f"🏢 STO : {sto}\n\n"
-        "Sekarang kirim file JSON hasil Export Telegram.\n"
-        "Bot hanya mengambil pesan /sto dan tidak menghapus data lama."
+        "Sekarang kirim file JSON hasil Export Telegram di chat pribadi ini.\n"
+        "Bot hanya mengambil pesan /sto dan tidak menghapus data lama.",
     )
 
 
 async def importhistory_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    message = update.effective_message
-    if not message:
+    private = await _private_admin(update, context)
+    if private is None:
         return
+    admin_id, _ = private
     context.user_data.pop(PENDING_KEY, None)
-    await message.reply_text("Import history dibatalkan.")
+    await _dm(context, admin_id, "Import history dibatalkan.")
 
 
 async def import_history_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    chat = update.effective_chat
-    user = update.effective_user
-    message = update.effective_message
-    document = message.document if message else None
-    settings = context.application.bot_data["settings"]
-    if not chat or chat.type != "private" or not user or not message or document is None:
+    private = await _private_admin(update, context)
+    if private is None:
         return
-    if user.id not in settings.admin_ids:
+    admin_id, message = private
+    document = message.document
+    if document is None:
         return
 
+    settings = context.application.bot_data["settings"]
     target_sto = str(context.user_data.get(PENDING_KEY) or "").strip().upper()
     if target_sto not in AREA_BY_STO:
         return
@@ -180,21 +194,21 @@ async def import_history_document(update: Update, context: ContextTypes.DEFAULT_
     filename = (document.file_name or "").lower()
     mime = (document.mime_type or "").lower()
     if not filename.endswith(".json") and "json" not in mime:
-        await message.reply_text("❌ File harus JSON hasil Export Telegram.")
+        await _dm(context, admin_id, "❌ File harus JSON hasil Export Telegram.")
         return
 
-    await message.reply_text("⏳ Membaca history Telegram...")
+    await _dm(context, admin_id, "⏳ Membaca history Telegram...")
     try:
         telegram_file = await context.bot.get_file(document.file_id)
         raw = bytes(await telegram_file.download_as_bytearray())
         payload = json.loads(raw.decode("utf-8-sig"))
     except Exception as exc:
-        await message.reply_text(f"❌ Gagal membaca JSON: {exc}")
+        await _dm(context, admin_id, f"❌ Gagal membaca JSON: {exc}")
         return
 
     messages = _messages_from_export(payload)
     if not messages:
-        await message.reply_text("❌ Tidak menemukan daftar messages pada export Telegram.")
+        await _dm(context, admin_id, "❌ Tidak menemukan daftar messages pada export Telegram.")
         return
 
     db: Database = context.application.bot_data["db"]
@@ -263,8 +277,6 @@ async def import_history_document(update: Update, context: ContextTypes.DEFAULT_
         else:
             mapped_existing += 1
 
-        # JAGIR sepenuhnya dapat direkap dari mapping internal ini; tidak perlu
-        # INET ditemukan di Google Sheet/Excel.
         await asyncio.to_thread(
             record_area_order,
             db.db_path,
@@ -283,7 +295,9 @@ async def import_history_document(update: Update, context: ContextTypes.DEFAULT_
             )
 
     context.user_data.pop(PENDING_KEY, None)
-    await message.reply_text(
+    await _dm(
+        context,
+        admin_id,
         "✅ IMPORT HISTORY SELESAI\n"
         f"📍 AREA : {area_label}\n"
         f"🏢 STO : {target_sto}\n"
@@ -292,5 +306,5 @@ async def import_history_document(update: Update, context: ContextTypes.DEFAULT_
         f"↪️ Bukan /sto : {skipped_not_sto}\n"
         f"⚠️ STO berbeda : {skipped_mismatch}\n"
         f"❌ Data tidak lengkap : {skipped_invalid}\n\n"
-        "Data existing tidak dihapus atau didobel."
+        "Data existing tidak dihapus atau didobel.",
     )
