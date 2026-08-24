@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sqlite3
 from datetime import datetime
 from typing import Any
@@ -21,6 +22,11 @@ AREA_BY_STO = {
     "JGR": "JAGIR",
 }
 PENDING_KEY = "telegram_report_history_import_sto"
+TICKET_FALLBACK_RE = re.compile(
+    r"(?im)^\s*(?:TIKET|TICKET|TIKET\s+ID|TICKET\s+ID|NO\.?\s*TIKET|INC)\s*[:：=]\s*([^\n\r]+)"
+)
+INC_RE = re.compile(r"\bINC\d{5,}\b", re.IGNORECASE)
+EMPTY_TICKET_VALUES = {"", "-", "MANUAL", "N/A", "NA", "NONE", "NULL"}
 
 
 def _flatten_text(value: Any) -> str:
@@ -66,6 +72,24 @@ def _parse_export_date(raw: Any, tz: ZoneInfo) -> datetime | None:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=tz)
     return dt.astimezone(tz)
+
+
+def _ticket_from_text(text: str, parsed_ticket: str) -> str:
+    ticket = str(parsed_ticket or "").strip()
+    if ticket.upper() not in EMPTY_TICKET_VALUES:
+        inc = INC_RE.search(ticket)
+        return inc.group(0).upper() if inc else ticket
+
+    match = TICKET_FALLBACK_RE.search(text)
+    if match:
+        value = match.group(1).strip()
+        if value.upper() not in EMPTY_TICKET_VALUES:
+            inc = INC_RE.search(value)
+            return inc.group(0).upper() if inc else value
+
+    # Last fallback: only accept an explicit INC token anywhere in the /sto text.
+    inc = INC_RE.search(text)
+    return inc.group(0).upper() if inc else ""
 
 
 def _existing_report(
@@ -217,6 +241,8 @@ async def import_history_document(update: Update, context: ContextTypes.DEFAULT_
 
     imported = 0
     mapped_existing = 0
+    tickets_saved = 0
+    tickets_missing = 0
     skipped_not_sto = 0
     skipped_mismatch = 0
     skipped_invalid = 0
@@ -285,14 +311,19 @@ async def import_history_document(update: Update, context: ContextTypes.DEFAULT_
             target_sto,
             area_label,
         )
-        if parsed.ticket_id:
+
+        ticket_id = _ticket_from_text(text, parsed.ticket_id)
+        if ticket_id:
             await asyncio.to_thread(
                 _save_ticket_metadata,
                 db.db_path,
                 parsed.service_number,
                 period_start,
-                parsed.ticket_id,
+                ticket_id,
             )
+            tickets_saved += 1
+        else:
+            tickets_missing += 1
 
     context.user_data.pop(PENDING_KEY, None)
     await _dm(
@@ -303,8 +334,10 @@ async def import_history_document(update: Update, context: ContextTypes.DEFAULT_
         f"🏢 STO : {target_sto}\n"
         f"➕ Report baru : {imported}\n"
         f"🔗 Data lama dipetakan : {mapped_existing}\n"
+        f"🎫 Tiket tersimpan : {tickets_saved}\n"
+        f"📝 /sto tanpa tiket : {tickets_missing}\n"
         f"↪️ Bukan /sto : {skipped_not_sto}\n"
         f"⚠️ STO berbeda : {skipped_mismatch}\n"
         f"❌ Data tidak lengkap : {skipped_invalid}\n\n"
-        "Data existing tidak dihapus atau didobel.",
+        "Data existing tidak dihapus atau didobel. Tiket existing akan dilengkapi dari JSON bila ditemukan.",
     )
