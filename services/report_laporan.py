@@ -1,17 +1,26 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import re
 import sqlite3
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 from telegram import Update
 from telegram.ext import ApplicationHandlerStop, ContextTypes
 
 from database import Database
-from services.google_sheet_reference import get_reference_statuses, unique_reference_orders
+from services.google_sheet_reference import (
+    HEADER_ALIASES,
+    cell,
+    current_csv_url,
+    find_column,
+    normalize_ticket,
+)
 from services.report_leaderboard import NO_SERVICE_RE, _period_bounds
 from services.report_multi_topic import get_topic_identity
 
@@ -64,16 +73,44 @@ def _save_ticket_metadata(
         )
 
 
+def _read_sheet_ticket_priority() -> dict[str, str]:
+    """Read Order Sheet tickets with explicit priority: INSERA TODAY -> TIKET."""
+    request = Request(current_csv_url(), headers={"User-Agent": "Kerja-Bot/1.0"})
+    with urlopen(request, timeout=20) as response:
+        rows = list(csv.reader(io.StringIO(response.read().decode("utf-8-sig", errors="replace"))))
+    if not rows:
+        return {}
+
+    header_index = -1
+    service_col = ticket_col = insera_col = None
+    for index, row in enumerate(rows[:20]):
+        service_col = find_column(row, HEADER_ALIASES["service_number"])
+        ticket_col = find_column(row, HEADER_ALIASES["ticket"])
+        insera_col = find_column(row, HEADER_ALIASES["insera_ticket"])
+        if service_col is not None:
+            header_index = index
+            break
+    if header_index < 0 or service_col is None:
+        return {}
+
+    result: dict[str, str] = {}
+    for row in rows[header_index + 1 :]:
+        service = cell(row, service_col).strip()
+        if not service:
+            continue
+        insera_ticket = normalize_ticket(cell(row, insera_col))
+        primary_ticket = normalize_ticket(cell(row, ticket_col))
+        ticket = insera_ticket or primary_ticket
+        if ticket:
+            result[service] = ticket
+    return result
+
+
 def _backfill_sheet_ticket_metadata(
     database_path: Path,
     sheet_tickets: dict[str, str],
 ) -> int:
-    """Fill missing report ticket metadata using ticket values from Order Sheet.
-
-    ReferenceStatus.ticket_id already falls back to the INSERA TODAY column when
-    the primary ticket column is empty, so old MANUAL rows can repair themselves.
-    Existing non-empty metadata is never overwritten.
-    """
+    """Fill only missing/MANUAL report ticket metadata using Order Sheet."""
     if not sheet_tickets:
         return 0
 
@@ -94,10 +131,11 @@ def _backfill_sheet_ticket_metadata(
         ).fetchall()
 
         for service_number, period_start, metadata_ticket in rows:
-            if str(metadata_ticket or "").strip():
+            current = str(metadata_ticket or "").strip()
+            if current and current.upper() not in {"MANUAL", "-", "N/A", "NA", "NONE"}:
                 continue
             ticket = sheet_tickets.get(str(service_number or "").strip(), "").strip()
-            if not ticket or ticket.upper() in {"-", "MANUAL", "N/A", "NA", "NONE"}:
+            if not ticket:
                 continue
             conn.execute(
                 """
@@ -105,11 +143,15 @@ def _backfill_sheet_ticket_metadata(
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT(service_number, period_start) DO UPDATE SET
                     ticket_id = CASE
-                        WHEN TRIM(report_ticket_metadata.ticket_id) = '' THEN excluded.ticket_id
+                        WHEN TRIM(report_ticket_metadata.ticket_id) = ''
+                          OR UPPER(TRIM(report_ticket_metadata.ticket_id)) IN ('MANUAL','-','N/A','NA','NONE')
+                        THEN excluded.ticket_id
                         ELSE report_ticket_metadata.ticket_id
                     END,
                     updated_at = CASE
-                        WHEN TRIM(report_ticket_metadata.ticket_id) = '' THEN excluded.updated_at
+                        WHEN TRIM(report_ticket_metadata.ticket_id) = ''
+                          OR UPPER(TRIM(report_ticket_metadata.ticket_id)) IN ('MANUAL','-','N/A','NA','NONE')
+                        THEN excluded.updated_at
                         ELSE report_ticket_metadata.updated_at
                     END
                 """,
@@ -120,24 +162,12 @@ def _backfill_sheet_ticket_metadata(
 
 
 async def _sync_manual_tickets_from_sheet(db: Database) -> int:
-    """Best-effort repair of MANUAL tickets from the latest Order Sheet cache."""
+    """On every /laporan: INSERA TODAY first, then TIKET, otherwise keep MANUAL."""
     try:
-        statuses = await get_reference_statuses()
+        sheet_tickets = await asyncio.to_thread(_read_sheet_ticket_priority)
     except Exception:
         return 0
-
-    sheet_tickets: dict[str, str] = {}
-    for reference in unique_reference_orders(statuses):
-        service = reference.service_number.strip()
-        ticket = reference.ticket_id.strip()
-        if service and ticket and ticket.upper() not in {"-", "MANUAL", "N/A", "NA", "NONE"}:
-            sheet_tickets[service] = ticket
-
-    return await asyncio.to_thread(
-        _backfill_sheet_ticket_metadata,
-        db.db_path,
-        sheet_tickets,
-    )
+    return await asyncio.to_thread(_backfill_sheet_ticket_metadata, db.db_path, sheet_tickets)
 
 
 async def capture_report_ticket_metadata(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -305,8 +335,6 @@ async def _send_laporan(message, db: Database, query: str) -> None:
         await message.reply_text("\n".join(lines))
         return
 
-    # Sebelum laporan ditampilkan, isi ticket MANUAL yang masih kosong dari
-    # Order Sheet. Kolom ticket referensi sudah fallback ke INSERA TODAY.
     await _sync_manual_tickets_from_sheet(db)
 
     nik, name = matches[0]
@@ -333,7 +361,6 @@ async def _send_laporan(message, db: Database, query: str) -> None:
 
 
 async def laporan_group_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Allow anyone in a registered REPORT topic to check technician report history."""
     chat = update.effective_chat
     message = update.effective_message
     if not chat or not message or chat.type not in {"group", "supergroup"}:
@@ -346,12 +373,7 @@ async def laporan_group_command(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     db: Database = context.application.bot_data["db"]
-    identity = await asyncio.to_thread(
-        get_topic_identity,
-        db.db_path,
-        chat.id,
-        message.message_thread_id,
-    )
+    identity = await asyncio.to_thread(get_topic_identity, db.db_path, chat.id, message.message_thread_id)
     if identity is None:
         return
 
