@@ -12,12 +12,37 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from database import Database
-from services.report_area_tracking import area_order_matches_sql, ensure_area_tracking_table
+from services.report_area_tracking import area_order_condition, ensure_area_tracking_table
 
 AREA_BY_STO = {
     "MYR": "MANYAR",
     "JGR": "JAGIR",
 }
+EMPTY_TICKETS = {"", "-", "MANUAL", "N/A", "NA", "NONE"}
+
+
+def _clean_ticket(value: object) -> str:
+    ticket = str(value or "").strip()
+    return "" if ticket.upper() in EMPTY_TICKETS else ticket
+
+
+def _order_ticket(conn: sqlite3.Connection, service_number: str) -> str:
+    row = conn.execute(
+        """
+        SELECT ticket_id
+        FROM orders
+        WHERE service_number = ?
+          AND TRIM(COALESCE(ticket_id, '')) != ''
+        ORDER BY id DESC
+        LIMIT 20
+        """,
+        (service_number,),
+    ).fetchall()
+    for item in row:
+        ticket = _clean_ticket(item[0])
+        if ticket:
+            return ticket
+    return ""
 
 
 def _export_rows(database_path: Path, sto_code: str) -> list[dict[str, object]]:
@@ -36,7 +61,8 @@ def _export_rows(database_path: Path, sto_code: str) -> list[dict[str, object]]:
             )
             """
         )
-        predicate = area_order_matches_sql("r")
+
+        predicate, params = area_order_condition(sto_code, "r")
         rows = conn.execute(
             f"""
             SELECT r.service_number,
@@ -46,19 +72,7 @@ def _export_rows(database_path: Path, sto_code: str) -> list[dict[str, object]]:
                    r.message_date,
                    r.chat_id,
                    r.message_id,
-                   COALESCE(
-                       NULLIF(TRIM(m.ticket_id), ''),
-                       NULLIF(TRIM((
-                           SELECT o.ticket_id
-                           FROM orders o
-                           WHERE o.service_number = r.service_number
-                             AND TRIM(o.ticket_id) != ''
-                             AND UPPER(TRIM(o.ticket_id)) NOT IN ('MANUAL', '-', 'N/A', 'NA', 'NONE')
-                           ORDER BY o.id DESC
-                           LIMIT 1
-                       )), ''),
-                       'MANUAL'
-                   ) AS ticket_id
+                   COALESCE(m.ticket_id, '') AS metadata_ticket
             FROM report_group_orders r
             LEFT JOIN report_ticket_metadata m
               ON m.service_number = r.service_number
@@ -66,23 +80,27 @@ def _export_rows(database_path: Path, sto_code: str) -> list[dict[str, object]]:
             WHERE {predicate}
             ORDER BY r.message_date ASC, r.service_number ASC
             """,
-            (sto_code, sto_code),
+            params,
         ).fetchall()
 
-    result: list[dict[str, object]] = []
-    for row in rows:
-        result.append(
-            {
-                "service_number": str(row["service_number"] or "").strip(),
-                "period_start": str(row["period_start"] or "").strip(),
-                "technician_nik": str(row["technician_nik"] or "").strip(),
-                "technician_name": str(row["technician_name"] or "").strip(),
-                "date": str(row["message_date"] or "").strip(),
-                "chat_id": int(row["chat_id"] or 0),
-                "message_id": int(row["message_id"]) if row["message_id"] is not None else None,
-                "ticket_id": str(row["ticket_id"] or "MANUAL").strip() or "MANUAL",
-            }
-        )
+        result: list[dict[str, object]] = []
+        for row in rows:
+            service_number = str(row["service_number"] or "").strip()
+            ticket = _clean_ticket(row["metadata_ticket"])
+            if not ticket:
+                ticket = _order_ticket(conn, service_number)
+            result.append(
+                {
+                    "service_number": service_number,
+                    "period_start": str(row["period_start"] or "").strip(),
+                    "technician_nik": str(row["technician_nik"] or "").strip(),
+                    "technician_name": str(row["technician_name"] or "").strip(),
+                    "date": str(row["message_date"] or "").strip(),
+                    "chat_id": int(row["chat_id"] or 0),
+                    "message_id": int(row["message_id"]) if row["message_id"] is not None else None,
+                    "ticket_id": ticket or "MANUAL",
+                }
+            )
     return result
 
 
