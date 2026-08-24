@@ -53,6 +53,7 @@ from services.report_hourly_progress import (
     remember_report_manyar_group,
     send_hourly_report_progress,
 )
+from services.report_laporan import capture_report_ticket_metadata, laporan_command
 from services.report_leaderboard import (
     capture_report_group_message,
     capture_sto_recap_group_message,
@@ -168,7 +169,7 @@ async def post_init(application: Application) -> None:
         )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, area leaderboard, area daily close, hourly REPORT progress, multi-topic /sto report, name-only /sto compatibility, /update kendala, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, STO recap replies in REPORT MANYAR, and previous-week catch-up initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, area leaderboard, area daily close, hourly REPORT progress, multi-topic /sto report, name-only /sto compatibility, /laporan report history, /update kendala, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, STO recap replies in REPORT MANYAR, and previous-week catch-up initialized"
     )
 
 
@@ -202,6 +203,10 @@ def build_application() -> Application:
 
     install_auto_close(order_flow_module)
 
+    app.add_handler(
+        MessageHandler(filters.ChatType.GROUPS, capture_report_ticket_metadata),
+        group=-9,
+    )
     app.add_handler(
         MessageHandler(filters.ChatType.GROUPS, handle_name_only_sto),
         group=-8,
@@ -253,6 +258,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("rekapmingguan", recap_mingguan_command))
     app.add_handler(CommandHandler("leaderboard", leaderboard_command))
     app.add_handler(CommandHandler("closeharian", closeharian_command))
+    app.add_handler(CommandHandler("laporan", laporan_command))
 
     for handler in build_excel_status_handlers():
         app.add_handler(handler)
