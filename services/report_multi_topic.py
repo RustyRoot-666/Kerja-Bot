@@ -34,6 +34,11 @@ AREA_BY_COMMAND = {
 }
 
 
+def _command_from_text(text: str) -> str:
+    token = text.split(maxsplit=1)[0].lower().split("@", 1)[0]
+    return token.rstrip(":")
+
+
 def _utc_now() -> str:
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
@@ -250,7 +255,7 @@ async def handle_multi_report_topic(update: Update, context: ContextTypes.DEFAUL
     text = (message.text or message.caption or "").strip()
     if not text:
         return
-    command = text.split(maxsplit=1)[0].lower().split("@", 1)[0]
+    command = _command_from_text(text)
     db: Database = context.application.bot_data["db"]
 
     if command in BIND_COMMANDS:
