@@ -11,6 +11,7 @@ from telegram import Update
 from telegram.ext import ApplicationHandlerStop, ContextTypes
 
 from database import Database
+from services.report_area_tracking import record_area_order
 from services.report_leaderboard import (
     NO_SERVICE_RE,
     REPORT_GROUP_SETTING_KEY,
@@ -360,6 +361,24 @@ async def handle_multi_report_topic(update: Update, context: ContextTypes.DEFAUL
         chat.id,
         message.message_id,
     )
+
+    identity = await asyncio.to_thread(
+        _topic_identity,
+        db.db_path,
+        chat.id,
+        message.message_thread_id,
+    )
+    if identity:
+        area_label, sto_code = identity
+        await asyncio.to_thread(
+            record_area_order,
+            db.db_path,
+            service_number,
+            period_start.isoformat(),
+            sto_code,
+            area_label,
+        )
+
     total_today = await asyncio.to_thread(
         _technician_daily_total,
         db.db_path,
