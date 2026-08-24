@@ -9,6 +9,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from telegram import Update
+from telegram.error import NetworkError, TimedOut
 from telegram.ext import ContextTypes
 
 from database import Database
@@ -142,6 +143,31 @@ def _telegram_like_payload(rows: list[dict[str, object]], sto_code: str, timezon
     }
 
 
+async def _send_export_document(message, temp_path: Path, filename: str, caption: str) -> None:
+    """Send export file with longer timeouts and retries for unstable VPS->Telegram links."""
+    last_error: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            with temp_path.open("rb") as document:
+                await message.reply_document(
+                    document=document,
+                    filename=filename,
+                    caption=caption,
+                    connect_timeout=60,
+                    read_timeout=180,
+                    write_timeout=180,
+                    pool_timeout=60,
+                )
+            return
+        except (TimedOut, NetworkError) as exc:
+            last_error = exc
+            if attempt < 3:
+                await asyncio.sleep(attempt * 2)
+
+    if last_error is not None:
+        raise last_error
+
+
 async def exportreport_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat = update.effective_chat
     user = update.effective_user
@@ -172,6 +198,12 @@ async def exportreport_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
     payload = _telegram_like_payload(rows, sto_code, settings.timezone)
     filename = f"report_{sto_code.lower()}_{datetime.now(ZoneInfo(settings.timezone)).strftime('%Y%m%d_%H%M%S')}.json"
+    caption = (
+        f"📤 EXPORT REPORT {AREA_BY_STO[sto_code]}\n"
+        f"🏢 STO : {sto_code}\n"
+        f"📊 TOTAL : {len(rows)} report\n\n"
+        "File ini berasal dari history internal bot dan kompatibel untuk /importhistory."
+    )
 
     temp_path: Path | None = None
     try:
@@ -185,16 +217,12 @@ async def exportreport_command(update: Update, context: ContextTypes.DEFAULT_TYP
             json.dump(payload, handle, ensure_ascii=False, indent=2)
             temp_path = Path(handle.name)
 
-        with temp_path.open("rb") as document:
-            await message.reply_document(
-                document=document,
-                filename=filename,
-                caption=(
-                    f"📤 EXPORT REPORT {AREA_BY_STO[sto_code]}\n"
-                    f"🏢 STO : {sto_code}\n"
-                    f"📊 TOTAL : {len(rows)} report\n\n"
-                    "File ini berasal dari history internal bot dan kompatibel untuk /importhistory."
-                ),
+        try:
+            await _send_export_document(message, temp_path, filename, caption)
+        except (TimedOut, NetworkError):
+            await message.reply_text(
+                "❌ File export sudah berhasil dibuat, tetapi koneksi VPS ke Telegram timeout saat mengirim file.\n"
+                "Silakan coba /exportreport lagi beberapa saat lagi."
             )
     finally:
         if temp_path is not None:
