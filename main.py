@@ -60,6 +60,7 @@ from services.report_leaderboard import (
 )
 from services.report_multi_topic import handle_multi_report_topic
 from services.report_name_only_sto import handle_name_only_sto
+from services.report_universal_sto import handle_universal_sto
 from services.update_kendala import handle_update_message, migrate_existing_evidence_urls
 from utils.keyboards import MAIN_MENU
 from utils.logging import setup_logging
@@ -169,7 +170,7 @@ async def post_init(application: Application) -> None:
         )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, area leaderboard, area daily close, hourly REPORT progress, multi-topic /sto report, name-only /sto compatibility, /laporan report history, /update kendala, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, STO recap replies in REPORT MANYAR, and previous-week catch-up initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, area leaderboard, area daily close, hourly REPORT progress, universal /sto parser, multi-topic /sto report, name-only /sto compatibility, /laporan report history, /update kendala, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, STO recap replies in REPORT MANYAR, and previous-week catch-up initialized"
     )
 
 
@@ -203,6 +204,10 @@ def build_application() -> Application:
 
     install_auto_close(order_flow_module)
 
+    app.add_handler(
+        MessageHandler(filters.ChatType.GROUPS, handle_universal_sto),
+        group=-10,
+    )
     app.add_handler(
         MessageHandler(filters.ChatType.GROUPS, capture_report_ticket_metadata),
         group=-9,
