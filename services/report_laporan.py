@@ -221,21 +221,19 @@ async def laporan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     chat = update.effective_chat
     user = update.effective_user
     message = update.effective_message
-    settings = context.application.bot_data["settings"]
     if not chat or chat.type != "private" or not user or not message:
         return
-    if user.id not in settings.admin_ids:
-        await message.reply_text("Perintah admin saja.")
+
+    db: Database = context.application.bot_data["db"]
+    technician = await db.get_technician(user.id)
+    if technician is None:
+        await message.reply_text("❌ Perintah /laporan hanya untuk teknisi yang sudah terdaftar di bot.")
         return
 
     query = " ".join(context.args).strip()
     if not query:
-        await message.reply_text(
-            "Format:\n/laporan NIK\n/laporan NAMA TEKNISI\n\nContoh:\n/laporan 268800163\n/laporan Agam Rizky"
-        )
-        return
+        query = technician.nik.strip() or technician.name.strip()
 
-    db: Database = context.application.bot_data["db"]
     matches = await asyncio.to_thread(_find_technicians, db.db_path, query)
     if not matches:
         await message.reply_text(f"❌ Teknisi tidak ditemukan untuk: {query}")
@@ -250,7 +248,6 @@ async def laporan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     periods = await asyncio.to_thread(_report_rows, db.db_path, nik, 3)
     text = _build_report_text(nik, name, periods)
 
-    # Telegram message limit is 4096 chars; split cleanly if the history is long.
     if len(text) <= 4000:
         await message.reply_text(text)
         return
