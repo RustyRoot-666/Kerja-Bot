@@ -12,7 +12,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from database import Database
-from services.report_area_tracking import area_order_matches_sql, ensure_area_tracking_table
+from services.report_area_tracking import area_order_condition, ensure_area_tracking_table
 from services.report_multi_topic import get_topic_identity, list_registered_topics
 
 
@@ -101,7 +101,7 @@ def _today_progress_rows(
     try:
         ensure_area_tracking_table(conn)
         try:
-            area_predicate = area_order_matches_sql("r")
+            area_predicate, area_params = area_order_condition(sto_code, "r")
             close_rows = conn.execute(
                 f"""
                 SELECT r.technician_nik,
@@ -112,32 +112,38 @@ def _today_progress_rows(
                   AND {area_predicate}
                 GROUP BY r.technician_nik
                 """,
-                (day_iso, sto_code, sto_code),
+                (day_iso, *area_params),
             ).fetchall()
         except sqlite3.OperationalError:
             close_rows = []
 
-        try:
-            update_rows = conn.execute(
-                """
-                SELECT k.telegram_id,
-                       MAX(k.technician_name) AS technician_name,
-                       COUNT(DISTINCT k.service_number) AS total
-                FROM kendala_updates k
-                WHERE substr(k.created_at, 1, 10) = ?
-                  AND UPPER(TRIM(k.status)) = 'UPDATE'
-                  AND EXISTS (
-                      SELECT 1
-                      FROM orders o
-                      WHERE o.service_number = k.service_number
-                        AND UPPER(TRIM(o.sto)) = ?
-                  )
-                GROUP BY k.telegram_id
-                """,
-                (day_iso, sto_code),
-            ).fetchall()
-        except sqlite3.OperationalError:
+        # /update saat ini berasal dari workflow Manyar/Sheet. JAGIR tidak memiliki
+        # Sheet/Excel, jadi progress JAGIR tidak mencoba mengklasifikasikan UPDATE
+        # lewat tabel orders. Close JAGIR sepenuhnya berasal dari catatan /sto internal.
+        if sto_code == "JGR":
             update_rows = []
+        else:
+            try:
+                update_rows = conn.execute(
+                    """
+                    SELECT k.telegram_id,
+                           MAX(k.technician_name) AS technician_name,
+                           COUNT(DISTINCT k.service_number) AS total
+                    FROM kendala_updates k
+                    WHERE substr(k.created_at, 1, 10) = ?
+                      AND UPPER(TRIM(k.status)) = 'UPDATE'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM orders o
+                          WHERE o.service_number = k.service_number
+                            AND UPPER(TRIM(o.sto)) = ?
+                      )
+                    GROUP BY k.telegram_id
+                    """,
+                    (day_iso, sto_code),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                update_rows = []
 
         combined: dict[str, dict[str, object]] = {}
 
