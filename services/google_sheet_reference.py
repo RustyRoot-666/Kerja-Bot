@@ -103,6 +103,52 @@ def normalize_ticket(value: object) -> str:
     return "" if ticket in {"", "-", "MANUAL", "N/A", "NA", "NONE"} else ticket
 
 
+def _natural_parts(value: str) -> tuple[tuple[int, object], ...]:
+    """Natural-sort text so 2 comes before 10 without type-comparison errors."""
+    cleaned = re.sub(r"[^A-Z0-9]+", " ", normalize(value)).strip()
+    parts: list[tuple[int, object]] = []
+    for token in re.findall(r"\d+|[A-Z]+", cleaned):
+        if token.isdigit():
+            parts.append((0, int(token)))
+        else:
+            parts.append((1, token))
+    return tuple(parts)
+
+
+def address_route_sort_key(address: str) -> tuple[object, ...]:
+    """Group nearby addresses by road/gang first, then block letter and house number.
+
+    Example: `SEMOLO WARU INDAH 1 NO 4Q` stays next to other addresses on
+    `SEMOLO WARU INDAH 1`, especially the same Q block, instead of following
+    arbitrary Google Sheet row order.
+    """
+    text = re.sub(r"[^A-Z0-9]+", " ", normalize(address)).strip()
+    if not text:
+        return ((), "", 10**9, "")
+
+    # Prefer an explicit house-number marker so the street/gang number remains
+    # part of the cluster: `... INDAH 1 NO 4Q` -> base `... INDAH 1`.
+    match = re.search(r"\b(?:NO|NOMOR)\s*([0-9]+)\s*([A-Z]*)\b", text)
+    if match:
+        base = text[: match.start()].strip()
+        house_number = int(match.group(1))
+        block = match.group(2) or ""
+        return (_natural_parts(base), block, house_number, _natural_parts(text))
+
+    # Common compact form at the end, e.g. `... 4Q`.
+    compact = re.search(r"\b([0-9]+)\s*([A-Z]+)\b\s*$", text)
+    if compact:
+        base = text[: compact.start()].strip()
+        return (
+            _natural_parts(base),
+            compact.group(2),
+            int(compact.group(1)),
+            _natural_parts(text),
+        )
+
+    return (_natural_parts(text), "", 10**9, _natural_parts(text))
+
+
 def current_sheet_url() -> str:
     return f"https://docs.google.com/spreadsheets/d/{_spreadsheet_id}/edit?gid={_sheet_gid}"
 
@@ -242,7 +288,16 @@ def unique_reference_orders(statuses: dict[str, ReferenceStatus]) -> list[Refere
         key = (normalize_key(reference.ticket_id), normalize_key(reference.service_number))
         if key != ("", ""):
             unique[key] = reference
-    return list(unique.values())
+    # /orderanku consumes this list directly. Sorting here makes cards follow a
+    # route-like address order while remaining deterministic for other callers.
+    return sorted(
+        unique.values(),
+        key=lambda reference: (
+            address_route_sort_key(reference.address),
+            normalize(reference.customer_name),
+            normalize_key(reference.service_number),
+        ),
+    )
 
 
 def _sync_missing_orders(database_path: Path, references: list[ReferenceStatus]) -> tuple[int, int, int]:
