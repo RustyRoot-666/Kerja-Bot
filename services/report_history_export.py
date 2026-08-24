@@ -46,7 +46,19 @@ def _export_rows(database_path: Path, sto_code: str) -> list[dict[str, object]]:
                    r.message_date,
                    r.chat_id,
                    r.message_id,
-                   COALESCE(NULLIF(TRIM(m.ticket_id), ''), 'MANUAL') AS ticket_id
+                   COALESCE(
+                       NULLIF(TRIM(m.ticket_id), ''),
+                       NULLIF(TRIM((
+                           SELECT o.ticket_id
+                           FROM orders o
+                           WHERE o.service_number = r.service_number
+                             AND TRIM(o.ticket_id) != ''
+                             AND UPPER(TRIM(o.ticket_id)) NOT IN ('MANUAL', '-', 'N/A', 'NA', 'NONE')
+                           ORDER BY o.id DESC
+                           LIMIT 1
+                       )), ''),
+                       'MANUAL'
+                   ) AS ticket_id
             FROM report_group_orders r
             LEFT JOIN report_ticket_metadata m
               ON m.service_number = r.service_number
