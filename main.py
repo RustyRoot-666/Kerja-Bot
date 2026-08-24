@@ -59,7 +59,11 @@ from services.report_hourly_progress import (
     remember_report_manyar_group,
     send_hourly_report_progress,
 )
-from services.report_laporan import capture_report_ticket_metadata, laporan_command
+from services.report_laporan import (
+    capture_report_ticket_metadata,
+    laporan_command,
+    laporan_group_command,
+)
 from services.report_leaderboard import (
     capture_report_group_message,
     capture_sto_recap_group_message,
@@ -176,7 +180,7 @@ async def post_init(application: Application) -> None:
         )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, area leaderboard, area daily close, hourly REPORT progress, universal /sto parser, JAGIR internal report tracking, Telegram history import/export, multi-topic /sto report, name-only /sto compatibility, /laporan report history, /update kendala, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, and previous-week catch-up initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, area leaderboard, area daily close, hourly REPORT progress, universal /sto parser, JAGIR internal report tracking, Telegram history import/export, private technician /laporan, group REPORT /laporan monitoring, multi-topic /sto report, name-only /sto compatibility, /update kendala, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, and previous-week catch-up initialized"
     )
 
 
@@ -210,6 +214,10 @@ def build_application() -> Application:
 
     install_auto_close(order_flow_module)
 
+    app.add_handler(
+        MessageHandler(filters.ChatType.GROUPS, laporan_group_command),
+        group=-11,
+    )
     app.add_handler(
         MessageHandler(filters.ChatType.GROUPS, handle_universal_sto),
         group=-10,
