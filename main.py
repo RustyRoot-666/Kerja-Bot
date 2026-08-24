@@ -49,6 +49,7 @@ from services.google_sheet_reference import (
 from services.logic_dispatch import detect_logic_group, ignore_group_message
 from services.order_repository import OrderRepository
 from services.report_area_leaderboard import send_daily_close, send_report_leaderboard
+from services.report_history_export import exportreport_command
 from services.report_history_import import (
     import_history_document,
     importhistory_cancel,
@@ -175,7 +176,7 @@ async def post_init(application: Application) -> None:
         )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, area leaderboard, area daily close, hourly REPORT progress, universal /sto parser, JAGIR internal report tracking, Telegram history import, multi-topic /sto report, name-only /sto compatibility, /laporan report history, /update kendala, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, and previous-week catch-up initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, area leaderboard, area daily close, hourly REPORT progress, universal /sto parser, JAGIR internal report tracking, Telegram history import/export, multi-topic /sto report, name-only /sto compatibility, /laporan report history, /update kendala, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, and previous-week catch-up initialized"
     )
 
 
@@ -271,6 +272,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("laporan", laporan_command))
     app.add_handler(CommandHandler("importhistory", importhistory_command))
     app.add_handler(CommandHandler("cancelimporthistory", importhistory_cancel))
+    app.add_handler(CommandHandler("exportreport", exportreport_command))
     app.add_handler(
         MessageHandler(
             filters.ChatType.PRIVATE & filters.Document.ALL,
