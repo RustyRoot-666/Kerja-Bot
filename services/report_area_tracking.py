@@ -46,7 +46,7 @@ def record_area_order(
 
 
 def area_order_matches_sql(report_alias: str = "r") -> str:
-    """SQL predicate: direct report-area mapping first, legacy orders STO as fallback."""
+    """Legacy predicate: direct report-area mapping first, orders STO as fallback."""
     return f"""
     (
         EXISTS (
@@ -69,3 +69,29 @@ def area_order_matches_sql(report_alias: str = "r") -> str:
         )
     )
     """
+
+
+def area_order_condition(
+    sto_code: str,
+    report_alias: str = "r",
+) -> tuple[str, tuple[str, ...]]:
+    """Return SQL + params for an area.
+
+    JGR/JAGIR is intentionally 100% internal because it has no Sheet/Excel source.
+    Only report_area_orders (created from /sto or Telegram-history import) can classify
+    a report as JAGIR. MYR keeps the legacy Sheet fallback for older Manyar records.
+    """
+    sto = sto_code.strip().upper()
+    if sto == "JGR":
+        return (
+            f"""
+            EXISTS (
+                SELECT 1 FROM report_area_orders ra
+                WHERE ra.service_number = {report_alias}.service_number
+                  AND ra.period_start = {report_alias}.period_start
+                  AND UPPER(TRIM(ra.sto_code)) = ?
+            )
+            """,
+            (sto,),
+        )
+    return area_order_matches_sql(report_alias), (sto, sto)
