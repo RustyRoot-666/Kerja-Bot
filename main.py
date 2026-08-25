@@ -33,6 +33,7 @@ from handlers.my_orders import build_my_orders_handlers, orderanku
 from handlers.order_flow import build_order_conversation
 from services.assign_request import handle_assign_message
 from services.auto_close import install_auto_close
+from services.bot_commands_guide import perintah_command
 from services.daily_recap import (
     initialize_recap_delivery_log,
     recap_harian_command,
@@ -180,7 +181,7 @@ async def post_init(application: Application) -> None:
         )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, area leaderboard, area daily close, hourly REPORT progress, universal /sto parser, JAGIR internal report tracking, Telegram history import/export, private technician /laporan, group REPORT /laporan monitoring, multi-topic /sto report, name-only /sto compatibility, /update kendala, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, and previous-week catch-up initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, area leaderboard, area daily close, hourly REPORT progress, universal /sto parser, JAGIR internal report tracking, Telegram history import/export, private technician /laporan, group REPORT /laporan monitoring, /perintah technician guide, multi-topic /sto report, name-only /sto compatibility, /update kendala, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, and previous-week catch-up initialized"
     )
 
 
@@ -264,6 +265,7 @@ def build_application() -> Application:
     app.add_handler(order_conv)
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("perintah", perintah_command))
     app.add_handler(CommandHandler("daftar_teknisi", start))
     app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(CommandHandler("history", history))
