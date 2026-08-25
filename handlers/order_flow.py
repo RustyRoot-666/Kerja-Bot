@@ -11,6 +11,7 @@ from telegram.ext import (
 
 from database import Database
 from handlers.common import cancel
+from handlers.my_orders import orderanku
 from services.auth import require_technician
 from services.excel_orders import import_workbook
 from services.formatters import generate_config, generate_report, generate_sto
@@ -123,6 +124,16 @@ def clear_order_state(context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop("missing_fields", None)
     context.user_data.pop("order_choices", None)
     context.user_data.pop("order_action", None)
+
+
+async def open_orderanku_from_flow(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> int:
+    """Leave any active CONFIG/REPORT/STO flow and open Orderanku safely."""
+    clear_order_state(context)
+    await orderanku(update, context)
+    return ConversationHandler.END
 
 
 async def start_output(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -504,6 +515,13 @@ async def receive_excel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     return ConversationHandler.END
 
 
+def _orderanku_escape_handler() -> MessageHandler:
+    return MessageHandler(
+        filters.Regex(f"^{MAIN_MENU['orders']}$"),
+        open_orderanku_from_flow,
+    )
+
+
 def build_order_conversation() -> ConversationHandler:
     return ConversationHandler(
         entry_points=[
@@ -518,11 +536,21 @@ def build_order_conversation() -> ConversationHandler:
             MessageHandler(filters.Regex(f"^{MAIN_MENU['full']}$"), start_output),
         ],
         states={
-            SEARCH_ORDER: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_search)],
-            CHOOSE_ORDER: [MessageHandler(filters.TEXT & ~filters.COMMAND, choose_order)],
-            FILL_MISSING: [MessageHandler(filters.TEXT & ~filters.COMMAND, fill_missing)],
+            SEARCH_ORDER: [
+                _orderanku_escape_handler(),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_search),
+            ],
+            CHOOSE_ORDER: [
+                _orderanku_escape_handler(),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, choose_order),
+            ],
+            FILL_MISSING: [
+                _orderanku_escape_handler(),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, fill_missing),
+            ],
             CHECK_CONTACT_CHANGE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_contact_change)
+                _orderanku_escape_handler(),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_contact_change),
             ],
             WAIT_EXCEL: [MessageHandler(filters.Document.ALL, receive_excel)],
         },
