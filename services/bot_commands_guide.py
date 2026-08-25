@@ -129,6 +129,39 @@ Urutan pengecekan tiket:
 Jika tiket baru muncul di Sheet kemudian hari, cukup jalankan /laporan lagi. Tidak perlu report ulang hanya untuk memperbarui tiket.""",
 
     """━━━━━━━━━━━━━━━━━━
+🏆 LEADERBOARD
+━━━━━━━━━━━━━━━━━━
+
+🏆 /leaderboard
+📍 Digunakan di:
+• CHAT PRIBADI BOT
+• TOPIC REPORT MANYAR
+• TOPIC REPORT JAGIR
+
+🔓 Akses: UNIVERSAL
+Tidak harus admin dan tidak harus terdaftar sebagai teknisi.
+
+Fungsi:
+Melihat ranking teknisi berdasarkan jumlah report/CLOSE yang tersimpan pada periode berjalan.
+
+Periode leaderboard:
+Jumat sampai Kamis.
+
+👤 DI CHAT PRIBADI
+/leaderboard
+→ Bot menampilkan leaderboard semua area REPORT yang sudah terdaftar, seperti MANYAR dan JAGIR.
+
+📡 DI TOPIC REPORT
+/leaderboard
+→ Bot hanya menampilkan leaderboard area topic tersebut.
+
+Contoh:
+Jika diketik di REPORT MANYAR, bot menampilkan leaderboard MANYAR.
+Jika diketik di REPORT JAGIR, bot menampilkan leaderboard JAGIR.
+
+Data ranking menggunakan report internal bot dan satu INET dihitung satu pekerjaan dalam satu periode.
+
+━━━━━━━━━━━━━━━━━━
 📱 FORMAT WHATSAPP PELANGGAN
 ━━━━━━━━━━━━━━━━━━
 
@@ -149,9 +182,9 @@ Pesan dapat mencakup:
 • Tujuan kunjungan
 • Informasi penggantian ONT/Modem
 • Informasi GRATIS
-• Tidak mengubah biaya langganan
+• Tidak mengubah biaya langganan""",
 
-━━━━━━━━━━━━━━━━━━
+    """━━━━━━━━━━━━━━━━━━
 📡 REPORT /STO
 ━━━━━━━━━━━━━━━━━━
 
@@ -183,9 +216,9 @@ JGR → REPORT JAGIR
 
 Jika STO tidak sesuai topic, bot akan menolak report.
 
-Satu INET dihitung satu pekerjaan dalam satu periode Jumat–Kamis. INET yang sama pada periode yang sama tidak dihitung dua kali sebagai pekerjaan baru.""",
+Satu INET dihitung satu pekerjaan dalam satu periode Jumat–Kamis. INET yang sama pada periode yang sama tidak dihitung dua kali sebagai pekerjaan baru.
 
-    """━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━
 🛠 UPDATE KENDALA
 ━━━━━━━━━━━━━━━━━━
 
@@ -203,9 +236,9 @@ Bot dapat mencatat data seperti:
 • Foto pekerjaan
 • Link evidence
 
-⚠️ /update bukan command untuk chat pribadi bot.
+⚠️ /update bukan command untuk chat pribadi bot.""",
 
-━━━━━━━━━━━━━━━━━━
+    """━━━━━━━━━━━━━━━━━━
 📨 REQUEST ASSIGN
 ━━━━━━━━━━━━━━━━━━
 
@@ -279,6 +312,7 @@ Membuka panduan lengkap ini.
 /orderanku semua
 /laporan
 /laporan <NIK/NAMA>
+/leaderboard
 /format <INET>
 /profile
 /rekapharian
@@ -297,10 +331,12 @@ Menu:
 📡 TOPIC REPORT MANYAR
 /sto → MYR
 /laporan <NIK/NAMA>
+/leaderboard
 
 📡 TOPIC REPORT JAGIR
 /sto → JGR
 /laporan <NIK/NAMA>
+/leaderboard
 
 🛠 GRUP/TOPIC UPDATE KENDALA
 /update
@@ -319,6 +355,7 @@ Menu:
 • JGR → REPORT JAGIR.
 • Tiket yang belum tersedia tampil MANUAL sementara.
 • Tiket MANUAL akan dicek kembali saat /laporan digunakan.
+• /leaderboard dapat digunakan semua orang di private bot atau topic REPORT terdaftar.
 • Gunakan command sesuai chat/grup/topic yang ditentukan.
 
 🤖 KERJA BOT
