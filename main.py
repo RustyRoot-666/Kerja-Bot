@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -49,7 +50,14 @@ from services.google_sheet_reference import (
 )
 from services.logic_dispatch import detect_logic_group, ignore_group_message
 from services.order_repository import OrderRepository
-from services.report_area_leaderboard import send_daily_close, send_report_leaderboard
+from services.report_area_leaderboard import (
+    _leaderboard_rows,
+    _period_bounds as _area_period_bounds,
+    _registered_area_topics,
+    build_leaderboard_text,
+    send_daily_close,
+    send_report_leaderboard,
+)
 from services.report_history_export import exportreport_command
 from services.report_history_import import (
     import_history_document,
@@ -69,7 +77,7 @@ from services.report_leaderboard import (
     capture_report_group_message,
     capture_sto_recap_group_message,
 )
-from services.report_multi_topic import handle_multi_report_topic
+from services.report_multi_topic import get_topic_identity, handle_multi_report_topic
 from services.report_name_only_sto import handle_name_only_sto
 from services.report_universal_sto import handle_universal_sto
 from services.update_kendala import handle_update_message, migrate_existing_evidence_urls
@@ -103,12 +111,55 @@ async def auto_sync_google_sheet(context) -> None:
 
 
 async def leaderboard_command(update, context) -> None:
+    """Universal leaderboard: private shows all areas, registered REPORT topic shows that area."""
     chat = update.effective_chat
-    user = update.effective_user
-    app_settings = context.application.bot_data["settings"]
-    if not chat or chat.type != "private" or not user or user.id not in app_settings.admin_ids:
+    message = update.effective_message
+    if not chat or not message:
         return
-    await send_report_leaderboard(context)
+
+    db: Database = context.application.bot_data["db"]
+    app_settings = context.application.bot_data["settings"]
+    today = datetime.now(ZoneInfo(app_settings.timezone)).date()
+    period_start, _ = _area_period_bounds(today)
+
+    if chat.type == "private":
+        topics = await asyncio.to_thread(_registered_area_topics, db.db_path)
+        if not topics:
+            await message.reply_text("Belum ada topic REPORT yang terdaftar untuk leaderboard.")
+            return
+
+        seen: set[tuple[str, str]] = set()
+        for _, _, area, sto_code in topics:
+            key = (area, sto_code)
+            if key in seen:
+                continue
+            seen.add(key)
+            rows = await asyncio.to_thread(
+                _leaderboard_rows,
+                db.db_path,
+                period_start,
+                sto_code,
+            )
+            await message.reply_text(build_leaderboard_text(rows, today, area))
+        return
+
+    if chat.type in {"group", "supergroup"} and message.message_thread_id is not None:
+        identity = await asyncio.to_thread(
+            get_topic_identity,
+            db.db_path,
+            chat.id,
+            message.message_thread_id,
+        )
+        if identity is None:
+            return
+        area, sto_code = identity
+        rows = await asyncio.to_thread(
+            _leaderboard_rows,
+            db.db_path,
+            period_start,
+            sto_code,
+        )
+        await message.reply_text(build_leaderboard_text(rows, today, area))
 
 
 async def closeharian_command(update, context) -> None:
@@ -181,7 +232,7 @@ async def post_init(application: Application) -> None:
         )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, area leaderboard, area daily close, hourly REPORT progress, universal /sto parser, JAGIR internal report tracking, Telegram history import/export, private technician /laporan, group REPORT /laporan monitoring, /perintah technician guide, multi-topic /sto report, name-only /sto compatibility, /update kendala, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, and previous-week catch-up initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, universal /leaderboard, area daily close, hourly REPORT progress, universal /sto parser, JAGIR internal report tracking, Telegram history import/export, private technician /laporan, group REPORT /laporan monitoring, /perintah technician guide, multi-topic /sto report, name-only /sto compatibility, /update kendala, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, and previous-week catch-up initialized"
     )
 
 
