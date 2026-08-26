@@ -3,77 +3,114 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <meta name="theme-color" content="#111827" />
-  <title>Kerja Bot - Pendapatan</title>
+  <meta name="theme-color" content="#07111f" />
+  <title>Kerja Bot - Dashboard Perolehan</title>
   <link rel="stylesheet" href="/styles.css" />
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
   <main class="app-shell">
-    <header class="hero">
+    <header class="hero glass">
       <div>
         <p class="eyebrow">KERJA BOT</p>
-        <h1>Monitoring Pendapatan</h1>
-        <p id="technicianName" class="subtle">Teknisi</p>
+        <h1>Dashboard Perolehan</h1>
+        <p class="subtle">Monitoring seluruh teknisi secara real-time</p>
       </div>
-      <div class="avatar">💼</div>
+      <div class="hero-icon">📊</div>
     </header>
 
-    <section class="summary-grid" aria-label="Ringkasan pendapatan">
-      <article class="summary-card primary">
-        <span>Total Pendapatan</span>
-        <strong id="totalIncome">Rp0</strong>
-        <small id="totalOrders">0 order</small>
+    <section class="segmented" aria-label="Filter area">
+      <button class="segment active" data-area="ALL">SEMUA</button>
+      <button class="segment" data-area="MYR">MANYAR</button>
+      <button class="segment" data-area="JGR">JAGIR</button>
+    </section>
+
+    <section class="segmented period-tabs" aria-label="Periode">
+      <button class="period active" data-period="daily">HARI INI</button>
+      <button class="period" data-period="weekly">MINGGU INI</button>
+      <button class="period" data-period="all">KESELURUHAN</button>
+    </section>
+
+    <section class="hero-summary">
+      <article class="metric metric-main">
+        <span>Total CLOSE</span>
+        <strong id="totalClose">0</strong>
+        <small id="periodLabel">Hari ini</small>
       </article>
-      <article class="summary-card">
-        <span>Sudah Terbayar</span>
-        <strong id="paidIncome">Rp0</strong>
-        <small id="paidCount">0 order</small>
+      <article class="metric">
+        <span>Teknisi Aktif</span>
+        <strong id="activeTechnicians">0</strong>
+        <small>punya perolehan</small>
       </article>
-      <article class="summary-card">
-        <span>Belum Terbayar</span>
-        <strong id="unpaidIncome">Rp0</strong>
-        <small id="unpaidCount">0 order</small>
+      <article class="metric">
+        <span>Rata-rata</span>
+        <strong id="averageClose">0</strong>
+        <small>order / teknisi</small>
       </article>
     </section>
 
-    <section class="toolbar">
-      <div class="filter-row">
-        <button class="filter active" data-filter="all">Semua</button>
-        <button class="filter" data-filter="paid">Terbayar</button>
-        <button class="filter" data-filter="unpaid">Belum Bayar</button>
-      </div>
-      <input id="searchInput" type="search" placeholder="Cari nomor INET..." autocomplete="off" />
-    </section>
-
-    <section>
+    <section class="card trend-card">
       <div class="section-heading">
-        <h2>Daftar INET</h2>
-        <span id="resultCount">0 data</span>
+        <div>
+          <p class="section-kicker">TREN</p>
+          <h2>Perolehan Harian</h2>
+        </div>
+        <span id="trendTotal">0 close</span>
       </div>
-      <div id="paymentList" class="payment-list"></div>
+      <div id="trendChart" class="trend-chart"></div>
+    </section>
+
+    <section class="card leaderboard-card">
+      <div class="section-heading">
+        <div>
+          <p class="section-kicker">RANKING</p>
+          <h2>Leaderboard Teknisi</h2>
+        </div>
+        <span id="resultCount">0 teknisi</span>
+      </div>
+      <div class="search-wrap">
+        <span>🔎</span>
+        <input id="searchInput" type="search" placeholder="Cari nama atau NIK teknisi..." autocomplete="off" />
+      </div>
+      <div id="leaderboard" class="leaderboard"></div>
       <div id="emptyState" class="empty hidden">
         <div>📭</div>
-        <p>Belum ada data pendapatan.</p>
+        <p>Belum ada perolehan pada periode ini.</p>
       </div>
+    </section>
+
+    <section id="detailPanel" class="detail-panel hidden">
+      <div class="detail-backdrop" data-close-detail></div>
+      <article class="detail-sheet">
+        <div class="detail-handle"></div>
+        <button class="close-detail" data-close-detail>✕</button>
+        <p class="section-kicker">DETAIL TEKNISI</p>
+        <h2 id="detailName">-</h2>
+        <p id="detailNik" class="subtle">-</p>
+        <div class="detail-metrics">
+          <div><span>Hari ini</span><strong id="detailDaily">0</strong></div>
+          <div><span>Minggu ini</span><strong id="detailWeekly">0</strong></div>
+          <div><span>Keseluruhan</span><strong id="detailAll">0</strong></div>
+        </div>
+        <div class="section-heading compact">
+          <h3>Daftar pekerjaan</h3>
+          <span id="detailCount">0 data</span>
+        </div>
+        <div id="detailOrders" class="detail-orders"></div>
+      </article>
     </section>
   </main>
 
-  <template id="paymentTemplate">
-    <article class="payment-card">
-      <div class="payment-top">
-        <div>
-          <span class="label">NO INET</span>
-          <strong class="inet"></strong>
-        </div>
-        <span class="badge"></span>
-      </div>
-      <div class="payment-meta">
-        <div><span>Status pekerjaan</span><strong class="work-status"></strong></div>
-        <div><span>Task payment</span><strong class="task-payment"></strong></div>
-        <div><span>Nominal</span><strong class="amount"></strong></div>
-      </div>
-    </article>
+  <template id="leaderTemplate">
+    <button class="leader-row">
+      <span class="rank"></span>
+      <span class="leader-info">
+        <strong class="leader-name"></strong>
+        <small class="leader-meta"></small>
+      </span>
+      <span class="leader-score"></span>
+      <span class="chevron">›</span>
+    </button>
   </template>
 
   <script src="/app.js"></script>
