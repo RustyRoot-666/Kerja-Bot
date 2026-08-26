@@ -10,3 +10,15 @@ services:
       - ./logs:/app/logs
       - ./evidence:/app/evidence
       - ./secrets:/app/secrets:ro
+
+  kerja-bot-miniapp:
+    build: .
+    container_name: kerja-bot-miniapp
+    restart: unless-stopped
+    env_file:
+      - .env
+    command: ["python", "webapp/server.py"]
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./database:/app/database:ro
