@@ -142,6 +142,12 @@ async function openTechnician(key) {
   }
 }
 
+function openPage(pageId, button) {
+  document.querySelectorAll('.page-view').forEach(page => page.classList.toggle('hidden', page.id !== pageId));
+  document.querySelectorAll('.nav-item').forEach(item => item.classList.toggle('active', item === button));
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 document.querySelectorAll('.segment').forEach(button => {
   button.addEventListener('click', () => {
     state.area = button.dataset.area;
@@ -161,6 +167,10 @@ document.querySelectorAll('.period').forEach(button => {
 document.querySelector('#searchInput').addEventListener('input', event => {
   state.query = event.target.value;
   renderLeaderboard();
+});
+
+document.querySelectorAll('.nav-item').forEach(button => {
+  button.addEventListener('click', () => openPage(button.dataset.page, button));
 });
 
 document.querySelectorAll('[data-close-detail]').forEach(item => {
