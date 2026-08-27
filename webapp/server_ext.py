@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import timedelta
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from webapp import server as base
 
 
 _original_load_my_open_orders = base.load_my_open_orders
+_original_load_technician = base.load_technician
 
 
 def _clean(value: object) -> str:
@@ -54,8 +56,6 @@ def load_my_open_orders(telegram_id: int, force: bool = False) -> dict:
             if reference is None:
                 continue
 
-            # These fields are already present on the Order Sheet. Mini App
-            # must not ask the technician to type them again when populated.
             order.update(
                 {
                     "voip_number": _clean(reference.voip_number),
@@ -69,16 +69,42 @@ def load_my_open_orders(telegram_id: int, force: bool = False) -> dict:
                     "onu_rx": _clean(reference.onu_rx) or _clean(order.get("onu_rx")),
                     "package": _clean(reference.package) or _clean(order.get("package")),
                     "rca": _clean(reference.rca) or _clean(order.get("rca")),
-                    # Sheet status OPEN/CLOSE is an order status, not necessarily
-                    # the technician's REPORT result, so don't prefill RESULT.
                     "result": "",
                 }
             )
     return payload
 
 
-# Handler.do_GET resolves this name from the base module at request time.
+def load_technician(identity_key: str, area: str) -> dict:
+    """Extend the existing personal report payload with a 7-day trend."""
+    payload = _original_load_technician(identity_key, area)
+    today = base.datetime.now().date()
+    trend = []
+    try:
+        with base.connect() as conn:
+            _, rows = base._identity_members(conn, identity_key, area)
+            for offset in range(6, -1, -1):
+                day = today - timedelta(days=offset)
+                services = {
+                    str(row["service_number"] or "").strip()
+                    for row in rows
+                    if str(row["message_date"] or "")[:10] == day.isoformat()
+                    and str(row["service_number"] or "").strip()
+                }
+                trend.append({
+                    "date": day.isoformat(),
+                    "label": base.DAYS[day.weekday()],
+                    "total": len(services),
+                })
+    except Exception as exc:
+        print(f"[miniapp] gagal membuat trend teknisi: {exc}")
+    payload["trend"] = trend
+    return payload
+
+
+# Handler.do_GET resolves these names from the base module at request time.
 base.load_my_open_orders = load_my_open_orders
+base.load_technician = load_technician
 
 
 if __name__ == "__main__":
