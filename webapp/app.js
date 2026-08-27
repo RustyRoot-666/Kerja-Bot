@@ -9,15 +9,22 @@ const state = {
   period: 'daily',
   query: '',
   payload: null,
+  me: null,
 };
 
 const fmt = value => new Intl.NumberFormat('id-ID').format(Number(value || 0));
 const shortDay = value => String(value || '').slice(0, 3).toUpperCase();
+const normName = value => String(value || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+
+function telegramName() {
+  const user = tg?.initDataUnsafe?.user;
+  if (!user) return '';
+  return [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
+}
 
 function setWelcome() {
-  const user = tg?.initDataUnsafe?.user;
-  const name = user ? [user.first_name, user.last_name].filter(Boolean).join(' ') : 'Teknisi';
-  document.querySelector('#welcomeName').textContent = name || 'Teknisi';
+  const name = telegramName() || 'Teknisi';
+  document.querySelector('#welcomeName').textContent = name;
   const now = new Date();
   const date = new Intl.DateTimeFormat('id-ID', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
@@ -125,12 +132,20 @@ function render() {
   renderRecentActivity();
 }
 
+function resolveMeFromPayload() {
+  const rows = state.payload?.leaderboard || [];
+  const tgName = normName(telegramName());
+  if (!tgName) return null;
+  return rows.find(item => normName(item.name) === tgName) || null;
+}
+
 async function loadDashboard() {
   const params = new URLSearchParams({ area: state.area, period: state.period });
   try {
     const response = await fetch(`/api/dashboard?${params}`, { cache: 'no-store' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     state.payload = await response.json();
+    state.me = resolveMeFromPayload() || state.me;
   } catch (error) {
     console.error('Gagal mengambil dashboard', error);
     state.payload = { summary: { total_close: 0, active_technicians: 0, average_close: 0 }, period_label: 'Data tidak tersedia', trend: [], leaderboard: [] };
@@ -138,12 +153,16 @@ async function loadDashboard() {
   render();
 }
 
+async function fetchTechnician(key, area = 'ALL') {
+  const params = new URLSearchParams({ key, area });
+  const response = await fetch(`/api/technician?${params}`, { cache: 'no-store' });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
 async function openTechnician(key) {
   try {
-    const params = new URLSearchParams({ key, area: state.area });
-    const response = await fetch(`/api/technician?${params}`, { cache: 'no-store' });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
+    const data = await fetchTechnician(key, state.area);
     document.querySelector('#detailName').textContent = data.name || '-';
     document.querySelector('#detailNik').textContent = `NIK ${data.nik || '-'}`;
     document.querySelector('#detailDaily').textContent = fmt(data.daily);
@@ -161,12 +180,52 @@ async function openTechnician(key) {
     document.querySelector('#detailPanel').classList.remove('hidden');
   } catch (error) {
     console.error('Gagal membuka detail teknisi', error);
+    showToast('Detail teknisi gagal dimuat');
   }
 }
 
-function openPage(pageId, button) {
+async function loadMyData() {
+  const candidate = state.me || resolveMeFromPayload();
+  const ordersIdentity = document.querySelector('#ordersIdentity');
+  const reportIdentity = document.querySelector('#reportIdentity');
+  const ordersList = document.querySelector('#myOrdersList');
+  if (!candidate) {
+    ordersIdentity.textContent = 'Data akun Telegram ini belum cocok dengan nama teknisi pada REPORT.';
+    reportIdentity.textContent = 'Data akun Telegram ini belum cocok dengan nama teknisi pada REPORT.';
+    ordersList.innerHTML = '<div class="empty"><p>Belum bisa menemukan data teknisi kamu.</p></div>';
+    return;
+  }
+  try {
+    const data = await fetchTechnician(candidate.key || candidate.nik, 'ALL');
+    state.me = candidate;
+    ordersIdentity.textContent = `${data.name || candidate.name} • NIK ${data.nik || candidate.nik || '-'}`;
+    reportIdentity.textContent = `${data.name || candidate.name} • NIK ${data.nik || candidate.nik || '-'}`;
+    document.querySelectorAll('#myOrderSummary strong').forEach((el, i) => el.textContent = fmt([data.daily, data.weekly, data.all][i]));
+    document.querySelectorAll('#reportSummary strong').forEach((el, i) => el.textContent = fmt([data.daily, data.weekly, data.all][i]));
+    const orders = data.orders || [];
+    document.querySelector('#myOrderCount').textContent = `${orders.length} data`;
+    ordersList.replaceChildren();
+    if (!orders.length) {
+      ordersList.innerHTML = '<div class="empty"><p>Belum ada pekerjaan tercatat.</p></div>';
+      return;
+    }
+    orders.slice(0, 100).forEach(order => {
+      const row = document.createElement('div');
+      row.className = 'mini-order';
+      row.innerHTML = `<strong>${order.service_number || '-'}</strong><small>${order.ticket_id || 'MANUAL'} • ${order.area_label || order.sto || '-'} • ${order.date_label || '-'}</small>`;
+      ordersList.appendChild(row);
+    });
+  } catch (error) {
+    console.error('Gagal memuat data pribadi', error);
+    ordersIdentity.textContent = 'Gagal memuat data teknisi.';
+    reportIdentity.textContent = 'Gagal memuat data teknisi.';
+  }
+}
+
+function openPage(pageId, button = null) {
   document.querySelectorAll('.page-view').forEach(page => page.classList.toggle('hidden', page.id !== pageId));
-  document.querySelectorAll('.nav-item[data-page]').forEach(item => item.classList.toggle('active', item === button));
+  document.querySelectorAll('.nav-item[data-page]').forEach(item => item.classList.toggle('active', item.dataset.page === pageId));
+  if (pageId === 'ordersPage' || pageId === 'reportsPage') loadMyData();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -174,6 +233,35 @@ function selectArea(value) {
   state.area = value;
   document.querySelectorAll('.segment').forEach(item => item.classList.toggle('active', item.dataset.area === value));
   loadDashboard();
+}
+
+function showToast(text) {
+  const toast = document.querySelector('#toast');
+  toast.textContent = text;
+  toast.classList.remove('hidden');
+  clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(() => toast.classList.add('hidden'), 1800);
+}
+
+async function copyCommand(command) {
+  try {
+    await navigator.clipboard.writeText(command);
+    showToast(`${command} tersalin`);
+  } catch {
+    const area = document.createElement('textarea');
+    area.value = command;
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand('copy');
+    area.remove();
+    showToast(`${command} tersalin`);
+  }
+  if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+}
+
+function closeOverlays() {
+  document.querySelector('#drawer').classList.add('hidden');
+  document.querySelector('#moreMenu').classList.add('hidden');
 }
 
 document.querySelectorAll('.segment').forEach(button => button.addEventListener('click', () => selectArea(button.dataset.area)));
@@ -187,8 +275,17 @@ document.querySelectorAll('.period').forEach(button => {
 });
 document.querySelector('#searchInput').addEventListener('input', event => { state.query = event.target.value; renderLeaderboard(); });
 document.querySelectorAll('.nav-item[data-page]').forEach(button => button.addEventListener('click', () => openPage(button.dataset.page, button)));
-document.querySelector('[data-back-dashboard]')?.addEventListener('click', () => openPage('dashboardPage', document.querySelector('.nav-item[data-page="dashboardPage"]')));
+document.querySelectorAll('[data-back-dashboard]').forEach(button => button.addEventListener('click', () => openPage('dashboardPage')));
 document.querySelectorAll('[data-close-detail]').forEach(item => item.addEventListener('click', () => document.querySelector('#detailPanel').classList.add('hidden')));
+document.querySelectorAll('[data-copy-command]').forEach(button => button.addEventListener('click', () => copyCommand(button.dataset.copyCommand)));
+
+document.querySelector('#menuButton')?.addEventListener('click', () => document.querySelector('#drawer').classList.remove('hidden'));
+document.querySelectorAll('[data-close-drawer]').forEach(item => item.addEventListener('click', closeOverlays));
+document.querySelectorAll('[data-drawer-page]').forEach(button => button.addEventListener('click', () => { closeOverlays(); openPage(button.dataset.drawerPage); }));
+document.querySelector('#moreButton')?.addEventListener('click', () => document.querySelector('#moreMenu').classList.remove('hidden'));
+document.querySelectorAll('[data-close-more]').forEach(item => item.addEventListener('click', closeOverlays));
+document.querySelector('#refreshButton')?.addEventListener('click', async () => { closeOverlays(); await loadDashboard(); if (!document.querySelector('#ordersPage').classList.contains('hidden') || !document.querySelector('#reportsPage').classList.contains('hidden')) await loadMyData(); showToast('Data diperbarui'); });
+document.querySelector('#closeMiniAppButton')?.addEventListener('click', () => { if (tg?.close) tg.close(); });
 
 setWelcome();
-loadDashboard();
+loadDashboard().then(loadMyData);
