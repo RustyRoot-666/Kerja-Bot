@@ -4,80 +4,127 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#07111f" />
-  <title>Kerja Bot - Dashboard Perolehan</title>
+  <title>Kerja BOT - Dashboard</title>
   <link rel="stylesheet" href="/styles.css" />
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
   <main class="app-shell">
-    <header class="hero glass">
-      <div>
-        <p class="eyebrow">KERJA BOT</p>
-        <h1>Dashboard Perolehan</h1>
-        <p class="subtle">Monitoring seluruh teknisi secara real-time</p>
-      </div>
-      <div class="hero-icon">📊</div>
-    </header>
-
-    <section class="segmented" aria-label="Filter area">
-      <button class="segment active" data-area="ALL">SEMUA</button>
-      <button class="segment" data-area="MYR">MANYAR</button>
-      <button class="segment" data-area="JGR">JAGIR</button>
-    </section>
-
-    <section class="segmented period-tabs" aria-label="Periode">
-      <button class="period active" data-period="daily">HARI INI</button>
-      <button class="period" data-period="weekly">MINGGU INI</button>
-      <button class="period" data-period="all">KESELURUHAN</button>
-    </section>
-
-    <section class="hero-summary">
-      <article class="metric metric-main">
-        <span>Total CLOSE</span>
-        <strong id="totalClose">0</strong>
-        <small id="periodLabel">Hari ini</small>
-      </article>
-      <article class="metric">
-        <span>Teknisi Aktif</span>
-        <strong id="activeTechnicians">0</strong>
-        <small>punya perolehan</small>
-      </article>
-      <article class="metric">
-        <span>Rata-rata</span>
-        <strong id="averageClose">0</strong>
-        <small>order / teknisi</small>
-      </article>
-    </section>
-
-    <section class="card trend-card">
-      <div class="section-heading">
+    <section id="dashboardPage" class="page-view">
+      <header class="topbar glass">
         <div>
-          <p class="section-kicker">TREN</p>
-          <h2>Perolehan Harian</h2>
+          <p class="eyebrow">KERJA BOT</p>
+          <h1>Dashboard Teknisi</h1>
+          <p class="subtle">Monitoring perolehan seluruh teknisi</p>
         </div>
-        <span id="trendTotal">0 close</span>
-      </div>
-      <div id="trendChart" class="trend-chart"></div>
+        <div class="brand-mark">⚡</div>
+      </header>
+
+      <section class="filter-stack">
+        <div class="segmented" aria-label="Filter area">
+          <button class="segment active" data-area="ALL">SEMUA</button>
+          <button class="segment" data-area="MYR">MANYAR</button>
+          <button class="segment" data-area="JGR">JAGIR</button>
+        </div>
+        <div class="segmented period-tabs" aria-label="Periode">
+          <button class="period active" data-period="daily">HARI INI</button>
+          <button class="period" data-period="weekly">MINGGU INI</button>
+          <button class="period" data-period="all">KESELURUHAN</button>
+        </div>
+      </section>
+
+      <section class="hero-summary">
+        <article class="metric metric-main">
+          <span class="metric-icon">✓</span>
+          <div>
+            <span>Total CLOSE</span>
+            <strong id="totalClose">0</strong>
+            <small id="periodLabel">Hari ini</small>
+          </div>
+        </article>
+        <article class="metric">
+          <span class="metric-icon mini">👷</span>
+          <div>
+            <span>Teknisi Aktif</span>
+            <strong id="activeTechnicians">0</strong>
+            <small>punya perolehan</small>
+          </div>
+        </article>
+        <article class="metric">
+          <span class="metric-icon mini">↗</span>
+          <div>
+            <span>Rata-rata</span>
+            <strong id="averageClose">0</strong>
+            <small>order / teknisi</small>
+          </div>
+        </article>
+      </section>
+
+      <section class="card trend-card">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">TREN 7 HARI</p>
+            <h2>Perolehan Harian</h2>
+          </div>
+          <span id="trendTotal">0 close</span>
+        </div>
+        <div id="trendChart" class="trend-chart"></div>
+      </section>
+
+      <section class="card leaderboard-card">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">RANKING</p>
+            <h2>Leaderboard Teknisi</h2>
+          </div>
+          <span id="resultCount">0 teknisi</span>
+        </div>
+        <div class="search-wrap">
+          <span>🔎</span>
+          <input id="searchInput" type="search" placeholder="Cari nama atau NIK teknisi..." autocomplete="off" />
+        </div>
+        <div id="leaderboard" class="leaderboard"></div>
+        <div id="emptyState" class="empty hidden">
+          <div>📭</div>
+          <p>Belum ada perolehan pada periode ini.</p>
+        </div>
+      </section>
     </section>
 
-    <section class="card leaderboard-card">
-      <div class="section-heading">
+    <section id="payrollPage" class="page-view hidden">
+      <header class="topbar glass payroll-header">
         <div>
-          <p class="section-kicker">RANKING</p>
-          <h2>Leaderboard Teknisi</h2>
+          <p class="eyebrow">PAYROLL</p>
+          <h1>Status Pembayaran</h1>
+          <p class="subtle">Cek INET yang sudah atau belum dibayar</p>
         </div>
-        <span id="resultCount">0 teknisi</span>
-      </div>
-      <div class="search-wrap">
-        <span>🔎</span>
-        <input id="searchInput" type="search" placeholder="Cari nama atau NIK teknisi..." autocomplete="off" />
-      </div>
-      <div id="leaderboard" class="leaderboard"></div>
-      <div id="emptyState" class="empty hidden">
-        <div>📭</div>
-        <p>Belum ada perolehan pada periode ini.</p>
-      </div>
+        <div class="brand-mark payroll-mark">💳</div>
+      </header>
+
+      <section class="payroll-summary">
+        <article class="payroll-stat"><span>Sudah dibayar</span><strong>0</strong><small>INET</small></article>
+        <article class="payroll-stat"><span>Belum dibayar</span><strong>0</strong><small>INET</small></article>
+        <article class="payroll-stat wide"><span>Total data payroll</span><strong>0</strong><small>data belum tersedia</small></article>
+      </section>
+
+      <section class="card payroll-empty-card">
+        <div class="warning-orb">!</div>
+        <h2>Belum ada data</h2>
+        <p>Data payroll belum tersedia. Nantinya halaman ini akan menampilkan status pembayaran setiap INET setelah data payroll dimasukkan.</p>
+        <div class="payroll-preview">
+          <span>Fitur yang disiapkan</span>
+          <div>🔎 Pencarian nomor INET</div>
+          <div>✅ Status sudah dibayar</div>
+          <div>⚠️ Status belum dibayar</div>
+          <div>💰 Nominal pembayaran</div>
+        </div>
+      </section>
     </section>
+
+    <nav class="bottom-nav glass" aria-label="Navigasi Mini App">
+      <button class="nav-item active" data-page="dashboardPage"><span>⌂</span><small>Dashboard</small></button>
+      <button class="nav-item" data-page="payrollPage"><span>💳</span><small>Payroll</small></button>
+    </nav>
 
     <section id="detailPanel" class="detail-panel hidden">
       <div class="detail-backdrop" data-close-detail></div>
