@@ -1,6 +1,15 @@
 from __future__ import annotations
 
+import sys
 from http.server import ThreadingHTTPServer
+from pathlib import Path
+
+# `python webapp/server_ext.py` starts with /app/webapp on sys.path.
+# Add the repository root so `webapp.server` can be imported reliably
+# inside the Docker container.
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from webapp import server as base
 
