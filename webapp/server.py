@@ -195,10 +195,15 @@ def load_dashboard(area: str, period: str) -> dict:
         leaderboard, trend = [], []
     total_close = sum(item["total"] for item in leaderboard)
     active = len(leaderboard)
+    try:
+        rca_summary = load_rca_summary(area)
+    except Exception as exc:
+        print(f"[miniapp] gagal membuat RCA summary: {exc}")
+        rca_summary = {"total": 0, "items": [], "source": "Sheet + Grup Kendala"}
     return {
         "area": area.upper(), "period": period, "period_label": label,
         "summary": {"total_close": total_close, "active_technicians": active, "average_close": round(total_close / active, 1) if active else 0},
-        "trend": trend, "leaderboard": leaderboard,
+        "trend": trend, "leaderboard": leaderboard, "rca_summary": rca_summary,
     }
 
 
@@ -313,6 +318,109 @@ def _configured_sheet_statuses(force: bool = False) -> dict[str, sheet_ref.Refer
         return _sheet_cache
 
 
+def _normalize_rca(value: str) -> str:
+    text = " ".join(str(value or "").upper().replace("_", " ").split())
+    if text in {"", "-", "N/A", "NA", "NONE", "#N/A"}:
+        return ""
+    aliases = (
+        (("MENOLAK", "TIDAK MAU", "TIDAK BERKENAN"), "MENOLAK"),
+        (("RUKOS", "RUMAH KOSONG", "TIDAK ADA PENGHUNI"), "RUKOS"),
+        (("ALAMAT NOK", "ALAMAT TIDAK", "ALAMAT SALAH", "RUMAH TIDAK DITEMUKAN"), "ALAMAT NOK"),
+        (("LEPAS DC",), "LEPAS DC"),
+        (("CABUT", "PUTUS LANGGANAN", "PUTUS INTERNET"), "CABUT"),
+        (("2 VOIP", "ONT 2 VOIP", "VOIP ADA 2"), "ONT 2 VOIP"),
+        (("MANJA", "RESCHEDULE", "JADWAL", "BESOK", "LUAR KOTA"), "MANJA"),
+        (("RNA", "TIDAK RESPON", "NO RESPON", "TIDAK BISA DIHUBUNGI", "CP NOK", "CP NO WA", "HISTORY NOK"), "RNA"),
+        (("SALBON",), "SALBON"),
+        (("DYING GASP",), "DYING GASP"),
+        (("REDAMAN", "LOS", "RX TINGGI", "REDAMAN TINGGI"), "REDAMAN TINGGI"),
+        (("KONEKTOR KOTOR", "CONNECTOR KOTOR"), "KONEKTOR KOTOR"),
+        (("PUTUS", "RUSAK"), "PUTUS / RUSAK"),
+    )
+    for needles, label in aliases:
+        if any(needle in text for needle in needles):
+            return label
+    return text[:60]
+
+
+def _service_sto(conn: sqlite3.Connection, service: str) -> str:
+    row = conn.execute(
+        "SELECT UPPER(TRIM(COALESCE(sto,''))) AS sto FROM orders WHERE service_number=? ORDER BY id DESC LIMIT 1",
+        (service,),
+    ).fetchone()
+    return str(row["sto"] or "").strip().upper() if row else ""
+
+
+def load_rca_summary(area: str) -> dict:
+    area = area.upper().strip()
+    statuses = _configured_sheet_statuses(force=False)
+    references = sheet_ref.unique_reference_orders(statuses)
+    merged: dict[str, dict[str, str]] = {}
+
+    for reference in references:
+        service = str(reference.service_number or "").strip()
+        if not service:
+            continue
+        sto = str(reference.sto or "").strip().upper()
+        if area in {"MYR", "JGR"} and sto and sto != area:
+            continue
+        rca = _normalize_rca(reference.rca)
+        if rca:
+            merged[service] = {"rca": rca, "source": "SHEET", "sto": sto}
+
+    with connect() as conn:
+        try:
+            rows = conn.execute(
+                """
+                SELECT k.service_number, k.rca, k.created_at
+                FROM kendala_updates k
+                JOIN (
+                    SELECT service_number, MAX(id) AS max_id
+                    FROM kendala_updates
+                    GROUP BY service_number
+                ) latest ON latest.max_id=k.id
+                ORDER BY k.id DESC
+                """
+            ).fetchall()
+        except sqlite3.OperationalError:
+            rows = []
+
+        for row in rows:
+            service = str(row["service_number"] or "").strip()
+            if not service:
+                continue
+            sto = _service_sto(conn, service)
+            if area in {"MYR", "JGR"} and sto != area:
+                continue
+            rca = _normalize_rca(row["rca"])
+            if not rca:
+                continue
+            merged[service] = {"rca": rca, "source": "KENDALA", "sto": sto}
+
+    counts: dict[str, int] = {}
+    sheet_count = 0
+    kendala_count = 0
+    for item in merged.values():
+        counts[item["rca"]] = counts.get(item["rca"], 0) + 1
+        if item["source"] == "KENDALA":
+            kendala_count += 1
+        else:
+            sheet_count += 1
+
+    total = sum(counts.values())
+    items = [
+        {"label": label, "count": count, "percent": round(count * 100 / total, 1) if total else 0}
+        for label, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+    return {
+        "total": total,
+        "items": items,
+        "source": "Google Sheet + Grup Kendala",
+        "sheet_count": sheet_count,
+        "kendala_count": kendala_count,
+    }
+
+
 def _technician_by_telegram_id(telegram_id: int) -> dict | None:
     with connect() as conn:
         row = conn.execute("SELECT telegram_id, nik, name, sto FROM technicians WHERE telegram_id=?", (telegram_id,)).fetchone()
@@ -413,6 +521,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if route == "/api/dashboard":
             self._send_json(load_dashboard((query.get("area") or ["ALL"])[0], (query.get("period") or ["daily"])[0]))
+            return
+        if route == "/api/rca-summary":
+            self._send_json(load_rca_summary((query.get("area") or ["ALL"])[0]))
             return
         if route == "/api/technician":
             identity_key = (query.get("key") or query.get("nik") or [""])[0].strip()
