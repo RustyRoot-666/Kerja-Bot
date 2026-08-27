@@ -22,11 +22,17 @@ def _clean(value: object) -> str:
     return "" if text.upper() in {"", "-", "N/A", "NA", "NONE", "#N/A"} else text
 
 
-def load_my_open_orders(telegram_id: int, force: bool = False) -> dict:
-    """Use the existing Orderanku logic, then expose workflow fields already present in Sheet.
+def _service_key(value: object) -> str:
+    return base.sheet_ref.normalize_key(value)
 
-    The Mini App should ask technicians only for fields that are genuinely missing.
-    Ticket priority remains centralized in google_sheet_reference:
+
+def load_my_open_orders(telegram_id: int, force: bool = False) -> dict:
+    """Expose Sheet fields needed by the Mini App workflow.
+
+    Orderanku already comes from the same unique Sheet references used by the
+    chatbot. We deliberately re-match by service number (not ticket), because
+    historical/updated ticket aliases can differ while the INET stays stable.
+    Ticket priority itself remains centralized in google_sheet_reference:
     INSERA TODAY -> TIKET -> MANUAL.
     """
     payload = _original_load_my_open_orders(telegram_id, force=force)
@@ -34,14 +40,22 @@ def load_my_open_orders(telegram_id: int, force: bool = False) -> dict:
         return payload
 
     statuses = base._configured_sheet_statuses(force=False)
+    references = base.sheet_ref.unique_reference_orders(statuses)
+    by_service = {
+        _service_key(reference.service_number): reference
+        for reference in references
+        if _service_key(reference.service_number)
+    }
+
     for area in payload.get("areas", []):
         for order in area.get("orders", []):
-            service = str(order.get("service_number") or "").strip()
-            ticket = str(order.get("ticket_id") or "").strip()
-            reference = base.sheet_ref.status_for_order(statuses, ticket, service)
+            service = _service_key(order.get("service_number"))
+            reference = by_service.get(service)
             if reference is None:
                 continue
 
+            # These fields are already present on the Order Sheet. Mini App
+            # must not ask the technician to type them again when populated.
             order.update(
                 {
                     "voip_number": _clean(reference.voip_number),
@@ -52,6 +66,9 @@ def load_my_open_orders(telegram_id: int, force: bool = False) -> dict:
                     "valins_id": _clean(reference.valins_id),
                     "config_description": _clean(reference.config_description),
                     "report_description": _clean(reference.report_description),
+                    "onu_rx": _clean(reference.onu_rx) or _clean(order.get("onu_rx")),
+                    "package": _clean(reference.package) or _clean(order.get("package")),
+                    "rca": _clean(reference.rca) or _clean(order.get("rca")),
                     # Sheet status OPEN/CLOSE is an order status, not necessarily
                     # the technician's REPORT result, so don't prefill RESULT.
                     "result": "",
