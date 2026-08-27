@@ -30,7 +30,7 @@ HEADER_ALIASES: dict[str, set[str]] = {
     "package": {"PAKET", "KECEPATAN", "SPEED", "SPEED PAKET", "PAKET INTERNET", "BANDWIDTH", "SPEED BY TACPRO"},
     "onu_rx": {"ONU RX", "ONU_RX", "RX ONU", "ONU RX POWER", "RX POWER ONU"},
     "rca": {"RCA", "ROOT CAUSE", "ROOT CAUSE ANALYSIS"},
-    "old_sn": {"SN ONT LAMA", "SN LAMA", "OLD SN", "SN OLD", "SERIAL NUMBER LAMA"},
+    "old_sn": {"SN ONT LAMA", "SN ONT OLD", "SN LAMA", "OLD SN", "SN OLD", "SERIAL NUMBER LAMA"},
     "new_sn": {"SN ONT NEW", "SN ONT BARU", "SN NEW", "NEW SN", "SN BARU", "SERIAL NUMBER BARU"},
     "ont_type": {"TYPE ONT", "TIPE ONT", "MODEL ONT", "MODEL ONT BARU", "TYPE ONT BARU", "TIPE ONT BARU"},
     "sto": {"STO", "KODE STO"},
@@ -126,8 +126,6 @@ def address_route_sort_key(address: str) -> tuple[object, ...]:
     if not text:
         return ((), "", 10**9, "")
 
-    # Prefer an explicit house-number marker so the street/gang number remains
-    # part of the cluster: `... INDAH 1 NO 4Q` -> base `... INDAH 1`.
     match = re.search(r"\b(?:NO|NOMOR)\s*([0-9]+)\s*([A-Z]*)\b", text)
     if match:
         base = text[: match.start()].strip()
@@ -135,16 +133,10 @@ def address_route_sort_key(address: str) -> tuple[object, ...]:
         block = match.group(2) or ""
         return (_natural_parts(base), block, house_number, _natural_parts(text))
 
-    # Common compact form at the end, e.g. `... 4Q`.
     compact = re.search(r"\b([0-9]+)\s*([A-Z]+)\b\s*$", text)
     if compact:
         base = text[: compact.start()].strip()
-        return (
-            _natural_parts(base),
-            compact.group(2),
-            int(compact.group(1)),
-            _natural_parts(text),
-        )
+        return (_natural_parts(base), compact.group(2), int(compact.group(1)), _natural_parts(text))
 
     return (_natural_parts(text), "", 10**9, _natural_parts(text))
 
@@ -237,8 +229,6 @@ def download_statuses() -> dict[str, ReferenceStatus]:
         service_number = cell(row, columns["service_number"])
         primary_ticket = normalize_ticket(cell(row, columns["ticket"]))
         insera_ticket = normalize_ticket(cell(row, columns["insera_ticket"]))
-        # Ticket source priority is shared by chatbot and Mini App:
-        # INSERA TODAY -> TIKET -> MANUAL (display fallback handled by callers).
         ticket_id = insera_ticket or primary_ticket
         if not service_number and not ticket_id:
             continue
@@ -290,8 +280,6 @@ def unique_reference_orders(statuses: dict[str, ReferenceStatus]) -> list[Refere
         key = (normalize_key(reference.ticket_id), normalize_key(reference.service_number))
         if key != ("", ""):
             unique[key] = reference
-    # /orderanku consumes this list directly. Sorting here makes cards follow a
-    # route-like address order while remaining deterministic for other callers.
     return sorted(
         unique.values(),
         key=lambda reference: (
@@ -333,10 +321,7 @@ def _sync_missing_orders(database_path: Path, references: list[ReferenceStatus])
                 if changes:
                     assignments = ", ".join(f"{field} = ?" for field in changes)
                     values = list(changes.values()) + [now, existing["id"]]
-                    conn.execute(
-                        f"UPDATE orders SET {assignments}, updated_at = ? WHERE id = ?",
-                        values,
-                    )
+                    conn.execute(f"UPDATE orders SET {assignments}, updated_at = ? WHERE id = ?", values)
                     updated += 1
                 else:
                     unchanged += 1
