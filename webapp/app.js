@@ -10,14 +10,19 @@ const state = {
   query: '',
   payload: null,
   me: null,
+  myOpenOrders: null,
 };
 
 const fmt = value => new Intl.NumberFormat('id-ID').format(Number(value || 0));
 const shortDay = value => String(value || '').slice(0, 3).toUpperCase();
 const normName = value => String(value || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
 
+function telegramUser() {
+  return tg?.initDataUnsafe?.user || null;
+}
+
 function telegramName() {
-  const user = tg?.initDataUnsafe?.user;
+  const user = telegramUser();
   if (!user) return '';
   return [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
 }
@@ -184,40 +189,113 @@ async function openTechnician(key) {
   }
 }
 
-async function loadMyData() {
+function setMyOrderSummary(totalOpen, activeAreas) {
+  const boxes = document.querySelectorAll('#myOrderSummary > div');
+  const labels = ['ORDER OPEN', 'AREA AKTIF', 'SUMBER'];
+  const values = [fmt(totalOpen), fmt(activeAreas), 'SHEET'];
+  boxes.forEach((box, index) => {
+    box.querySelector('span').textContent = labels[index];
+    box.querySelector('strong').textContent = values[index];
+  });
+}
+
+function renderMyOrderAreas(data) {
+  const list = document.querySelector('#myOrdersList');
+  const count = document.querySelector('#myOrderCount');
+  list.replaceChildren();
+  count.textContent = `${data.total_open || 0} OPEN`;
+  if (!data.areas?.length) {
+    list.innerHTML = '<div class="empty"><p>✅ Tidak ada order OPEN dari Google Sheets.</p></div>';
+    return;
+  }
+  data.areas.forEach(area => {
+    const button = document.createElement('button');
+    button.className = 'tool-action';
+    button.innerHTML = `<div><b>📍 ${area.area}</b><small style="display:block;margin-top:4px;color:#758ba2">🟢 Open: ${fmt(area.open)} | 🔴 Close: ${fmt(area.close)}${area.update ? ` | 🟡 Update: ${fmt(area.update)}` : ''}</small></div><span>${fmt(area.open)} ›</span>`;
+    button.addEventListener('click', () => renderMyOpenArea(area));
+    list.appendChild(button);
+  });
+}
+
+function renderMyOpenArea(area) {
+  const list = document.querySelector('#myOrdersList');
+  const count = document.querySelector('#myOrderCount');
+  list.replaceChildren();
+  count.textContent = `${area.orders?.length || 0} OPEN`;
+
+  const back = document.createElement('button');
+  back.className = 'tool-action';
+  back.innerHTML = '<b>‹ Kembali ke daftar area</b><span>📍</span>';
+  back.addEventListener('click', () => renderMyOrderAreas(state.myOpenOrders));
+  list.appendChild(back);
+
+  const heading = document.createElement('div');
+  heading.className = 'tool-card';
+  heading.innerHTML = `<strong>🟢 ORDER OPEN — ${area.area}</strong><small>${state.myOpenOrders?.technician?.name || '-'} • ${fmt(area.orders?.length || 0)} order</small>`;
+  list.appendChild(heading);
+
+  (area.orders || []).forEach((order, index) => {
+    const card = document.createElement('div');
+    card.className = 'mini-order';
+    card.innerHTML = `
+      <strong>${index + 1}. ${order.customer_name || '-'}</strong>
+      <small style="line-height:1.65">
+        🎫 ${order.ticket_id || 'MANUAL'}<br>
+        🌐 ${order.service_number || '-'}<br>
+        📞 ${order.customer_phone || '-'}<br>
+        ⚡ ${order.package || '-'}<br>
+        📡 ONU RX: ${order.onu_rx || '-'}<br>
+        📝 RCA: ${order.rca || '-'}<br>
+        🏠 ${order.address || '-'}
+      </small>`;
+    list.appendChild(card);
+  });
+}
+
+async function loadMyOpenOrders(force = false) {
+  const user = telegramUser();
+  const identity = document.querySelector('#ordersIdentity');
+  const list = document.querySelector('#myOrdersList');
+  if (!user?.id) {
+    identity.textContent = 'Mini App harus dibuka dari Telegram untuk membaca akun teknisi.';
+    list.innerHTML = '<div class="empty"><p>Telegram ID tidak tersedia.</p></div>';
+    return;
+  }
+
+  identity.textContent = '🔄 Membaca Google Sheets terbaru...';
+  list.innerHTML = '<div class="empty"><p>Memuat order OPEN...</p></div>';
+  try {
+    const params = new URLSearchParams({ telegram_id: String(user.id) });
+    if (force) params.set('force', '1');
+    const response = await fetch(`/api/my-open-orders?${params}`, { cache: 'no-store' });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.message || `HTTP ${response.status}`);
+    state.myOpenOrders = data;
+    identity.textContent = `${data.technician.name} • NIK ${data.technician.nik || '-'} • ${data.source}`;
+    setMyOrderSummary(data.total_open, data.active_areas);
+    renderMyOrderAreas(data);
+  } catch (error) {
+    console.error('Gagal memuat Orderanku dari Sheet', error);
+    identity.textContent = '❌ Gagal membaca Orderanku dari Google Sheets.';
+    list.innerHTML = `<div class="empty"><p>${error.message || 'Gagal membaca data.'}</p></div>`;
+    setMyOrderSummary(0, 0);
+  }
+}
+
+async function loadReportData() {
   const candidate = state.me || resolveMeFromPayload();
-  const ordersIdentity = document.querySelector('#ordersIdentity');
   const reportIdentity = document.querySelector('#reportIdentity');
-  const ordersList = document.querySelector('#myOrdersList');
   if (!candidate) {
-    ordersIdentity.textContent = 'Data akun Telegram ini belum cocok dengan nama teknisi pada REPORT.';
     reportIdentity.textContent = 'Data akun Telegram ini belum cocok dengan nama teknisi pada REPORT.';
-    ordersList.innerHTML = '<div class="empty"><p>Belum bisa menemukan data teknisi kamu.</p></div>';
     return;
   }
   try {
     const data = await fetchTechnician(candidate.key || candidate.nik, 'ALL');
     state.me = candidate;
-    ordersIdentity.textContent = `${data.name || candidate.name} • NIK ${data.nik || candidate.nik || '-'}`;
     reportIdentity.textContent = `${data.name || candidate.name} • NIK ${data.nik || candidate.nik || '-'}`;
-    document.querySelectorAll('#myOrderSummary strong').forEach((el, i) => el.textContent = fmt([data.daily, data.weekly, data.all][i]));
     document.querySelectorAll('#reportSummary strong').forEach((el, i) => el.textContent = fmt([data.daily, data.weekly, data.all][i]));
-    const orders = data.orders || [];
-    document.querySelector('#myOrderCount').textContent = `${orders.length} data`;
-    ordersList.replaceChildren();
-    if (!orders.length) {
-      ordersList.innerHTML = '<div class="empty"><p>Belum ada pekerjaan tercatat.</p></div>';
-      return;
-    }
-    orders.slice(0, 100).forEach(order => {
-      const row = document.createElement('div');
-      row.className = 'mini-order';
-      row.innerHTML = `<strong>${order.service_number || '-'}</strong><small>${order.ticket_id || 'MANUAL'} • ${order.area_label || order.sto || '-'} • ${order.date_label || '-'}</small>`;
-      ordersList.appendChild(row);
-    });
   } catch (error) {
-    console.error('Gagal memuat data pribadi', error);
-    ordersIdentity.textContent = 'Gagal memuat data teknisi.';
+    console.error('Gagal memuat laporan pribadi', error);
     reportIdentity.textContent = 'Gagal memuat data teknisi.';
   }
 }
@@ -225,7 +303,8 @@ async function loadMyData() {
 function openPage(pageId, button = null) {
   document.querySelectorAll('.page-view').forEach(page => page.classList.toggle('hidden', page.id !== pageId));
   document.querySelectorAll('.nav-item[data-page]').forEach(item => item.classList.toggle('active', item.dataset.page === pageId));
-  if (pageId === 'ordersPage' || pageId === 'reportsPage') loadMyData();
+  if (pageId === 'ordersPage') loadMyOpenOrders();
+  if (pageId === 'reportsPage') loadReportData();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -284,8 +363,14 @@ document.querySelectorAll('[data-close-drawer]').forEach(item => item.addEventLi
 document.querySelectorAll('[data-drawer-page]').forEach(button => button.addEventListener('click', () => { closeOverlays(); openPage(button.dataset.drawerPage); }));
 document.querySelector('#moreButton')?.addEventListener('click', () => document.querySelector('#moreMenu').classList.remove('hidden'));
 document.querySelectorAll('[data-close-more]').forEach(item => item.addEventListener('click', closeOverlays));
-document.querySelector('#refreshButton')?.addEventListener('click', async () => { closeOverlays(); await loadDashboard(); if (!document.querySelector('#ordersPage').classList.contains('hidden') || !document.querySelector('#reportsPage').classList.contains('hidden')) await loadMyData(); showToast('Data diperbarui'); });
+document.querySelector('#refreshButton')?.addEventListener('click', async () => {
+  closeOverlays();
+  await loadDashboard();
+  if (!document.querySelector('#ordersPage').classList.contains('hidden')) await loadMyOpenOrders(true);
+  if (!document.querySelector('#reportsPage').classList.contains('hidden')) await loadReportData();
+  showToast('Data diperbarui');
+});
 document.querySelector('#closeMiniAppButton')?.addEventListener('click', () => { if (tg?.close) tg.close(); });
 
 setWelcome();
-loadDashboard().then(loadMyData);
+loadDashboard();
