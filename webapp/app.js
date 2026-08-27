@@ -157,7 +157,7 @@ function renderRca() {
     </div>`).join('');
 
   box.innerHTML = `
-    <div class="placeholder-pie" style="background:conic-gradient(${stops.join(',')});box-shadow:inset 0 0 0 24px #0a1929">${fmt(summary.total)}</div>
+    <div class="placeholder-pie" style="width:180px;height:180px;flex:0 0 180px;font-size:24px;background:conic-gradient(${stops.join(',')});box-shadow:inset 0 0 0 38px #0a1929">${fmt(summary.total)}</div>
     <div style="min-width:0;flex:1">
       <strong>${fmt(summary.total)} RCA tercatat</strong>
       <p style="margin:4px 0 8px">${summary.source || 'Google Sheet + Grup Kendala'} • Sheet ${fmt(summary.sheet_count)} • Kendala ${fmt(summary.kendala_count)}</p>
