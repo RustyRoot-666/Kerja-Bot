@@ -130,11 +130,47 @@ function renderRecentActivity() {
   });
 }
 
+function renderRca() {
+  const box = document.querySelector('.rca-panel .placeholder-chart');
+  if (!box) return;
+  const summary = state.payload?.rca_summary || { total: 0, items: [] };
+  const items = summary.items || [];
+  if (!summary.total || !items.length) {
+    box.innerHTML = `<div class="placeholder-pie">!</div><div><strong>Belum ada RCA</strong><p>Belum ditemukan RCA pada Google Sheet maupun Grup Kendala untuk filter area ini.</p></div>`;
+    return;
+  }
+
+  const palette = ['#8d2dce', '#ee4f5d', '#ffb62c', '#2584ef', '#2bd08f', '#57e6ff', '#7e74ff', '#ff7d20', '#8ca2bd'];
+  let cursor = 0;
+  const stops = [];
+  items.forEach((item, index) => {
+    const start = cursor;
+    cursor += Number(item.percent || 0);
+    stops.push(`${palette[index % palette.length]} ${start}% ${cursor}%`);
+  });
+  if (cursor < 100) stops.push(`#1a2e45 ${cursor}% 100%`);
+
+  const legend = items.slice(0, 7).map((item, index) => `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin:7px 0;font-size:10px">
+      <span style="display:flex;align-items:center;gap:7px;color:#b7c8d9"><i style="width:8px;height:8px;border-radius:50%;background:${palette[index % palette.length]};display:inline-block"></i>${item.label}</span>
+      <strong style="white-space:nowrap">${fmt(item.count)} <span style="color:#71879f;font-weight:500">(${item.percent}%)</span></strong>
+    </div>`).join('');
+
+  box.innerHTML = `
+    <div class="placeholder-pie" style="background:conic-gradient(${stops.join(',')});box-shadow:inset 0 0 0 24px #0a1929">${fmt(summary.total)}</div>
+    <div style="min-width:0;flex:1">
+      <strong>${fmt(summary.total)} RCA tercatat</strong>
+      <p style="margin:4px 0 8px">${summary.source || 'Google Sheet + Grup Kendala'} • Sheet ${fmt(summary.sheet_count)} • Kendala ${fmt(summary.kendala_count)}</p>
+      ${legend}
+    </div>`;
+}
+
 function render() {
   renderSummary();
   renderTrend();
   renderLeaderboard();
   renderRecentActivity();
+  renderRca();
 }
 
 function resolveMeFromPayload() {
@@ -153,7 +189,7 @@ async function loadDashboard() {
     state.me = resolveMeFromPayload() || state.me;
   } catch (error) {
     console.error('Gagal mengambil dashboard', error);
-    state.payload = { summary: { total_close: 0, active_technicians: 0, average_close: 0 }, period_label: 'Data tidak tersedia', trend: [], leaderboard: [] };
+    state.payload = { summary: { total_close: 0, active_technicians: 0, average_close: 0 }, period_label: 'Data tidak tersedia', trend: [], leaderboard: [], rca_summary: { total: 0, items: [] } };
   }
   render();
 }
