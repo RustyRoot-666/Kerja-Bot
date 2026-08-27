@@ -5,7 +5,6 @@ import mimetypes
 import os
 import re
 import sqlite3
-from collections import defaultdict
 from datetime import date, datetime, timedelta
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -74,61 +73,51 @@ def _norm_nik(value: str) -> str:
     return re.sub(r"[^A-Z0-9]", "", text)
 
 
-def _technician_registry(conn: sqlite3.Connection) -> tuple[dict[str, dict], dict[str, dict]]:
-    by_nik: dict[str, dict] = {}
+def _technician_registry(conn: sqlite3.Connection) -> dict[str, dict]:
     by_name: dict[str, dict] = {}
     try:
-        rows = conn.execute("SELECT nik, name, sto FROM technicians").fetchall()
+        rows = conn.execute("SELECT nik, name, sto FROM technicians ORDER BY id ASC").fetchall()
     except sqlite3.OperationalError:
-        return by_nik, by_name
+        return by_name
+
     for row in rows:
         item = {
             "nik": str(row["nik"] or "").strip(),
             "name": str(row["name"] or "").strip(),
             "sto": str(row["sto"] or "").strip().upper(),
         }
-        nik_key = _norm_nik(item["nik"])
         name_key = _norm_name(item["name"])
-        if nik_key:
-            by_nik[nik_key] = item
         if name_key:
             by_name[name_key] = item
-    return by_nik, by_name
+    return by_name
 
 
-def _identity_for(row: sqlite3.Row, by_nik: dict[str, dict], by_name: dict[str, dict]) -> dict:
+def _identity_for(row: sqlite3.Row, by_name: dict[str, dict]) -> dict:
+    """Resolve one report row to a technician identity.
+
+    Historical imports contain reused or placeholder NIKs. Therefore the dashboard
+    uses normalized technician name as the primary identity and treats NIK only as
+    display metadata. This makes one person one leaderboard row even when their NIK
+    changed across imports.
+    """
     raw_nik = str(row["nik"] or "").strip()
     raw_name = str(row["name"] or "").strip()
-    nik_key = _norm_nik(raw_nik)
     name_key = _norm_name(raw_name)
 
-    registered = by_nik.get(nik_key) if nik_key else None
-    if registered is None and name_key:
-        registered = by_name.get(name_key)
-
-    if registered:
-        canonical_nik = registered["nik"] or raw_nik
-        canonical_name = registered["name"] or raw_name or "-"
-        key = f"NIK:{_norm_nik(canonical_nik)}" if canonical_nik else f"NAME:{_norm_name(canonical_name)}"
-        return {
-            "key": key,
-            "nik": canonical_nik,
-            "name": canonical_name,
-            "sto": registered.get("sto", ""),
-        }
-
     if name_key:
+        registered = by_name.get(name_key)
         return {
             "key": f"NAME:{name_key}",
-            "nik": raw_nik,
-            "name": raw_name or "-",
-            "sto": "",
+            "nik": str((registered or {}).get("nik") or raw_nik).strip(),
+            "name": str((registered or {}).get("name") or raw_name or "-").strip(),
+            "sto": str((registered or {}).get("sto") or "").strip().upper(),
         }
 
+    nik_key = _norm_nik(raw_nik)
     return {
         "key": f"NIK:{nik_key or raw_nik}",
         "nik": raw_nik,
-        "name": raw_name or raw_nik or "-",
+        "name": raw_nik or "-",
         "sto": "",
     }
 
@@ -158,10 +147,11 @@ def _report_rows(conn: sqlite3.Connection, where_sql: str, params: tuple[str, ..
 
 
 def _group_rows(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[dict]:
-    by_nik, by_name = _technician_registry(conn)
+    by_name = _technician_registry(conn)
     grouped: dict[str, dict] = {}
+
     for row in rows:
-        identity = _identity_for(row, by_nik, by_name)
+        identity = _identity_for(row, by_name)
         key = identity["key"]
         item = grouped.setdefault(
             key,
@@ -171,23 +161,39 @@ def _group_rows(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[dict]
                 "area_label": "",
                 "area_sto": "",
                 "latest": "",
+                "nik_candidates": [],
             },
         )
+
         service = str(row["service_number"] or "").strip()
         if service:
             item["services"].add(service)
+
+        raw_nik = str(row["nik"] or "").strip()
+        if raw_nik and raw_nik not in item["nik_candidates"]:
+            item["nik_candidates"].append(raw_nik)
+
         message_date = str(row["message_date"] or "")
         if message_date >= item["latest"]:
             item["latest"] = message_date
             item["area_label"] = str(row["area_label"] or "")
             item["area_sto"] = str(row["sto"] or "")
-        # Prefer a real NIK over imported placeholders such as NAME-... or TG-...
-        raw_nik = str(row["nik"] or "").strip()
-        if (not item["nik"] or item["nik"].upper().startswith(("NAME-", "TG-"))) and raw_nik and not raw_nik.upper().startswith(("NAME-", "TG-")):
-            item["nik"] = raw_nik
 
     result = []
     for item in grouped.values():
+        # Keep registered NIK when available. Otherwise prefer a non-placeholder
+        # historical NIK, but never use it for grouping.
+        if not item["nik"] or item["nik"].upper().startswith(("NAME-", "TG-")):
+            real_nik = next(
+                (
+                    value
+                    for value in item["nik_candidates"]
+                    if value and not value.upper().startswith(("NAME-", "TG-"))
+                ),
+                item["nik_candidates"][0] if item["nik_candidates"] else item["nik"],
+            )
+            item["nik"] = real_nik
+
         result.append({
             "key": item["key"],
             "nik": item["nik"],
@@ -196,6 +202,7 @@ def _group_rows(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[dict]
             "area_label": item["area_label"],
             "sto": item["area_sto"] or item.get("sto", ""),
         })
+
     result.sort(key=lambda item: (-item["total"], _norm_name(item["name"])))
     return result
 
@@ -219,7 +226,11 @@ def load_dashboard(area: str, period: str) -> dict:
                     f"substr(r.message_date,1,10)=? AND {area_sql}",
                     (day.isoformat(), *area_params),
                 )
-                total = len({str(row["service_number"] or "").strip() for row in day_rows if str(row["service_number"] or "").strip()})
+                total = len({
+                    str(row["service_number"] or "").strip()
+                    for row in day_rows
+                    if str(row["service_number"] or "").strip()
+                })
                 trend.append({
                     "date": day.isoformat(),
                     "label": DAYS[day.weekday()],
@@ -248,14 +259,16 @@ def load_dashboard(area: str, period: str) -> dict:
 def _identity_members(conn: sqlite3.Connection, identity_key: str, area: str) -> tuple[dict, list[sqlite3.Row]]:
     area_sql, area_params = area_condition(area)
     rows = _report_rows(conn, area_sql, area_params)
-    by_nik, by_name = _technician_registry(conn)
+    by_name = _technician_registry(conn)
     members: list[sqlite3.Row] = []
     chosen = {"key": identity_key, "nik": "", "name": "-", "sto": ""}
+
     for row in rows:
-        identity = _identity_for(row, by_nik, by_name)
+        identity = _identity_for(row, by_name)
         if identity["key"] == identity_key:
             members.append(row)
             chosen = identity
+
     return chosen, members
 
 
@@ -266,25 +279,39 @@ def load_technician(identity_key: str, area: str) -> dict:
     try:
         with connect() as conn:
             identity, rows = _identity_members(conn, identity_key, area)
-            services_all = {str(r["service_number"] or "").strip() for r in rows if str(r["service_number"] or "").strip()}
+            services_all = {
+                str(r["service_number"] or "").strip()
+                for r in rows
+                if str(r["service_number"] or "").strip()
+            }
             services_daily = {
                 str(r["service_number"] or "").strip()
                 for r in rows
-                if str(r["message_date"] or "")[:10] == today.isoformat() and str(r["service_number"] or "").strip()
+                if str(r["message_date"] or "")[:10] == today.isoformat()
+                and str(r["service_number"] or "").strip()
             }
             services_weekly = {
                 str(r["service_number"] or "").strip()
                 for r in rows
-                if str(r["period_start"] or "") == week_start.isoformat() and str(r["service_number"] or "").strip()
+                if str(r["period_start"] or "") == week_start.isoformat()
+                and str(r["service_number"] or "").strip()
             }
 
-            # Collect all aliases/NIKs that belong to this canonical identity.
-            aliases = sorted({str(r["nik"] or "").strip() for r in rows if str(r["nik"] or "").strip()})
+            aliases = sorted({
+                str(r["nik"] or "").strip()
+                for r in rows
+                if str(r["nik"] or "").strip()
+            })
             if aliases and (not identity["nik"] or identity["nik"].upper().startswith(("NAME-", "TG-"))):
-                real = next((nik for nik in aliases if not nik.upper().startswith(("NAME-", "TG-"))), aliases[0])
-                identity["nik"] = real
+                identity["nik"] = next(
+                    (nik for nik in aliases if not nik.upper().startswith(("NAME-", "TG-"))),
+                    aliases[0],
+                )
 
-            service_periods = {(str(r["service_number"] or "").strip(), str(r["period_start"] or "").strip()) for r in rows}
+            service_periods = {
+                (str(r["service_number"] or "").strip(), str(r["period_start"] or "").strip())
+                for r in rows
+            }
             payload_orders = []
             for service_number, period_start in sorted(service_periods):
                 if not service_number:
@@ -313,15 +340,18 @@ def load_technician(identity_key: str, area: str) -> dict:
                 ).fetchone()
                 if not row:
                     continue
+
                 raw_day = str(row["message_day"] or "")
                 try:
                     parsed = date.fromisoformat(raw_day)
                     formatted = date_label(parsed)
                 except ValueError:
                     formatted = raw_day or "-"
+
                 ticket = str(row["ticket_id"] or "MANUAL").strip()
                 if ticket.upper() in {"", "-", "N/A", "NA", "NONE"}:
                     ticket = "MANUAL"
+
                 payload_orders.append({
                     "service_number": str(row["service_number"] or "-"),
                     "ticket_id": ticket,
@@ -330,12 +360,21 @@ def load_technician(identity_key: str, area: str) -> dict:
                     "date_label": formatted,
                     "raw_day": raw_day,
                 })
+
             payload_orders.sort(key=lambda item: item["raw_day"], reverse=True)
             for item in payload_orders:
                 item.pop("raw_day", None)
             payload_orders = payload_orders[:100]
     except sqlite3.Error:
-        return {"key": identity_key, "nik": "", "name": "-", "daily": 0, "weekly": 0, "all": 0, "orders": []}
+        return {
+            "key": identity_key,
+            "nik": "",
+            "name": "-",
+            "daily": 0,
+            "weekly": 0,
+            "all": 0,
+            "orders": [],
+        }
 
     return {
         "key": identity_key,
@@ -368,6 +407,7 @@ class Handler(BaseHTTPRequestHandler):
         except FileNotFoundError:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
+
         mime, _ = mimetypes.guess_type(str(resolved))
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", mime or "application/octet-stream")
@@ -380,28 +420,35 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         route = parsed.path
         query = parse_qs(parsed.query)
+
         if route == "/health":
             self._send_json({"ok": True, "database": str(DATABASE_PATH)})
             return
+
         if route == "/api/dashboard":
             area = (query.get("area") or ["ALL"])[0]
             period = (query.get("period") or ["daily"])[0]
             self._send_json(load_dashboard(area, period))
             return
+
         if route == "/api/technician":
             identity_key = (query.get("key") or query.get("nik") or [""])[0].strip()
             area = (query.get("area") or ["ALL"])[0]
             if not identity_key:
                 self._send_json({"error": "key required"}, HTTPStatus.BAD_REQUEST)
                 return
-            # Backward compatibility for old callers that still send a raw NIK.
+
+            # Backward compatibility for old direct calls. New Mini App requests use
+            # NAME:<normalized name>; raw values are treated as NIK only if needed.
             if not identity_key.startswith(("NIK:", "NAME:")):
                 identity_key = f"NIK:{_norm_nik(identity_key)}"
             self._send_json(load_technician(identity_key, area))
             return
+
         if route in {"/", "/index.html"}:
             self._serve_file(BASE_DIR / "index.html")
             return
+
         self._serve_file(BASE_DIR / route.lstrip("/"))
 
     def log_message(self, fmt: str, *args: object) -> None:
