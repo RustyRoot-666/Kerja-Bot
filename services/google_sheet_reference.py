@@ -237,7 +237,9 @@ def download_statuses() -> dict[str, ReferenceStatus]:
         service_number = cell(row, columns["service_number"])
         primary_ticket = normalize_ticket(cell(row, columns["ticket"]))
         insera_ticket = normalize_ticket(cell(row, columns["insera_ticket"]))
-        ticket_id = primary_ticket or insera_ticket
+        # Ticket source priority is shared by chatbot and Mini App:
+        # INSERA TODAY -> TIKET -> MANUAL (display fallback handled by callers).
+        ticket_id = insera_ticket or primary_ticket
         if not service_number and not ticket_id:
             continue
 
