@@ -81,7 +81,7 @@ function renderLeaderboard() {
     node.querySelector('.leader-name').textContent = item.name || '-';
     node.querySelector('.leader-meta').textContent = `${item.nik || '-'} • ${item.area_label || item.sto || 'SEMUA'}`;
     node.querySelector('.leader-score').textContent = fmt(item.total);
-    button.addEventListener('click', () => openTechnician(item.nik));
+    button.addEventListener('click', () => openTechnician(item.key || item.nik));
     list.appendChild(node);
   });
 }
@@ -110,9 +110,9 @@ async function loadDashboard() {
   render();
 }
 
-async function openTechnician(nik) {
+async function openTechnician(key) {
   try {
-    const params = new URLSearchParams({ nik, area: state.area });
+    const params = new URLSearchParams({ key, area: state.area });
     const response = await fetch(`/api/technician?${params}`, { cache: 'no-store' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
