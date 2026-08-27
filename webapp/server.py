@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import re
 import sqlite3
+from collections import defaultdict
 from datetime import date, datetime, timedelta
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -60,6 +62,144 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
+def _norm_name(value: str) -> str:
+    text = str(value or "").upper().strip()
+    text = re.sub(r"^(?:NAME|NAMA)\s*[-:=]\s*", "", text)
+    text = re.sub(r"[^A-Z0-9]+", " ", text)
+    return " ".join(text.split())
+
+
+def _norm_nik(value: str) -> str:
+    text = str(value or "").upper().strip()
+    return re.sub(r"[^A-Z0-9]", "", text)
+
+
+def _technician_registry(conn: sqlite3.Connection) -> tuple[dict[str, dict], dict[str, dict]]:
+    by_nik: dict[str, dict] = {}
+    by_name: dict[str, dict] = {}
+    try:
+        rows = conn.execute("SELECT nik, name, sto FROM technicians").fetchall()
+    except sqlite3.OperationalError:
+        return by_nik, by_name
+    for row in rows:
+        item = {
+            "nik": str(row["nik"] or "").strip(),
+            "name": str(row["name"] or "").strip(),
+            "sto": str(row["sto"] or "").strip().upper(),
+        }
+        nik_key = _norm_nik(item["nik"])
+        name_key = _norm_name(item["name"])
+        if nik_key:
+            by_nik[nik_key] = item
+        if name_key:
+            by_name[name_key] = item
+    return by_nik, by_name
+
+
+def _identity_for(row: sqlite3.Row, by_nik: dict[str, dict], by_name: dict[str, dict]) -> dict:
+    raw_nik = str(row["nik"] or "").strip()
+    raw_name = str(row["name"] or "").strip()
+    nik_key = _norm_nik(raw_nik)
+    name_key = _norm_name(raw_name)
+
+    registered = by_nik.get(nik_key) if nik_key else None
+    if registered is None and name_key:
+        registered = by_name.get(name_key)
+
+    if registered:
+        canonical_nik = registered["nik"] or raw_nik
+        canonical_name = registered["name"] or raw_name or "-"
+        key = f"NIK:{_norm_nik(canonical_nik)}" if canonical_nik else f"NAME:{_norm_name(canonical_name)}"
+        return {
+            "key": key,
+            "nik": canonical_nik,
+            "name": canonical_name,
+            "sto": registered.get("sto", ""),
+        }
+
+    if name_key:
+        return {
+            "key": f"NAME:{name_key}",
+            "nik": raw_nik,
+            "name": raw_name or "-",
+            "sto": "",
+        }
+
+    return {
+        "key": f"NIK:{nik_key or raw_nik}",
+        "nik": raw_nik,
+        "name": raw_name or raw_nik or "-",
+        "sto": "",
+    }
+
+
+def _report_rows(conn: sqlite3.Connection, where_sql: str, params: tuple[str, ...]) -> list[sqlite3.Row]:
+    return conn.execute(
+        f"""
+        SELECT r.technician_nik AS nik,
+               r.technician_name AS name,
+               r.service_number,
+               r.period_start,
+               r.message_date,
+               UPPER(TRIM(COALESCE(NULLIF(ra.area_label,''), ra.sto_code, o.sto, ''))) AS area_label,
+               UPPER(TRIM(COALESCE(ra.sto_code, o.sto, ''))) AS sto
+        FROM report_group_orders r
+        LEFT JOIN report_area_orders ra
+          ON ra.service_number=r.service_number AND ra.period_start=r.period_start
+        LEFT JOIN orders o ON o.id=(
+            SELECT o2.id FROM orders o2
+            WHERE o2.service_number=r.service_number
+            ORDER BY o2.id DESC LIMIT 1
+        )
+        WHERE {where_sql}
+        """,
+        params,
+    ).fetchall()
+
+
+def _group_rows(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[dict]:
+    by_nik, by_name = _technician_registry(conn)
+    grouped: dict[str, dict] = {}
+    for row in rows:
+        identity = _identity_for(row, by_nik, by_name)
+        key = identity["key"]
+        item = grouped.setdefault(
+            key,
+            {
+                **identity,
+                "services": set(),
+                "area_label": "",
+                "area_sto": "",
+                "latest": "",
+            },
+        )
+        service = str(row["service_number"] or "").strip()
+        if service:
+            item["services"].add(service)
+        message_date = str(row["message_date"] or "")
+        if message_date >= item["latest"]:
+            item["latest"] = message_date
+            item["area_label"] = str(row["area_label"] or "")
+            item["area_sto"] = str(row["sto"] or "")
+        # Prefer a real NIK over imported placeholders such as NAME-... or TG-...
+        raw_nik = str(row["nik"] or "").strip()
+        if (not item["nik"] or item["nik"].upper().startswith(("NAME-", "TG-"))) and raw_nik and not raw_nik.upper().startswith(("NAME-", "TG-")):
+            item["nik"] = raw_nik
+
+    result = []
+    for item in grouped.values():
+        result.append({
+            "key": item["key"],
+            "nik": item["nik"],
+            "name": item["name"],
+            "total": len(item["services"]),
+            "area_label": item["area_label"],
+            "sto": item["area_sto"] or item.get("sto", ""),
+        })
+    result.sort(key=lambda item: (-item["total"], _norm_name(item["name"])))
+    return result
+
+
 def load_dashboard(area: str, period: str) -> dict:
     today = datetime.now().date()
     area_sql, area_params = area_condition(area)
@@ -67,59 +207,23 @@ def load_dashboard(area: str, period: str) -> dict:
 
     try:
         with connect() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT r.technician_nik AS nik,
-                       MAX(r.technician_name) AS name,
-                       COUNT(DISTINCT r.service_number) AS total
-                FROM report_group_orders r
-                WHERE {time_sql} AND {area_sql}
-                GROUP BY r.technician_nik
-                ORDER BY total DESC, UPPER(MAX(r.technician_name)) ASC
-                """,
-                (*time_params, *area_params),
-            ).fetchall()
-
-            leaderboard = []
-            for row in rows:
-                nik = str(row["nik"] or "")
-                area_row = conn.execute(
-                    """
-                    SELECT UPPER(TRIM(COALESCE(NULLIF(ra.area_label,''), ra.sto_code))) AS label,
-                           UPPER(TRIM(ra.sto_code)) AS sto
-                    FROM report_group_orders r
-                    LEFT JOIN report_area_orders ra
-                      ON ra.service_number=r.service_number AND ra.period_start=r.period_start
-                    WHERE r.technician_nik=?
-                    ORDER BY r.message_date DESC
-                    LIMIT 1
-                    """,
-                    (nik,),
-                ).fetchone()
-                leaderboard.append({
-                    "nik": nik,
-                    "name": str(row["name"] or "-"),
-                    "total": int(row["total"] or 0),
-                    "area_label": str(area_row["label"] if area_row else ""),
-                    "sto": str(area_row["sto"] if area_row else ""),
-                })
+            rows = _report_rows(conn, f"{time_sql} AND {area_sql}", (*time_params, *area_params))
+            leaderboard = _group_rows(conn, rows)
 
             trend = []
             week_start, _ = period_bounds(today)
             for offset in range(7):
                 day = week_start + timedelta(days=offset)
-                result = conn.execute(
-                    f"""
-                    SELECT COUNT(DISTINCT r.service_number) AS total
-                    FROM report_group_orders r
-                    WHERE substr(r.message_date,1,10)=? AND {area_sql}
-                    """,
+                day_rows = _report_rows(
+                    conn,
+                    f"substr(r.message_date,1,10)=? AND {area_sql}",
                     (day.isoformat(), *area_params),
-                ).fetchone()
+                )
+                total = len({str(row["service_number"] or "").strip() for row in day_rows if str(row["service_number"] or "").strip()})
                 trend.append({
                     "date": day.isoformat(),
                     "label": DAYS[day.weekday()],
-                    "total": int(result["total"] or 0),
+                    "total": total,
                 })
     except sqlite3.Error:
         leaderboard = []
@@ -141,57 +245,74 @@ def load_dashboard(area: str, period: str) -> dict:
     }
 
 
-def load_technician(nik: str, area: str) -> dict:
+def _identity_members(conn: sqlite3.Connection, identity_key: str, area: str) -> tuple[dict, list[sqlite3.Row]]:
+    area_sql, area_params = area_condition(area)
+    rows = _report_rows(conn, area_sql, area_params)
+    by_nik, by_name = _technician_registry(conn)
+    members: list[sqlite3.Row] = []
+    chosen = {"key": identity_key, "nik": "", "name": "-", "sto": ""}
+    for row in rows:
+        identity = _identity_for(row, by_nik, by_name)
+        if identity["key"] == identity_key:
+            members.append(row)
+            chosen = identity
+    return chosen, members
+
+
+def load_technician(identity_key: str, area: str) -> dict:
     today = datetime.now().date()
     week_start, _ = period_bounds(today)
-    area_sql, area_params = area_condition(area)
-
-    def count(conn: sqlite3.Connection, extra_sql: str, extra_params: tuple[str, ...]) -> int:
-        row = conn.execute(
-            f"""
-            SELECT COUNT(DISTINCT r.service_number) AS total
-            FROM report_group_orders r
-            WHERE r.technician_nik=? AND {extra_sql} AND {area_sql}
-            """,
-            (nik, *extra_params, *area_params),
-        ).fetchone()
-        return int(row["total"] or 0)
 
     try:
         with connect() as conn:
-            identity = conn.execute(
-                "SELECT MAX(technician_name) AS name FROM report_group_orders WHERE technician_nik=?",
-                (nik,),
-            ).fetchone()
-            daily = count(conn, "substr(r.message_date,1,10)=?", (today.isoformat(),))
-            weekly = count(conn, "r.period_start=?", (week_start.isoformat(),))
-            all_count = count(conn, "1=1", ())
-            orders = conn.execute(
-                f"""
-                SELECT r.service_number,
-                       substr(r.message_date,1,10) AS message_day,
-                       COALESCE(NULLIF(TRIM(m.ticket_id),''), NULLIF(TRIM(o.ticket_id),''), 'MANUAL') AS ticket_id,
-                       UPPER(TRIM(COALESCE(NULLIF(ra.area_label,''), ra.sto_code, o.sto, ''))) AS area_label,
-                       UPPER(TRIM(COALESCE(ra.sto_code, o.sto, ''))) AS sto
-                FROM report_group_orders r
-                LEFT JOIN report_ticket_metadata m
-                  ON m.service_number=r.service_number AND m.period_start=r.period_start
-                LEFT JOIN report_area_orders ra
-                  ON ra.service_number=r.service_number AND ra.period_start=r.period_start
-                LEFT JOIN orders o ON o.id=(
-                    SELECT o2.id FROM orders o2
-                    WHERE o2.service_number=r.service_number
-                    ORDER BY o2.id DESC LIMIT 1
-                )
-                WHERE r.technician_nik=? AND {area_sql}
-                GROUP BY r.service_number, r.period_start
-                ORDER BY r.message_date DESC
-                LIMIT 100
-                """,
-                (nik, *area_params),
-            ).fetchall()
+            identity, rows = _identity_members(conn, identity_key, area)
+            services_all = {str(r["service_number"] or "").strip() for r in rows if str(r["service_number"] or "").strip()}
+            services_daily = {
+                str(r["service_number"] or "").strip()
+                for r in rows
+                if str(r["message_date"] or "")[:10] == today.isoformat() and str(r["service_number"] or "").strip()
+            }
+            services_weekly = {
+                str(r["service_number"] or "").strip()
+                for r in rows
+                if str(r["period_start"] or "") == week_start.isoformat() and str(r["service_number"] or "").strip()
+            }
+
+            # Collect all aliases/NIKs that belong to this canonical identity.
+            aliases = sorted({str(r["nik"] or "").strip() for r in rows if str(r["nik"] or "").strip()})
+            if aliases and (not identity["nik"] or identity["nik"].upper().startswith(("NAME-", "TG-"))):
+                real = next((nik for nik in aliases if not nik.upper().startswith(("NAME-", "TG-"))), aliases[0])
+                identity["nik"] = real
+
+            service_periods = {(str(r["service_number"] or "").strip(), str(r["period_start"] or "").strip()) for r in rows}
             payload_orders = []
-            for row in orders:
+            for service_number, period_start in sorted(service_periods):
+                if not service_number:
+                    continue
+                row = conn.execute(
+                    """
+                    SELECT r.service_number,
+                           substr(MAX(r.message_date),1,10) AS message_day,
+                           COALESCE(NULLIF(TRIM(m.ticket_id),''), NULLIF(TRIM(o.ticket_id),''), 'MANUAL') AS ticket_id,
+                           UPPER(TRIM(COALESCE(NULLIF(ra.area_label,''), ra.sto_code, o.sto, ''))) AS area_label,
+                           UPPER(TRIM(COALESCE(ra.sto_code, o.sto, ''))) AS sto
+                    FROM report_group_orders r
+                    LEFT JOIN report_ticket_metadata m
+                      ON m.service_number=r.service_number AND m.period_start=r.period_start
+                    LEFT JOIN report_area_orders ra
+                      ON ra.service_number=r.service_number AND ra.period_start=r.period_start
+                    LEFT JOIN orders o ON o.id=(
+                        SELECT o2.id FROM orders o2
+                        WHERE o2.service_number=r.service_number
+                        ORDER BY o2.id DESC LIMIT 1
+                    )
+                    WHERE r.service_number=? AND r.period_start=?
+                    GROUP BY r.service_number, r.period_start
+                    """,
+                    (service_number, period_start),
+                ).fetchone()
+                if not row:
+                    continue
                 raw_day = str(row["message_day"] or "")
                 try:
                     parsed = date.fromisoformat(raw_day)
@@ -207,16 +328,22 @@ def load_technician(nik: str, area: str) -> dict:
                     "area_label": str(row["area_label"] or ""),
                     "sto": str(row["sto"] or ""),
                     "date_label": formatted,
+                    "raw_day": raw_day,
                 })
+            payload_orders.sort(key=lambda item: item["raw_day"], reverse=True)
+            for item in payload_orders:
+                item.pop("raw_day", None)
+            payload_orders = payload_orders[:100]
     except sqlite3.Error:
-        return {"nik": nik, "name": "-", "daily": 0, "weekly": 0, "all": 0, "orders": []}
+        return {"key": identity_key, "nik": "", "name": "-", "daily": 0, "weekly": 0, "all": 0, "orders": []}
 
     return {
-        "nik": nik,
-        "name": str(identity["name"] if identity and identity["name"] else "-"),
-        "daily": daily,
-        "weekly": weekly,
-        "all": all_count,
+        "key": identity_key,
+        "nik": identity["nik"],
+        "name": identity["name"],
+        "daily": len(services_daily),
+        "weekly": len(services_weekly),
+        "all": len(services_all),
         "orders": payload_orders,
     }
 
@@ -262,12 +389,15 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(load_dashboard(area, period))
             return
         if route == "/api/technician":
-            nik = (query.get("nik") or [""])[0].strip()
+            identity_key = (query.get("key") or query.get("nik") or [""])[0].strip()
             area = (query.get("area") or ["ALL"])[0]
-            if not nik:
-                self._send_json({"error": "nik required"}, HTTPStatus.BAD_REQUEST)
+            if not identity_key:
+                self._send_json({"error": "key required"}, HTTPStatus.BAD_REQUEST)
                 return
-            self._send_json(load_technician(nik, area))
+            # Backward compatibility for old callers that still send a raw NIK.
+            if not identity_key.startswith(("NIK:", "NAME:")):
+                identity_key = f"NIK:{_norm_nik(identity_key)}"
+            self._send_json(load_technician(identity_key, area))
             return
         if route in {"/", "/index.html"}:
             self._serve_file(BASE_DIR / "index.html")
