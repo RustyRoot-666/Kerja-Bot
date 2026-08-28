@@ -3,6 +3,7 @@
 // INSERA TODAY -> TIKET -> MANUAL.
 
 const MINIAPP_EMPTY_TICKETS = new Set(['', '-', 'MANUAL', 'N/A', 'NA', 'NONE']);
+const MINIAPP_DRAFT_LIMIT = 20;
 
 function miniappTicket(value) {
   const raw = String(value || '').trim();
@@ -11,6 +12,129 @@ function miniappTicket(value) {
 
 function miniappIsManualTicket(value) {
   return miniappTicket(value) === 'MANUAL';
+}
+
+function draftStorageKey() {
+  const telegramId = telegramUser()?.id || 'anonymous';
+  return `kerja-bot-input-drafts:${telegramId}`;
+}
+
+function readWorkflowDrafts() {
+  try {
+    const raw = localStorage.getItem(draftStorageKey());
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.warn('Gagal membaca draft Mini App', error);
+    return [];
+  }
+}
+
+function writeWorkflowDrafts(items) {
+  try {
+    localStorage.setItem(draftStorageKey(), JSON.stringify(items.slice(0, MINIAPP_DRAFT_LIMIT)));
+  } catch (error) {
+    console.warn('Gagal menyimpan draft Mini App', error);
+  }
+}
+
+function draftId(action, serviceNumber) {
+  return `${String(action || '').toLowerCase()}:${String(serviceNumber || '').trim()}`;
+}
+
+function getWorkflowDraft(action, serviceNumber) {
+  const id = draftId(action, serviceNumber);
+  return readWorkflowDrafts().find(item => item.id === id) || null;
+}
+
+function saveWorkflowDraft(action, order, data) {
+  const serviceNumber = String(order?.service_number || data?.service_number || '').trim();
+  if (!serviceNumber) return;
+  const id = draftId(action, serviceNumber);
+  const now = new Date().toISOString();
+  const cleanData = {};
+  Object.entries(data || {}).forEach(([key, value]) => {
+    const text = String(value ?? '').trim();
+    if (text) cleanData[key] = text;
+  });
+  const item = {
+    id,
+    action,
+    service_number: serviceNumber,
+    customer_name: String(order?.customer_name || data?.customer_name || '').trim(),
+    address: String(order?.address || data?.address || '').trim(),
+    area: String(order?.area || '').trim(),
+    order: { ...(order || {}) },
+    data: cleanData,
+    updated_at: now,
+  };
+  const others = readWorkflowDrafts().filter(existing => existing.id !== id);
+  writeWorkflowDrafts([item, ...others]);
+}
+
+function removeWorkflowDraft(action, serviceNumber) {
+  const id = draftId(action, serviceNumber);
+  writeWorkflowDrafts(readWorkflowDrafts().filter(item => item.id !== id));
+}
+
+function draftTimeLabel(value) {
+  try {
+    return new Intl.DateTimeFormat('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value));
+  } catch (_) {
+    return '-';
+  }
+}
+
+function renderDraftHistory() {
+  const host = workflowHost();
+  if (!host || document.querySelector('#wfDraftHistory')) return;
+  const drafts = readWorkflowDrafts();
+  if (!drafts.length) return;
+
+  const card = document.createElement('article');
+  card.className = 'tool-card';
+  card.id = 'wfDraftHistory';
+  card.style.borderColor = '#5a4721';
+  card.style.background = 'linear-gradient(180deg,#1a1b20,#0d1824)';
+  card.innerHTML = `
+    <strong>🕘 HISTORY / PROSES TERTUNDA</strong>
+    <small>Input yang belum selesai tersimpan otomatis. Pilih untuk melanjutkan dari data terakhir.</small>
+    <div id="wfDraftList" class="mini-order-list" style="margin-top:10px"></div>`;
+
+  const list = card.querySelector('#wfDraftList');
+  drafts.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'mini-order';
+    row.innerHTML = `
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+        <div style="min-width:0;flex:1">
+          <strong>${esc(String(item.action || '').toUpperCase())} • ${esc(item.service_number || '-')}</strong>
+          <small>${esc(item.customer_name || '-')} ${item.area ? `• ${esc(item.area)}` : ''}<br>Terakhir: ${esc(draftTimeLabel(item.updated_at))}</small>
+        </div>
+        <button type="button" data-draft-remove="${esc(item.id)}" style="border:0;background:transparent;color:#ff7b85;font-size:12px;padding:4px">✕</button>
+      </div>
+      <button class="tool-action" type="button" data-draft-resume="${esc(item.id)}"><b>LANJUTKAN</b><span>›</span></button>`;
+    list.appendChild(row);
+  });
+  host.prepend(card);
+
+  card.querySelectorAll('[data-draft-resume]').forEach(button => {
+    button.addEventListener('click', () => {
+      const item = readWorkflowDrafts().find(draft => draft.id === button.dataset.draftResume);
+      if (!item) return;
+      renderWorkflowForm(item.action, item.order || { service_number: item.service_number });
+      showToast(`Melanjutkan ${String(item.action || '').toUpperCase()} ${item.service_number}`);
+    });
+  });
+  card.querySelectorAll('[data-draft-remove]').forEach(button => {
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      const draftsNow = readWorkflowDrafts().filter(draft => draft.id !== button.dataset.draftRemove);
+      writeWorkflowDrafts(draftsNow);
+      renderWorkflowHome();
+      showToast('History dihapus');
+    });
+  });
 }
 
 // Override the original seed so a missing ticket is represented as MANUAL,
@@ -133,10 +257,15 @@ function bindTicketHelpers(action, order) {
 // field requirements and output generator as the normal Mini App workflow.
 renderWorkflowForm = function renderWorkflowFormWithTicketTools(action, order) {
   state.workflow = { action, order };
-  const data = workflowSeed(order);
+  const draft = getWorkflowDraft(action, order.service_number);
+  const data = { ...workflowSeed(order), ...(draft?.data || {}) };
   const required = WF_REQUIRED[action];
   const missing = required.filter(k => !String(data[k] || '').trim());
   const host = workflowHost();
+
+  // Create/update draft as soon as the technician opens an order so the
+  // process is still recoverable even if Telegram closes before any typing.
+  saveWorkflowDraft(action, order, data);
 
   const known = required
     .filter(k => String(data[k] || '').trim())
@@ -144,12 +273,13 @@ renderWorkflowForm = function renderWorkflowFormWithTicketTools(action, order) {
     .join('');
 
   const fields = missing
-    .map(k => `<label style="display:block;margin:11px 0"><span style="display:block;color:#9cb0c5;font-size:10px;margin-bottom:5px">${WF_LABELS[k]}</span><input name="${k}" required placeholder="Isi ${WF_LABELS[k]}${['valins_id','voip_number'].includes(k) ? ' atau -' : ''}" style="width:100%;border:1px solid #2a496b;border-radius:12px;background:#081727;color:#fff;padding:12px;outline:none" /></label>`)
+    .map(k => `<label style="display:block;margin:11px 0"><span style="display:block;color:#9cb0c5;font-size:10px;margin-bottom:5px">${WF_LABELS[k]}</span><input name="${k}" required value="${esc(data[k] || '')}" placeholder="Isi ${WF_LABELS[k]}${['valins_id','voip_number'].includes(k) ? ' atau -' : ''}" style="width:100%;border:1px solid #2a496b;border-radius:12px;background:#081727;color:#fff;padding:12px;outline:none" /></label>`)
     .join('');
 
   host.innerHTML = `<article class="tool-card">
     <strong>${action.toUpperCase()} • ${esc(order.service_number)}</strong>
     <small>${esc(order.customer_name || '-')} • ${esc(order.address || '-')}</small>
+    <div class="info-box" style="margin-top:12px;border-color:#5a4721"><span>🕘</span><p><strong style="color:#eef6ff">Tersimpan otomatis</strong><br>Kalau proses ditutup atau pindah halaman, lanjutkan dari HISTORY / PROSES TERTUNDA di menu Input.</p></div>
     ${whatsappHelperMarkup(order)}
     ${ticketHelperMarkup(order)}
     ${known ? `<div style="margin-top:12px">${known}</div>` : ''}
@@ -161,8 +291,22 @@ renderWorkflowForm = function renderWorkflowFormWithTicketTools(action, order) {
   </article>`;
 
   bindTicketHelpers(action, order);
+  const form = document.querySelector('#wfForm');
+  form?.querySelectorAll('input').forEach(input => {
+    input.addEventListener('input', () => {
+      const formData = new FormData(form);
+      missing.forEach(k => {
+        const current = String(formData.get(k) || '').trim();
+        if (current) data[k] = current;
+        else delete data[k];
+      });
+      data.ticket_id = miniappTicket(data.ticket_id);
+      saveWorkflowDraft(action, order, data);
+    });
+  });
+
   document.querySelector('#wfBackOrders').addEventListener('click', () => startWorkflow(action));
-  document.querySelector('#wfForm').addEventListener('submit', event => {
+  form.addEventListener('submit', event => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     missing.forEach(k => {
@@ -170,6 +314,15 @@ renderWorkflowForm = function renderWorkflowFormWithTicketTools(action, order) {
     });
     // Never let an empty/placeholder Sheet ticket disappear from the output.
     data.ticket_id = miniappTicket(data.ticket_id);
+    removeWorkflowDraft(action, order.service_number);
     renderWorkflowResult(action, order, data);
   });
+};
+
+// Add draft/history cards to the normal Input home without changing the
+// existing LENGKAP / CONFIG / REPORT / STO buttons.
+const _renderWorkflowHomeWithNoDrafts = renderWorkflowHome;
+renderWorkflowHome = function renderWorkflowHomeWithDraftHistory() {
+  _renderWorkflowHomeWithNoDrafts();
+  renderDraftHistory();
 };
