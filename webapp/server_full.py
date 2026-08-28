@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import json
+import sys
 from http import HTTPStatus
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from webapp import server_ext as ext
 
