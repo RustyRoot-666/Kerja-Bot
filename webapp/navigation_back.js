@@ -87,20 +87,23 @@ if (tg?.BackButton) {
   syncTelegramBack();
 }
 
-// Load the richer personal-report page after the core app is ready. Keeping
-// this separate avoids duplicating the main app bundle and lets the report UI
-// evolve independently.
+// Load richer personal report first, then attach CONFIG/REPORT/STO history editor.
 (() => {
   if (document.querySelector('script[data-report-dashboard]')) return;
   const script = document.createElement('script');
   script.src = `/report_dashboard.js?v=${Date.now()}`;
   script.dataset.reportDashboard = '1';
+  script.onload = () => {
+    if (document.querySelector('script[data-report-history-editor]')) return;
+    const history = document.createElement('script');
+    history.src = `/report_history_editor.js?v=${Date.now()}`;
+    history.dataset.reportHistoryEditor = '1';
+    document.body.appendChild(history);
+  };
   document.body.appendChild(script);
 })();
 
 // Normalize technician identities after the core dashboard bundle is ready.
-// This merges conservative aliases such as IMAM MAULANA / IMAM MAULANA SASMINTHO
-// and forces technician display names to uppercase.
 (() => {
   if (document.querySelector('script[data-leaderboard-identity-fix]')) return;
   const script = document.createElement('script');
@@ -109,12 +112,21 @@ if (tg?.BackButton) {
   document.body.appendChild(script);
 })();
 
-// Load persistent workflow history last so it wraps the final Input renderers
-// from app.js, ticket_bridge.js, and workflow_area.js.
+// Load persistent workflow history so unfinished input survives Mini App close.
 (() => {
   if (document.querySelector('script[data-draft-history]')) return;
   const script = document.createElement('script');
   script.src = `/draft_history.js?v=${Date.now()}`;
   script.dataset.draftHistory = '1';
+  document.body.appendChild(script);
+})();
+
+// Generated CONFIG/REPORT/STO are editable code blocks; technician copies CODE,
+// not a decorative message card.
+(() => {
+  if (document.querySelector('script[data-input-code-editor]')) return;
+  const script = document.createElement('script');
+  script.src = `/input_code_editor.js?v=${Date.now()}`;
+  script.dataset.inputCodeEditor = '1';
   document.body.appendChild(script);
 })();
