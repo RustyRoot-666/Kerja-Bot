@@ -83,9 +83,15 @@ function ticketHelperMarkup(order) {
     </div>`;
 }
 
+function reqOpenTicketText(order) {
+  const sto = String(order.sto || state.myOpenOrders?.technician?.sto || '').trim().toUpperCase() || '-';
+  const inet = String(order.service_number || '').trim() || '-';
+  return `#REQOPENTIKET\nSTO: ${sto}\n\nNOMER INET:\n${inet}\n\nmoban create tiket`;
+}
+
 function bindTicketHelpers(action, order) {
   document.querySelector('#wfReqOpenTicket')?.addEventListener('click', async () => {
-    await copyText(`#REQOPENTIKET ${order.service_number}`, '#REQOPENTIKET tersalin');
+    await copyText(reqOpenTicketText(order), '#REQOPENTIKET lengkap tersalin');
   });
   document.querySelector('#wfInfoTicket')?.addEventListener('click', async () => {
     await copyText(`/infotiket ${order.service_number}`, '/infotiket tersalin');
