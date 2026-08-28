@@ -97,3 +97,14 @@ if (tg?.BackButton) {
   script.dataset.reportDashboard = '1';
   document.body.appendChild(script);
 })();
+
+// Normalize technician identities after the core dashboard bundle is ready.
+// This merges conservative aliases such as IMAM MAULANA / IMAM MAULANA SASMINTHO
+// and forces technician display names to uppercase.
+(() => {
+  if (document.querySelector('script[data-leaderboard-identity-fix]')) return;
+  const script = document.createElement('script');
+  script.src = `/leaderboard_identity_fix.js?v=${Date.now()}`;
+  script.dataset.leaderboardIdentityFix = '1';
+  document.body.appendChild(script);
+})();
