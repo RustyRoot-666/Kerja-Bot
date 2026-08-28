@@ -17,8 +17,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    command: ["python", "webapp/server_ext.py"]
+    command: ["python", "webapp/server_full.py"]
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
-      - ./database:/app/database:ro
+      - ./database:/app/database
