@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 import sys
-from datetime import timedelta
+from datetime import datetime, timedelta
 from http import HTTPStatus
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -95,12 +96,7 @@ def load_my_open_orders(telegram_id: int, force: bool = False) -> dict:
 
 
 def search_open_orders(telegram_id: int, query: str, force: bool = False) -> dict:
-    """Search OPEN Sheet orders across all technicians by INET.
-
-    Access is limited to registered technicians, but assignment is intentionally
-    not used as a filter so one technician can take over another technician's
-    OPEN order when operationally needed.
-    """
+    """Search OPEN Sheet orders across all technicians by INET."""
     technician = base._technician_by_telegram_id(telegram_id)
     if not technician:
         return {"ok": False, "error": "technician_not_registered", "message": "Akun Telegram belum terdaftar sebagai teknisi."}
@@ -201,6 +197,111 @@ def load_my_report(telegram_id: int) -> dict:
     }
 
 
+def _ensure_workflow_drafts() -> None:
+    with base.connect() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS miniapp_workflow_drafts (
+                telegram_id INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                service_number TEXT NOT NULL,
+                order_json TEXT NOT NULL DEFAULT '{}',
+                data_json TEXT NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL DEFAULT 'draft',
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (telegram_id, action, service_number)
+            )
+            """
+        )
+        conn.commit()
+
+
+def load_workflow_drafts(telegram_id: int) -> dict:
+    technician = base._technician_by_telegram_id(telegram_id)
+    if not technician:
+        return {"ok": False, "error": "technician_not_registered", "message": "Akun Telegram belum terdaftar sebagai teknisi."}
+    _ensure_workflow_drafts()
+    with base.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT action, service_number, order_json, data_json, status, updated_at
+            FROM miniapp_workflow_drafts
+            WHERE telegram_id=?
+            ORDER BY updated_at DESC
+            LIMIT 30
+            """,
+            (telegram_id,),
+        ).fetchall()
+    items = []
+    for row in rows:
+        try:
+            order = json.loads(row["order_json"] or "{}")
+        except json.JSONDecodeError:
+            order = {}
+        try:
+            data = json.loads(row["data_json"] or "{}")
+        except json.JSONDecodeError:
+            data = {}
+        items.append({
+            "action": str(row["action"] or "").lower(),
+            "service_number": str(row["service_number"] or ""),
+            "order": order,
+            "data": data,
+            "status": str(row["status"] or "draft"),
+            "updated_at": str(row["updated_at"] or ""),
+        })
+    return {"ok": True, "items": items}
+
+
+def save_workflow_draft(payload: dict) -> dict:
+    raw_id = str(payload.get("telegram_id") or "").strip()
+    if not raw_id.isdigit():
+        return {"ok": False, "error": "telegram_id_required", "message": "telegram_id wajib diisi."}
+    telegram_id = int(raw_id)
+    technician = base._technician_by_telegram_id(telegram_id)
+    if not technician:
+        return {"ok": False, "error": "technician_not_registered", "message": "Akun Telegram belum terdaftar sebagai teknisi."}
+    action = str(payload.get("action") or "").strip().lower()
+    service = _service_key(payload.get("service_number"))
+    if action not in {"lengkap", "config", "report", "sto"} or not service:
+        return {"ok": False, "error": "invalid_draft", "message": "Workflow atau INET tidak valid."}
+    order = payload.get("order") if isinstance(payload.get("order"), dict) else {}
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    status = "completed" if str(payload.get("status") or "").lower() == "completed" else "draft"
+    updated_at = datetime.now().isoformat(timespec="seconds")
+    _ensure_workflow_drafts()
+    with base.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO miniapp_workflow_drafts
+                (telegram_id, action, service_number, order_json, data_json, status, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(telegram_id, action, service_number) DO UPDATE SET
+                order_json=excluded.order_json,
+                data_json=excluded.data_json,
+                status=excluded.status,
+                updated_at=excluded.updated_at
+            """,
+            (telegram_id, action, service, json.dumps(order, ensure_ascii=False), json.dumps(data, ensure_ascii=False), status, updated_at),
+        )
+        conn.commit()
+    return {"ok": True, "updated_at": updated_at, "status": status}
+
+
+def delete_workflow_draft(telegram_id: int, action: str, service_number: str) -> dict:
+    technician = base._technician_by_telegram_id(telegram_id)
+    if not technician:
+        return {"ok": False, "error": "technician_not_registered"}
+    _ensure_workflow_drafts()
+    with base.connect() as conn:
+        conn.execute(
+            "DELETE FROM miniapp_workflow_drafts WHERE telegram_id=? AND action=? AND service_number=?",
+            (telegram_id, action.lower().strip(), _service_key(service_number)),
+        )
+        conn.commit()
+    return {"ok": True}
+
+
 def _extended_do_get(self) -> None:
     parsed = urlparse(self.path)
     query = parse_qs(parsed.query)
@@ -233,10 +334,60 @@ def _extended_do_get(self) -> None:
             self._send_json({"ok": False, "error": "sheet_error", "message": "Gagal mencari INET pada Google Sheet."}, HTTPStatus.BAD_GATEWAY)
         return
 
+    if parsed.path == "/api/workflow-drafts":
+        raw_id = (query.get("telegram_id") or [""])[0].strip()
+        if not raw_id.isdigit():
+            self._send_json({"ok": False, "error": "telegram_id_required"}, HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            payload = load_workflow_drafts(int(raw_id))
+            self._send_json(payload, HTTPStatus.OK if payload.get("ok") else HTTPStatus.NOT_FOUND)
+        except Exception as exc:
+            print(f"[miniapp] gagal membaca history input: {exc}")
+            self._send_json({"ok": False, "error": "draft_error", "message": "Gagal membaca history input."}, HTTPStatus.INTERNAL_SERVER_ERROR)
+        return
+
     _original_do_get(self)
 
 
+def _extended_do_post(self) -> None:
+    parsed = urlparse(self.path)
+    if parsed.path != "/api/workflow-drafts":
+        self.send_error(HTTPStatus.NOT_FOUND)
+        return
+    try:
+        length = int(self.headers.get("Content-Length") or "0")
+        body = self.rfile.read(length) if length > 0 else b"{}"
+        payload = json.loads(body.decode("utf-8") or "{}")
+        result = save_workflow_draft(payload if isinstance(payload, dict) else {})
+        self._send_json(result, HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST)
+    except Exception as exc:
+        print(f"[miniapp] gagal menyimpan history input: {exc}")
+        self._send_json({"ok": False, "error": "draft_save_error", "message": "Gagal menyimpan history input."}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+
+def _extended_do_delete(self) -> None:
+    parsed = urlparse(self.path)
+    if parsed.path != "/api/workflow-drafts":
+        self.send_error(HTTPStatus.NOT_FOUND)
+        return
+    query = parse_qs(parsed.query)
+    raw_id = (query.get("telegram_id") or [""])[0].strip()
+    action = (query.get("action") or [""])[0].strip()
+    service = (query.get("service_number") or [""])[0].strip()
+    if not raw_id.isdigit() or not action or not service:
+        self._send_json({"ok": False, "error": "invalid_request"}, HTTPStatus.BAD_REQUEST)
+        return
+    try:
+        self._send_json(delete_workflow_draft(int(raw_id), action, service))
+    except Exception as exc:
+        print(f"[miniapp] gagal menghapus history input: {exc}")
+        self._send_json({"ok": False, "error": "draft_delete_error"}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+
 base.Handler.do_GET = _extended_do_get
+base.Handler.do_POST = _extended_do_post
+base.Handler.do_DELETE = _extended_do_delete
 
 
 if __name__ == "__main__":
