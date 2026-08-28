@@ -89,6 +89,31 @@ function reqOpenTicketText(order) {
   return `#REQOPENTIKET\nSTO: ${sto}\n\nNOMER INET:\n${inet}\n\nmoban create tiket`;
 }
 
+function waGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 11) return 'Selamat pagi';
+  if (hour < 15) return 'Selamat siang';
+  if (hour < 18) return 'Selamat sore';
+  return 'Selamat malam';
+}
+
+function whatsappCustomerText(order) {
+  const technician = String(state.myOpenOrders?.technician?.name || telegramName() || 'Teknisi').trim();
+  const customer = String(order.customer_name || 'Bapak/Ibu').trim();
+  const inet = String(order.service_number || '-').trim();
+  const address = String(order.address || '-').trim();
+  const phone = String(order.customer_phone || '-').trim();
+  return `${waGreeting()} Bapak/Ibu ${customer}.\n\nPerkenalkan, saya ${technician}, teknisi resmi IndiHome.\n\nMohon maaf mengganggu waktunya. Saya mendapat penugasan dari pihak Telkom untuk melakukan penggantian ONT/Modem pada layanan Bapak/Ibu.\n\nNo. Internet: ${inet}\nAlamat: ${address}\nNo. HP: ${phone}\n\nPenggantian ini dilakukan sebagai pembaruan perangkat agar tetap kompatibel dengan jaringan terbaru dan menjaga kualitas layanan tetap optimal.\n\nLayanan penggantian ONT/Modem ini tidak ada biaya tambahan sama sekali atau GRATIS dari kami dan tidak mengubah biaya langganan Bapak/Ibu. Pekerjaan dilakukan oleh teknisi resmi. Apabila terdapat kendala atau hal yang perlu dikonfirmasi terkait layanan, Bapak/Ibu dapat melaporkannya melalui 188.\n\nApabila Bapak/Ibu berkenan, mohon konfirmasi waktu yang sesuai agar saya dapat melakukan kunjungan.\n\nTerima kasih atas perhatian dan kerja sama Bapak/Ibu. 🙏🏼`;
+}
+
+function whatsappHelperMarkup(order) {
+  return `<div class="tool-card" style="margin-top:12px;border-color:#255c4b;background:linear-gradient(180deg,#0d2925,#0b1c26)">
+    <strong>💬 FORMAT WHATSAPP PELANGGAN</strong>
+    <small>Data nama, INET, alamat, nomor HP, dan nama teknisi diambil otomatis dari order/akun teknisi.</small>
+    <button class="tool-action" type="button" id="wfCopyWhatsapp"><b>💬 SALIN FORMAT WA</b><span>Salin ›</span></button>
+  </div>`;
+}
+
 function bindTicketHelpers(action, order) {
   document.querySelector('#wfReqOpenTicket')?.addEventListener('click', async () => {
     await copyText(reqOpenTicketText(order), '#REQOPENTIKET lengkap tersalin');
@@ -98,6 +123,9 @@ function bindTicketHelpers(action, order) {
   });
   document.querySelector('#wfRefreshTicket')?.addEventListener('click', () => {
     refreshWorkflowTicket(action, order.service_number);
+  });
+  document.querySelector('#wfCopyWhatsapp')?.addEventListener('click', async () => {
+    await copyText(whatsappCustomerText(order), 'Format WhatsApp pelanggan tersalin');
   });
 }
 
@@ -122,6 +150,7 @@ renderWorkflowForm = function renderWorkflowFormWithTicketTools(action, order) {
   host.innerHTML = `<article class="tool-card">
     <strong>${action.toUpperCase()} • ${esc(order.service_number)}</strong>
     <small>${esc(order.customer_name || '-')} • ${esc(order.address || '-')}</small>
+    ${whatsappHelperMarkup(order)}
     ${ticketHelperMarkup(order)}
     ${known ? `<div style="margin-top:12px">${known}</div>` : ''}
     <form id="wfForm" style="margin-top:10px">
