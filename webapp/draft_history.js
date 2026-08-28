@@ -2,7 +2,7 @@
 // Drafts are stored in the bot SQLite database so unfinished work can be resumed
 // after closing Telegram or switching devices.
 
-const draftState = { items: [], timer: null };
+const draftState = { items: [], timer: null, pending: null };
 
 function draftTelegramId() {
   return String(telegramUser()?.id || '').trim();
@@ -12,6 +12,19 @@ function draftKey(action, service) {
   return `${String(action || '').toLowerCase()}:${String(service || '').trim()}`;
 }
 
+function buildDraftPayload(action, order, data, status = 'draft') {
+  const telegramId = draftTelegramId();
+  if (!telegramId || !order?.service_number) return null;
+  return {
+    telegram_id: telegramId,
+    action,
+    service_number: order.service_number,
+    order,
+    data,
+    status,
+  };
+}
+
 async function loadDraftHistory() {
   const telegramId = draftTelegramId();
   if (!telegramId) return [];
@@ -19,7 +32,7 @@ async function loadDraftHistory() {
     const response = await fetch(`/api/workflow-drafts?${new URLSearchParams({ telegram_id: telegramId })}`, { cache: 'no-store' });
     const payload = await response.json();
     if (!response.ok || !payload.ok) throw new Error(payload.message || `HTTP ${response.status}`);
-    draftState.items = payload.items || [];
+    draftState.items = (payload.items || []).filter(item => item.status !== 'completed');
     return draftState.items;
   } catch (error) {
     console.error('Gagal membaca history input', error);
@@ -34,31 +47,57 @@ function findDraft(action, service) {
 }
 
 async function saveDraft(action, order, data, status = 'draft') {
-  const telegramId = draftTelegramId();
-  if (!telegramId || !order?.service_number) return;
-  const payload = {
-    telegram_id: telegramId,
-    action,
-    service_number: order.service_number,
-    order,
-    data,
-    status,
-  };
+  const payload = buildDraftPayload(action, order, data, status);
+  if (!payload) return;
+  draftState.pending = payload;
   try {
     const response = await fetch('/api/workflow-drafts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      keepalive: true,
     });
     const result = await response.json();
     if (!response.ok || !result.ok) throw new Error(result.message || `HTTP ${response.status}`);
     const item = { ...payload, updated_at: result.updated_at };
     const key = draftKey(action, order.service_number);
-    draftState.items = [item, ...draftState.items.filter(row => draftKey(row.action, row.service_number) !== key)].slice(0, 30);
+    if (status === 'completed') {
+      draftState.items = draftState.items.filter(row => draftKey(row.action, row.service_number) !== key);
+    } else {
+      draftState.items = [item, ...draftState.items.filter(row => draftKey(row.action, row.service_number) !== key)].slice(0, 30);
+    }
+    if (draftState.pending && draftKey(draftState.pending.action, draftState.pending.service_number) === key) {
+      draftState.pending = null;
+    }
   } catch (error) {
     console.error('Gagal menyimpan history input', error);
   }
 }
+
+function flushPendingDraft() {
+  const payload = draftState.pending;
+  if (!payload) return;
+  try {
+    const body = JSON.stringify(payload);
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon('/api/workflow-drafts', new Blob([body], { type: 'application/json' }));
+    } else {
+      fetch('/api/workflow-drafts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        keepalive: true,
+      }).catch(() => {});
+    }
+  } catch (error) {
+    console.warn('Gagal flush draft saat Mini App ditutup', error);
+  }
+}
+
+window.addEventListener('pagehide', flushPendingDraft);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushPendingDraft();
+});
 
 async function deleteDraft(action, service) {
   const telegramId = draftTelegramId();
@@ -88,12 +127,11 @@ function historyMarkup(items) {
   if (!items.length) return '';
   const rows = items.slice(0, 10).map((item, index) => {
     const order = item.order || {};
-    const status = item.status === 'completed' ? '✅ SELESAI' : '🟡 BELUM SELESAI';
     return `<div class="mini-order" style="margin-top:8px">
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
         <div style="min-width:0;flex:1">
           <strong>${esc(String(item.action || '').toUpperCase())} • ${esc(item.service_number || '-')}</strong>
-          <small>${esc(order.customer_name || '-')} • ${esc(order.area || '-')}<br>${status} • ${esc(draftDateLabel(item.updated_at))}</small>
+          <small>${esc(order.customer_name || '-')} • ${esc(order.area || '-')}<br>🟡 BELUM SELESAI • ${esc(draftDateLabel(item.updated_at))}</small>
         </div>
         <span style="color:#55d9ff;font-size:10px;white-space:nowrap">${index + 1}</span>
       </div>
@@ -103,7 +141,7 @@ function historyMarkup(items) {
   }).join('');
   return `<article class="tool-card" id="workflowHistoryCard" style="border-color:#37506d">
     <strong>🕘 HISTORY INPUT</strong>
-    <small>Proses yang belum selesai disimpan otomatis. Jika VALINS atau data lain belum ada, teknisi dapat melanjutkan lagi tanpa mengulang dari awal.</small>
+    <small>Proses yang belum selesai tersimpan di database bot. Jika VALINS atau data lain belum ada, teknisi dapat menutup Mini App lalu melanjutkan lagi tanpa mengulang dari awal.</small>
     <div style="margin-top:8px">${rows}</div>
   </article>`;
 }
@@ -161,13 +199,26 @@ renderWorkflowForm = function renderWorkflowFormWithDrafts(action, order) {
   };
 
   // Create the draft immediately, even before the technician types anything.
-  saveDraft(action, cleanOrder, { ...baseData, ...draft }, 'draft');
+  const initial = { ...baseData, ...draft };
+  draftState.pending = buildDraftPayload(action, cleanOrder, initial, 'draft');
+  saveDraft(action, cleanOrder, initial, 'draft');
 
-  form.addEventListener('input', () => {
+  const queueSave = () => {
     const data = snapshot();
+    draftState.pending = buildDraftPayload(action, cleanOrder, data, 'draft');
     clearTimeout(draftState.timer);
-    draftState.timer = setTimeout(() => saveDraft(action, cleanOrder, data, 'draft'), 350);
+    draftState.timer = setTimeout(() => saveDraft(action, cleanOrder, data, 'draft'), 250);
+  };
+
+  form.addEventListener('input', queueSave);
+  form.addEventListener('change', () => {
+    const data = snapshot();
+    draftState.pending = buildDraftPayload(action, cleanOrder, data, 'draft');
+    saveDraft(action, cleanOrder, data, 'draft');
   });
-  form.addEventListener('change', () => saveDraft(action, cleanOrder, snapshot(), 'draft'));
-  form.addEventListener('submit', () => saveDraft(action, cleanOrder, snapshot(), 'completed'));
+  form.addEventListener('submit', () => {
+    const data = snapshot();
+    draftState.pending = null;
+    saveDraft(action, cleanOrder, data, 'completed');
+  });
 };
