@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import sys
 from datetime import timedelta
+from http import HTTPStatus
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 # `python webapp/server_ext.py` starts with /app/webapp on sys.path.
 # Add the repository root so `webapp.server` can be imported reliably
@@ -17,6 +19,7 @@ from webapp import server as base
 
 _original_load_my_open_orders = base.load_my_open_orders
 _original_load_technician = base.load_technician
+_original_do_get = base.Handler.do_GET
 
 
 def _clean(value: object) -> str:
@@ -29,14 +32,6 @@ def _service_key(value: object) -> str:
 
 
 def load_my_open_orders(telegram_id: int, force: bool = False) -> dict:
-    """Expose Sheet fields needed by the Mini App workflow.
-
-    Orderanku already comes from the same unique Sheet references used by the
-    chatbot. We deliberately re-match by service number (not ticket), because
-    historical/updated ticket aliases can differ while the INET stays stable.
-    Ticket priority itself remains centralized in google_sheet_reference:
-    INSERA TODAY -> TIKET -> MANUAL.
-    """
     payload = _original_load_my_open_orders(telegram_id, force=force)
     if not payload.get("ok"):
         return payload
@@ -55,7 +50,6 @@ def load_my_open_orders(telegram_id: int, force: bool = False) -> dict:
             reference = by_service.get(service)
             if reference is None:
                 continue
-
             order.update(
                 {
                     "voip_number": _clean(reference.voip_number),
@@ -76,7 +70,6 @@ def load_my_open_orders(telegram_id: int, force: bool = False) -> dict:
 
 
 def load_technician(identity_key: str, area: str) -> dict:
-    """Extend the existing personal report payload with a 7-day trend."""
     payload = _original_load_technician(identity_key, area)
     today = base.datetime.now().date()
     trend = []
@@ -91,20 +84,59 @@ def load_technician(identity_key: str, area: str) -> dict:
                     if str(row["message_date"] or "")[:10] == day.isoformat()
                     and str(row["service_number"] or "").strip()
                 }
-                trend.append({
-                    "date": day.isoformat(),
-                    "label": base.DAYS[day.weekday()],
-                    "total": len(services),
-                })
+                trend.append({"date": day.isoformat(), "label": base.DAYS[day.weekday()], "total": len(services)})
     except Exception as exc:
         print(f"[miniapp] gagal membuat trend teknisi: {exc}")
     payload["trend"] = trend
     return payload
 
 
-# Handler.do_GET resolves these names from the base module at request time.
 base.load_my_open_orders = load_my_open_orders
 base.load_technician = load_technician
+
+
+def load_my_report(telegram_id: int) -> dict:
+    technician = base._technician_by_telegram_id(telegram_id)
+    if not technician:
+        return {"ok": False, "error": "technician_not_registered", "message": "Akun Telegram belum terdaftar sebagai teknisi."}
+
+    identity_key = f"NAME:{base._norm_name(technician['name'])}"
+    detail = load_technician(identity_key, "ALL")
+    return {
+        "ok": True,
+        "technician": {
+            "telegram_id": telegram_id,
+            "nik": str(technician.get("nik") or detail.get("nik") or "").strip(),
+            "name": str(technician.get("name") or detail.get("name") or "-").strip(),
+            "sto": str(technician.get("sto") or "").strip().upper(),
+        },
+        "daily": detail.get("daily", 0),
+        "weekly": detail.get("weekly", 0),
+        "all": detail.get("all", 0),
+        "orders": detail.get("orders", []),
+        "trend": detail.get("trend", []),
+    }
+
+
+def _extended_do_get(self) -> None:
+    parsed = urlparse(self.path)
+    if parsed.path == "/api/my-report":
+        query = parse_qs(parsed.query)
+        raw_id = (query.get("telegram_id") or [""])[0].strip()
+        if not raw_id.isdigit():
+            self._send_json({"ok": False, "error": "telegram_id_required"}, HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            payload = load_my_report(int(raw_id))
+            self._send_json(payload, HTTPStatus.OK if payload.get("ok") else HTTPStatus.NOT_FOUND)
+        except Exception as exc:
+            print(f"[miniapp] gagal membaca laporan pribadi: {exc}")
+            self._send_json({"ok": False, "error": "report_error", "message": "Gagal membaca laporan pribadi."}, HTTPStatus.INTERNAL_SERVER_ERROR)
+        return
+    _original_do_get(self)
+
+
+base.Handler.do_GET = _extended_do_get
 
 
 if __name__ == "__main__":
