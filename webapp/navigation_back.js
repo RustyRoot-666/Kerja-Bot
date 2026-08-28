@@ -108,3 +108,13 @@ if (tg?.BackButton) {
   script.dataset.leaderboardIdentityFix = '1';
   document.body.appendChild(script);
 })();
+
+// Load persistent workflow history last so it wraps the final Input renderers
+// from app.js, ticket_bridge.js, and workflow_area.js.
+(() => {
+  if (document.querySelector('script[data-draft-history]')) return;
+  const script = document.createElement('script');
+  script.src = `/draft_history.js?v=${Date.now()}`;
+  script.dataset.draftHistory = '1';
+  document.body.appendChild(script);
+})();
