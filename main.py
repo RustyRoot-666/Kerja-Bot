@@ -32,7 +32,7 @@ from handlers.google_sheet import build_google_sheet_handlers
 from handlers.login import build_login_conversation, start
 from handlers.my_orders import build_my_orders_handlers, orderanku
 from handlers.order_flow import build_order_conversation
-from services.assign_request import handle_assign_message
+from services.assign_request_miniapp import handle_assign_message
 from services.auto_close import install_auto_close
 from services.bot_commands_guide import perintah_command
 from services.daily_recap import (
