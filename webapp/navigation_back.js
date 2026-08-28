@@ -18,7 +18,6 @@ function smartBack() {
   if (page.id === 'inputPage') {
     const action = state.workflow?.action;
 
-    // Result -> return to the selected order/form context.
     if (document.querySelector('#wfOutputs')) {
       const order = state.workflow?.order;
       if (action && order) renderWorkflowForm(action, order);
@@ -27,7 +26,6 @@ function smartBack() {
       return;
     }
 
-    // Form -> return to INET list for the same area.
     if (document.querySelector('#wfForm')) {
       const area = currentWorkflowArea();
       if (action && area) renderWorkflowAreaOrders(action, area);
@@ -36,26 +34,22 @@ function smartBack() {
       return;
     }
 
-    // INET list -> return to area list.
     if (document.querySelector('#wfOrders')) {
       if (action) renderWorkflowAreas(action, state.myOpenOrders);
       else renderWorkflowHome();
       return;
     }
 
-    // Area list -> return to workflow selector.
     if (document.querySelector('#wfAreaList')) {
       renderWorkflowHome();
       return;
     }
 
-    // Workflow selector -> dashboard.
     openPage('dashboardPage');
     return;
   }
 
   if (page.id === 'ordersPage') {
-    // If Orderanku is showing one area's orders, back returns to area list first.
     const areaBack = [...document.querySelectorAll('#myOrdersList .tool-action')]
       .find(button => button.textContent.includes('Kembali ke daftar area'));
     if (areaBack) {
@@ -69,7 +63,6 @@ function smartBack() {
   }
 }
 
-// Existing app.js binds header arrows straight to dashboard. Intercept first.
 document.querySelectorAll('[data-back-dashboard]').forEach(button => {
   button.addEventListener('click', event => {
     event.preventDefault();
@@ -78,7 +71,6 @@ document.querySelectorAll('[data-back-dashboard]').forEach(button => {
   }, true);
 });
 
-// Keep Telegram's native Mini App back button consistent when available.
 if (tg?.BackButton) {
   const syncTelegramBack = () => {
     const page = currentVisiblePage();
@@ -94,3 +86,14 @@ if (tg?.BackButton) {
   };
   syncTelegramBack();
 }
+
+// Load the richer personal-report page after the core app is ready. Keeping
+// this separate avoids duplicating the main app bundle and lets the report UI
+// evolve independently.
+(() => {
+  if (document.querySelector('script[data-report-dashboard]')) return;
+  const script = document.createElement('script');
+  script.src = `/report_dashboard.js?v=${Date.now()}`;
+  script.dataset.reportDashboard = '1';
+  document.body.appendChild(script);
+})();
