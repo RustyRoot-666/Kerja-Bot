@@ -7,9 +7,6 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-# `python webapp/server_ext.py` starts with /app/webapp on sys.path.
-# Add the repository root so `webapp.server` can be imported reliably
-# inside the Docker container.
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
@@ -102,6 +99,24 @@ def load_my_report(telegram_id: int) -> dict:
 
     identity_key = f"NAME:{base._norm_name(technician['name'])}"
     detail = load_technician(identity_key, "ALL")
+    orders = [dict(item) for item in detail.get("orders", [])]
+
+    # Keep a raw YYYY-MM-DD value so the Mini App can correctly filter
+    # Hari Ini / Minggu (Friday-Thursday) / Semua.
+    try:
+        with base.connect() as conn:
+            _, rows = base._identity_members(conn, identity_key, "ALL")
+            latest_by_service: dict[str, str] = {}
+            for row in rows:
+                service = str(row["service_number"] or "").strip()
+                raw_day = str(row["message_date"] or "")[:10]
+                if service and raw_day and raw_day > latest_by_service.get(service, ""):
+                    latest_by_service[service] = raw_day
+            for order in orders:
+                order["raw_day"] = latest_by_service.get(str(order.get("service_number") or "").strip(), "")
+    except Exception as exc:
+        print(f"[miniapp] gagal menambahkan raw_day laporan: {exc}")
+
     return {
         "ok": True,
         "technician": {
@@ -113,7 +128,7 @@ def load_my_report(telegram_id: int) -> dict:
         "daily": detail.get("daily", 0),
         "weekly": detail.get("weekly", 0),
         "all": detail.get("all", 0),
-        "orders": detail.get("orders", []),
+        "orders": orders,
         "trend": detail.get("trend", []),
     }
 
