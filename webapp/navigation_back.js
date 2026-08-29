@@ -130,3 +130,13 @@ if (tg?.BackButton) {
   script.dataset.inputCodeEditor = '1';
   document.body.appendChild(script);
 })();
+
+// Make Orderanku entries interactive: tap an OPEN order to inspect full Sheet
+// information, copy customer WhatsApp format, or continue directly to Input.
+(() => {
+  if (document.querySelector('script[data-order-detail]')) return;
+  const script = document.createElement('script');
+  script.src = `/order_detail.js?v=${Date.now()}`;
+  script.dataset.orderDetail = '1';
+  document.body.appendChild(script);
+})();
