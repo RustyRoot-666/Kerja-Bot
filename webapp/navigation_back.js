@@ -58,9 +58,7 @@ function smartBack() {
     }
   }
 
-  if (page.id !== 'dashboardPage') {
-    openPage('dashboardPage');
-  }
+  if (page.id !== 'dashboardPage') openPage('dashboardPage');
 }
 
 document.querySelectorAll('[data-back-dashboard]').forEach(button => {
@@ -87,56 +85,44 @@ if (tg?.BackButton) {
   syncTelegramBack();
 }
 
-// Load richer personal report first, then attach CONFIG/REPORT/STO history editor.
-(() => {
-  if (document.querySelector('script[data-report-dashboard]')) return;
-  const script = document.createElement('script');
-  script.src = `/report_dashboard.js?v=${Date.now()}`;
-  script.dataset.reportDashboard = '1';
-  script.onload = () => {
-    if (document.querySelector('script[data-report-history-editor]')) return;
-    const history = document.createElement('script');
-    history.src = `/report_history_editor.js?v=${Date.now()}`;
-    history.dataset.reportHistoryEditor = '1';
-    document.body.appendChild(history);
-  };
-  document.body.appendChild(script);
-})();
+function loadMiniAppScript(src, marker) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[data-${marker}]`);
+    if (existing) {
+      if (existing.dataset.loaded === '1') resolve();
+      else {
+        existing.addEventListener('load', resolve, { once: true });
+        existing.addEventListener('error', reject, { once: true });
+      }
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = `${src}?v=20260829-2`;
+    script.dataset[marker.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = '1';
+    script.onload = () => {
+      script.dataset.loaded = '1';
+      resolve();
+    };
+    script.onerror = reject;
+    document.body.appendChild(script);
+  });
+}
 
-// Normalize technician identities after the core dashboard bundle is ready.
-(() => {
-  if (document.querySelector('script[data-leaderboard-identity-fix]')) return;
-  const script = document.createElement('script');
-  script.src = `/leaderboard_identity_fix.js?v=${Date.now()}`;
-  script.dataset.leaderboardIdentityFix = '1';
-  document.body.appendChild(script);
-})();
+// Rich report + editable history.
+loadMiniAppScript('/report_dashboard.js', 'report-dashboard')
+  .then(() => loadMiniAppScript('/report_history_editor.js', 'report-history-editor'))
+  .catch(error => console.error('Gagal memuat report enhancement', error));
 
-// Load persistent workflow history so unfinished input survives Mini App close.
-(() => {
-  if (document.querySelector('script[data-draft-history]')) return;
-  const script = document.createElement('script');
-  script.src = `/draft_history.js?v=${Date.now()}`;
-  script.dataset.draftHistory = '1';
-  document.body.appendChild(script);
-})();
+// Normalize technician identities.
+loadMiniAppScript('/leaderboard_identity_fix.js', 'leaderboard-identity-fix')
+  .catch(error => console.error('Gagal memuat identity fix', error));
 
-// Generated CONFIG/REPORT/STO are editable code blocks; technician copies CODE,
-// not a decorative message card.
-(() => {
-  if (document.querySelector('script[data-input-code-editor]')) return;
-  const script = document.createElement('script');
-  script.src = `/input_code_editor.js?v=${Date.now()}`;
-  script.dataset.inputCodeEditor = '1';
-  document.body.appendChild(script);
-})();
+// IMPORTANT: load draft persistence FIRST and code-result renderer SECOND.
+// This makes the renderer with the SUDAH DIKERJAKAN button the final workflow renderer.
+loadMiniAppScript('/draft_history.js', 'draft-history')
+  .then(() => loadMiniAppScript('/input_code_editor.js', 'input-code-editor'))
+  .catch(error => console.error('Gagal memuat workflow enhancement', error));
 
-// Make Orderanku entries interactive: tap an OPEN order to inspect full Sheet
-// information, copy customer WhatsApp format, or continue directly to Input.
-(() => {
-  if (document.querySelector('script[data-order-detail]')) return;
-  const script = document.createElement('script');
-  script.src = `/order_detail.js?v=${Date.now()}`;
-  script.dataset.orderDetail = '1';
-  document.body.appendChild(script);
-})();
+// Interactive Orderanku detail.
+loadMiniAppScript('/order_detail.js', 'order-detail')
+  .catch(error => console.error('Gagal memuat detail order', error));
