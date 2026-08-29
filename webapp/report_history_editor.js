@@ -4,6 +4,11 @@ function workflowHistoryKindLabel(kind) {
   return String(kind || '').toUpperCase();
 }
 
+function historyTelegramCodeBlock(text) {
+  const clean = String(text || '').replace(/```/g, "''' ").trim();
+  return `\`\`\`\n${clean}\n\`\`\``;
+}
+
 async function fetchWorkflowHistory(serviceNumber) {
   const user = telegramUser();
   if (!user?.id) throw new Error('Mini App harus dibuka dari Telegram.');
@@ -63,12 +68,12 @@ async function openWorkflowHistory(serviceNumber) {
 
     const byKind = new Set(items.map(item => workflowHistoryKindLabel(item.kind)));
     const lengkap = ['CONFIG','REPORT','STO'].every(kind => byKind.has(kind));
-    body.innerHTML = `${lengkap ? '<div class="info-box"><span>✅</span><p><strong style="color:#eef6ff">LENGKAP</strong><br>History CONFIG + REPORT + STO tersedia untuk INET ini.</p></div>' : ''}${items.map(historyEditorBlock).join('')}`;
+    body.innerHTML = `${lengkap ? '<div class="info-box"><span>✅</span><p><strong style="color:#eef6ff">/LENGKAP</strong><br>History /CONFIG + /REPORT + /STO tersedia untuk INET ini.</p></div>' : ''}${items.map(historyEditorBlock).join('')}`;
 
     body.querySelectorAll('[data-copy-history]').forEach(button => {
       button.addEventListener('click', () => {
         const editor = body.querySelector(`[data-history-editor="${button.dataset.copyHistory}"]`);
-        copyText(editor?.value || '', 'Code tersalin');
+        copyText(historyTelegramCodeBlock(editor?.value || ''), 'Code tersalin');
       });
     });
     body.querySelectorAll('[data-save-history]').forEach(button => {
