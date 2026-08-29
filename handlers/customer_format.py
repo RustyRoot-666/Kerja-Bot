@@ -25,6 +25,40 @@ def _dash(value: str) -> str:
     return value if value else "-"
 
 
+def build_customer_whatsapp_text(
+    *,
+    greeting: str,
+    technician_name: str,
+    customer_name: str,
+    inet: str,
+    address: str,
+    phone: str,
+) -> str:
+    """WhatsApp customer template aligned with the Kerja BOT Mini App."""
+    return (
+        f"{greeting} Bapak/Ibu {customer_name}.\n\n"
+        f"Perkenalkan, saya {technician_name}, teknisi resmi IndiHome.\n\n"
+        "Mohon maaf mengganggu waktunya. Saya mendapat penugasan dari pihak Telkom "
+        "untuk melakukan penggantian ONT/Modem pada layanan Bapak/Ibu sebagai bagian "
+        "dari pembaruan perangkat jaringan.\n\n"
+        f"No. Internet: {inet}\n"
+        f"Alamat: {address}\n"
+        f"No. HP: {phone}\n\n"
+        "Dengan penggantian perangkat ini, Bapak/Ibu akan mendapatkan beberapa benefit:\n"
+        "• Jaringan lebih stabil\n"
+        "• Perangkat kompatibel dengan jaringan WiFi 5 GHz\n"
+        "• Biaya langganan tetap, tidak berubah\n"
+        "• Tidak ada biaya pemasangan / GRATIS\n\n"
+        "Seluruh proses penggantian dilakukan oleh teknisi resmi dan tidak mengubah "
+        "paket maupun biaya langganan Bapak/Ibu.\n\n"
+        "Apabila Bapak/Ibu berkenan, mohon konfirmasi waktu yang sesuai agar saya dapat "
+        "melakukan kunjungan.\n\n"
+        "Jika terdapat kendala atau membutuhkan konfirmasi terkait layanan, Bapak/Ibu "
+        "dapat menghubungi layanan resmi Telkom melalui 188.\n\n"
+        "Terima kasih atas perhatian dan kerja sama Bapak/Ibu. 🙏🏼"
+    )
+
+
 async def format_customer_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat = update.effective_chat
     user = update.effective_user
@@ -59,29 +93,13 @@ async def format_customer_command(update: Update, context: ContextTypes.DEFAULT_
     tz = ZoneInfo(settings.timezone)
     greeting = _greeting(datetime.now(tz).hour)
 
-    customer_name = _dash(order.customer_name)
-    address = _dash(order.address)
-    phone = _dash(order.customer_phone)
-
-    text = (
-        f"{greeting} Bapak/Ibu {customer_name}.\n\n"
-        f"Perkenalkan, saya {technician.name}, teknisi resmi IndiHome yang mendapat "
-        "penugasan dari pihak Telkom.\n\n"
-        "Mohon maaf mengganggu waktunya. Saya mendapat penugasan untuk melakukan "
-        "penggantian ONT/Modem pada layanan Bapak/Ibu.\n\n"
-        f"No. Internet: {inet}\n"
-        f"Alamat: {address}\n"
-        f"No. HP: {phone}\n\n"
-        "Penggantian ini dilakukan sebagai pembaruan perangkat agar tetap kompatibel "
-        "dengan jaringan terbaru dan membantu menjaga kualitas layanan tetap optimal.\n\n"
-        "Layanan penggantian ONT/Modem ini tidak dikenakan biaya tambahan atau GRATIS, "
-        "serta tidak mengubah biaya langganan Bapak/Ibu.\n\n"
-        "Pekerjaan dilakukan oleh teknisi resmi yang mendapat penugasan dari Telkom. "
-        "Apabila terdapat kendala, keraguan, atau hal yang ingin dikonfirmasi terkait "
-        "layanan, Bapak/Ibu dapat menghubungi Customer Care 188.\n\n"
-        "Apabila Bapak/Ibu berkenan, mohon konfirmasi waktu yang sesuai agar saya dapat "
-        "melakukan kunjungan.\n\n"
-        "Terima kasih atas perhatian dan kerja sama Bapak/Ibu. 🙏🏼"
+    text = build_customer_whatsapp_text(
+        greeting=greeting,
+        technician_name=_dash(technician.name),
+        customer_name=_dash(order.customer_name),
+        inet=inet,
+        address=_dash(order.address),
+        phone=_dash(order.customer_phone),
     )
 
     await message.reply_text(text)
