@@ -36,9 +36,10 @@ renderWorkflowResult = function renderWorkflowResultAsEditableCode(action, order
     <strong>✅ ${action.toUpperCase()} SIAP</strong>
     <small>INET ${esc(order.service_number)} • edit bila perlu, lalu salin sebagai code Telegram.</small>
     <div class="info-box" style="margin-top:12px"><span>⌨</span><p><strong style="color:#eef6ff">Output berupa CODE</strong><br>Saat disalin, output otomatis dibungkus dengan tanda <b>```</b> supaya tampil sebagai code block di Telegram.</p></div>
+    <div class="info-box" style="margin-top:10px"><span>💾</span><p><strong style="color:#eef6ff">Status penyimpanan</strong><br>Sebelum tombol <b>SUDAH DIKERJAKAN</b> ditekan, proses tetap tersimpan sebagai draft. Setelah ditekan, hasil dipindahkan ke history pekerjaan selesai dan tetap bisa diedit.</p></div>
     <div id="wfOutputs" style="margin-top:12px"></div>
-    <button class="tool-action" id="wfDone" style="border-color:#2f765d;background:linear-gradient(180deg,#103128,#0b2025)"><b>✅ SUDAH DIKERJAKAN</b><span>Simpan history ›</span></button>
-    <button class="tool-action hidden" id="wfOpenHistory"><b>🕘 HISTORY / EDIT</b><span>›</span></button>
+    <button class="tool-action" id="wfDone" style="border-color:#2f765d;background:linear-gradient(180deg,#103128,#0b2025)"><b>✅ SUDAH DIKERJAKAN</b><span>Simpan ke history ›</span></button>
+    <button class="tool-action hidden" id="wfOpenHistory"><b>🕘 HISTORY / EDIT</b><span>Edit hasil ›</span></button>
     <button class="tool-action" id="wfAnother"><b>Kerjakan order lain</b><span>＋</span></button>
     <button class="tool-action" id="wfHome"><b>Kembali ke menu Input</b><span>‹</span></button>
   </article>`;
@@ -66,12 +67,12 @@ renderWorkflowResult = function renderWorkflowResultAsEditableCode(action, order
       const cards = [...box.querySelectorAll('[data-output-kind]')];
       await saveCompletedWorkflow(action, order, data, cards);
       doneButton.querySelector('b').textContent = '✅ SUDAH TERSIMPAN';
-      doneButton.querySelector('span').textContent = 'Masuk history';
+      doneButton.querySelector('span').textContent = 'History selesai';
       historyButton?.classList.remove('hidden');
       if (typeof removeWorkflowDraft === 'function') {
-        try { removeWorkflowDraft(action, order.service_number); } catch (_) {}
+        try { await removeWorkflowDraft(action, order.service_number); } catch (_) {}
       }
-      showToast('Pekerjaan masuk history');
+      showToast('Pekerjaan selesai tersimpan dan bisa diedit dari history');
     } catch (error) {
       console.error('Gagal menyimpan pekerjaan selesai', error);
       doneButton.disabled = false;
