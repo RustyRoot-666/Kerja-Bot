@@ -216,9 +216,12 @@ renderWorkflowForm = function renderWorkflowFormWithDrafts(action, order) {
     draftState.pending = buildDraftPayload(action, cleanOrder, data, 'draft');
     saveDraft(action, cleanOrder, data, 'draft');
   });
+
+  // Clicking BUAT/PROSES only generates the result. The workflow remains a draft
+  // until the technician explicitly taps SUDAH DIKERJAKAN on the result page.
   form.addEventListener('submit', () => {
     const data = snapshot();
-    draftState.pending = null;
-    saveDraft(action, cleanOrder, data, 'completed');
+    draftState.pending = buildDraftPayload(action, cleanOrder, data, 'draft');
+    saveDraft(action, cleanOrder, data, 'draft');
   });
 };
