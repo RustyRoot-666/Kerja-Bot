@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 from datetime import datetime
+from pathlib import Path
 
 from services.jagir_work_orders import _ensure_tables, _resolve_tag
 
@@ -65,3 +67,9 @@ def seed_initial_jagir_work_orders(database_path) -> int:
                 inserted += 1
         conn.commit()
     return inserted
+
+
+if __name__ == "__main__":
+    database_path = Path(os.getenv("DATABASE_PATH", "/app/database/bot.sqlite3"))
+    inserted = seed_initial_jagir_work_orders(database_path)
+    print(f"JAGIR seed selesai: {inserted} WO baru ditambahkan")
