@@ -5,6 +5,7 @@ import logging
 import re
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from telegram import Update
@@ -99,6 +100,45 @@ def _name_identity_key(technician_name: str) -> str:
     """Stable fallback identity for explicit names that are not registered yet."""
     normalized = _norm_name(technician_name)
     return f"NAME-{normalized}" if normalized else "NAME-UNKNOWN"
+
+
+def _close_jagir_work_order(database_path, service_number: str, technician_nik: str, technician_name: str) -> bool:
+    """Mark matching JAGIR WO DONE after its /sto is accepted in REPORT JAGIR."""
+    now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    with sqlite3.connect(database_path) as conn:
+        try:
+            row = conn.execute(
+                "SELECT status, assigned_nik, assigned_name FROM jagir_work_orders WHERE service_number=?",
+                (service_number.strip(),),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return False
+        if not row:
+            return False
+
+        status, assigned_nik, assigned_name = row
+        if str(status or "").strip().upper() == "DONE":
+            return False
+
+        # /sto yang diterima di topic JAGIR adalah bukti penutupan WO. Ownership
+        # tidak dipakai sebagai blocker karena REPORT dapat dikirim oleh akun lain;
+        # NAMA TEKNISI pada /sto tetap disimpan sebagai identitas report.
+        cur = conn.execute(
+            "UPDATE jagir_work_orders SET status='DONE', updated_at=? WHERE service_number=? AND UPPER(TRIM(status))!='DONE'",
+            (now, service_number.strip()),
+        )
+        conn.commit()
+        if cur.rowcount:
+            logging.info(
+                "JAGIR WO auto-closed by REPORT /sto: inet=%s report_technician=%s (%s) assigned=%s (%s)",
+                service_number,
+                technician_name,
+                technician_nik,
+                str(assigned_name or ""),
+                str(assigned_nik or ""),
+            )
+            return True
+    return False
 
 
 def _command_sto_value(text: str) -> str:
@@ -299,6 +339,16 @@ async def handle_universal_sto(update: Update, context: ContextTypes.DEFAULT_TYP
         parsed.ticket_id,
     )
 
+    wo_closed = False
+    if expected_sto == "JGR":
+        wo_closed = await asyncio.to_thread(
+            _close_jagir_work_order,
+            db.db_path,
+            parsed.service_number,
+            technician_nik,
+            technician_name,
+        )
+
     total_today = await asyncio.to_thread(
         _technician_daily_total,
         db.db_path,
@@ -319,6 +369,7 @@ async def handle_universal_sto(update: Update, context: ContextTypes.DEFAULT_TYP
     else:
         status = "ℹ️ REPORT SUDAH TERSIMPAN"
 
+    wo_line = "\n📦 WO JAGIR : ✅ SELESAI" if wo_closed else ""
     await message.reply_text(
         f"{status}\n"
         f"📍 AREA : {area_label}\n"
@@ -328,9 +379,10 @@ async def handle_universal_sto(update: Update, context: ContextTypes.DEFAULT_TYP
         f"👷 TEKNISI : {technician_name.upper()}\n"
         f"📊 HARI INI : {total_today} order\n"
         f"📊 TOTAL PERIODE : {total_period} order"
+        f"{wo_line}"
     )
     logging.info(
-        "Universal /sto captured: inet=%s tiket=%s teknisi=%s (%s) area=%s sto=%s action=%s",
+        "Universal /sto captured: inet=%s tiket=%s teknisi=%s (%s) area=%s sto=%s action=%s jagir_wo_closed=%s",
         parsed.service_number,
         parsed.ticket_id or "MANUAL",
         technician_name,
@@ -338,5 +390,6 @@ async def handle_universal_sto(update: Update, context: ContextTypes.DEFAULT_TYP
         area_label,
         expected_sto,
         action,
+        wo_closed,
     )
     raise ApplicationHandlerStop
