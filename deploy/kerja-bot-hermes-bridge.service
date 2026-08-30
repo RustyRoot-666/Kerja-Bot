@@ -1,0 +1,19 @@
+[Unit]
+Description=Kerja BOT Hermes localhost bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=RustyRoot
+WorkingDirectory=/home/RustyRoot/Kerja-Bot
+Environment=HOME=/home/RustyRoot
+Environment=HERMES_BIN=/home/RustyRoot/.local/bin/hermes
+Environment=HERMES_BRIDGE_HOST=127.0.0.1
+Environment=HERMES_BRIDGE_PORT=8765
+ExecStart=/usr/bin/python3 /home/RustyRoot/Kerja-Bot/services/hermes_bridge_server.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
