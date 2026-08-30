@@ -1,12 +1,15 @@
-FROM php:8.3-cli
+FROM php:8.3-apache
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libsqlite3-dev ca-certificates \
     && docker-php-ext-install pdo_sqlite \
+    && a2enmod rewrite headers \
+    && sed -ri 's/AllowOverride None/AllowOverride All/g' /etc/apache2/apache2.conf \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
-COPY webapp /app/webapp
+WORKDIR /var/www/html
+COPY webapp/ /var/www/html/
 
-EXPOSE 8080
-CMD ["php", "-S", "0.0.0.0:8080", "-t", "/app/webapp", "/app/webapp/php_router.php"]
+RUN chown -R www-data:www-data /var/www/html
+
+EXPOSE 80
