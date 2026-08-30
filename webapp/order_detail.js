@@ -151,9 +151,11 @@ renderMyOrderAreas = function renderFilteredMyOrderAreas(d) {
     return;
   }
 
-  sourceAreas.forEach(a => {
+  sourceAreas.forEach((a, areaIndex) => {
     const b = document.createElement('button');
-    b.className = 'tool-action';
+    b.type = 'button';
+    b.className = 'tool-action order-area-button';
+    b.dataset.areaIndex = String(allAreas.indexOf(a));
     b.innerHTML = `<div><b>📍 ${esc(a.area)}</b><small style="display:block;margin-top:4px;color:#758ba2">🟢 Open: ${fmt(a.open)} | 🔴 Close: ${fmt(a.close)}${a.update ? ` | 🟡 Update: ${fmt(a.update)}` : ''}</small></div><span>${fmt(a.open)} ›</span>`;
     b.addEventListener('click', () => renderMyOpenArea(a));
     list.appendChild(b);
@@ -163,11 +165,12 @@ renderMyOrderAreas = function renderFilteredMyOrderAreas(d) {
 renderMyOpenArea = function renderClickableMyOpenArea(area) {
   const list = document.querySelector('#myOrdersList');
   const count = document.querySelector('#myOrderCount');
-  if (!list || !count) return;
+  if (!list || !count || !area) return;
   list.replaceChildren();
   count.textContent = `${area.orders?.length || 0} OPEN`;
 
   const back = document.createElement('button');
+  back.type = 'button';
   back.className = 'tool-action';
   back.innerHTML = '<b>‹ Kembali ke daftar area</b><span>📍</span>';
   back.addEventListener('click', () => renderMyOrderAreas(state.myOpenOrders));
@@ -188,3 +191,19 @@ renderMyOpenArea = function renderClickableMyOpenArea(area) {
 
   orders.forEach((order, index) => list.appendChild(orderCard(area, order, index)));
 };
+
+// Fallback delegation: keeps area navigation working even if another enhancement
+// re-renders/replaces Orderanku buttons after this script has bound listeners.
+if (!window.__orderAreaDelegationInstalled) {
+  window.__orderAreaDelegationInstalled = true;
+  document.addEventListener('click', event => {
+    const button = event.target.closest?.('#myOrdersList .order-area-button[data-area-index]');
+    if (!button) return;
+    const index = Number(button.dataset.areaIndex);
+    const area = state.myOpenOrders?.areas?.[index];
+    if (!area) return;
+    event.preventDefault();
+    event.stopPropagation();
+    renderMyOpenArea(area);
+  }, true);
+}
