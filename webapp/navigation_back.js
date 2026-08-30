@@ -97,7 +97,7 @@ function loadMiniAppScript(src, marker) {
       return;
     }
     const script = document.createElement('script');
-    script.src = `${src}?v=20260829-2`;
+    script.src = `${src}?v=20260830-php1`;
     script.dataset[marker.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = '1';
     script.onload = () => {
       script.dataset.loaded = '1';
@@ -126,3 +126,7 @@ loadMiniAppScript('/draft_history.js', 'draft-history')
 // Interactive Orderanku detail.
 loadMiniAppScript('/order_detail.js', 'order-detail')
   .catch(error => console.error('Gagal memuat detail order', error));
+
+// Native-feeling interactions: haptic press, online/offline badge, pull-to-refresh.
+loadMiniAppScript('/interactive_ui.js', 'interactive-ui')
+  .catch(error => console.error('Gagal memuat interaction enhancement', error));
