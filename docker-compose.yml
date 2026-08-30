@@ -13,12 +13,16 @@ services:
       - ./secrets:/app/secrets:ro
 
   kerja-bot-miniapp:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.miniapp-php
     container_name: kerja-bot-miniapp
     restart: unless-stopped
     env_file:
       - .env
-    command: ["python", "webapp/server_full.py"]
+    environment:
+      DATABASE_PATH: /app/database/bot.sqlite3
+      MINIAPP_BACKEND: php
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
