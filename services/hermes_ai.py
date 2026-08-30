@@ -21,6 +21,7 @@ from handlers.my_orders import (
     technician_sheet_orders,
 )
 from services.google_sheet_reference import get_reference_statuses
+from services.manja_reminder import _latest_manja
 
 BRIDGE_URL = "http://127.0.0.1:8765/ask"
 MAX_ORDERS_IN_CONTEXT = 60
@@ -190,6 +191,27 @@ async def _build_context(update: Update, context: ContextTypes.DEFAULT_TYPE, que
             "odp": str(row.get("odp_name") or "-"),
         })
 
+    manja_raw = await asyncio.to_thread(_latest_manja, db.db_path)
+    manja_rows = []
+    for row in manja_raw:
+        if int(row.get("telegram_id") or 0) != user.id:
+            continue
+        manja_rows.append({
+            "source": str(row.get("source") or "MANJA"),
+            "service_number": str(row.get("service_number") or ""),
+            "appointment_date": str(row.get("appointment_date") or ""),
+            "appointment_time": str(row.get("appointment_time") or ""),
+            "note": str(row.get("note") or "-") or "-",
+            "updated_at": str(row.get("updated_at") or ""),
+        })
+    manja_rows.sort(
+        key=lambda row: (
+            row["appointment_date"] or "9999-12-31",
+            row["appointment_time"] or "23:59",
+            row["service_number"],
+        )
+    )
+
     reports = await asyncio.to_thread(
         _query_report_rows,
         db.db_path,
@@ -205,6 +227,7 @@ async def _build_context(update: Update, context: ContextTypes.DEFAULT_TYPE, que
         relevant = [row for row in all_open if row["service_number"] in wanted]
         others = [row for row in all_open if row["service_number"] not in wanted]
         all_open = relevant + others
+        manja_rows.sort(key=lambda row: (row["service_number"] not in wanted, row["appointment_date"] or "9999-12-31"))
     worst = sorted(
         [row for row in all_open if _rx_number(row.get("onu_rx")) is not None],
         key=lambda row: _rx_number(row.get("onu_rx")) or 0,
@@ -220,6 +243,7 @@ async def _build_context(update: Update, context: ContextTypes.DEFAULT_TYPE, que
         "rules": {
             "ORDER SHEET": "MANYAR / MYR only",
             "WORK ORDER JAGIR": "JAGIR / JGR only",
+            "MANJA": "active appointment/follow-up state for this technician",
             "mode": "READ ONLY",
         },
         "open_summary": {
@@ -227,6 +251,12 @@ async def _build_context(update: Update, context: ContextTypes.DEFAULT_TYPE, que
             "myr": len(sheet_rows),
             "jgr": len(jagir_rows),
         },
+        "manja_summary": {
+            "active": len(manja_rows),
+            "with_appointment": sum(1 for row in manja_rows if row["appointment_date"]),
+            "without_appointment": sum(1 for row in manja_rows if not row["appointment_date"]),
+        },
+        "active_manja": manja_rows[:30],
         "open_orders": all_open[:MAX_ORDERS_IN_CONTEXT],
         "worst_rx_preview": worst,
         "report_summary": reports,
@@ -249,6 +279,8 @@ async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "/ai cari inet 152310205282\n"
             "/ai mana WO JAGIR saya yang RX paling jelek?\n"
             "/ai berapa order saya yang masih OPEN?\n"
+            "/ai MANJA saya apa saja?\n"
+            "/ai kapan janji MANJA saya berikutnya?\n"
             "/ai ringkas pekerjaan saya hari ini\n\n"
             "Boleh juga bertanya bebas tentang data pekerjaanmu yang tersedia di Kerja BOT."
         )
@@ -268,12 +300,14 @@ Nama teknisi: {technician_name}
 
 ATURAN KERAS:
 - Jawab pertanyaan user di atas, jangan hanya memperkenalkan diri atau bertanya balik.
-- Gunakan hanya DATA KERJA di bawah untuk fakta pekerjaan, INET, tiket, alamat, RX, status, jumlah, teknisi, dan STO.
+- Gunakan hanya DATA KERJA di bawah untuk fakta pekerjaan, INET, tiket, alamat, RX, status, jumlah, teknisi, STO, MANJA, dan jadwal janji.
 - Jangan mengarang data yang tidak ada.
 - ORDER SHEET = MANYAR/MYR. WORK ORDER JAGIR = JAGIR/JGR.
-- Mode READ-ONLY: jangan mengaku mengubah database, menutup WO, membuat tiket, mengirim pesan, atau menjalankan aksi.
-- Jika user meminta daftar WO/order, tampilkan data yang relevan langsung. Jika terlalu banyak, ringkas total lalu tampilkan yang paling relevan.
-- Jika user meminta jumlah, hitung dari open_summary/data yang tersedia.
+- active_manja berisi status MANJA aktif milik teknisi, termasuk jadwal janji jika tersedia.
+- Mode READ-ONLY: jangan mengaku mengubah database, menutup WO, membuat tiket, membuat reminder, mengirim pesan, atau menjalankan aksi.
+- Jika user meminta daftar WO/order/MANJA, tampilkan data yang relevan langsung. Jika terlalu banyak, ringkas total lalu tampilkan yang paling relevan.
+- Jika user meminta jumlah, hitung dari summary/data yang tersedia.
+- Jika user meminta janji berikutnya, utamakan MANJA dengan appointment_date/time terdekat yang masih tersedia.
 - Jika user meminta RX terburuk, angka lebih negatif berarti lebih buruk (-24 lebih buruk daripada -17).
 - Jika data tidak tersedia, katakan data tidak tersedia. Jangan menanyakan kembali apa yang mau dicek jika pertanyaan sudah jelas.
 
