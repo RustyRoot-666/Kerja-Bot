@@ -38,4 +38,6 @@ jobs:
           node --check webapp/order_detail.js
           node --check webapp/orderanku_android_fix.js
       - name: Compose config
-        run: docker compose config >/dev/null
+        run: |
+          touch .env
+          docker compose config >/dev/null
