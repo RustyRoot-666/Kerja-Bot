@@ -37,6 +37,7 @@ jobs:
           node --check webapp/navigation_back.js
           node --check webapp/order_detail.js
           node --check webapp/orderanku_android_fix.js
+          node --check webapp/manja_ui_v2.js
       - name: Compose config
         run: |
           touch .env
