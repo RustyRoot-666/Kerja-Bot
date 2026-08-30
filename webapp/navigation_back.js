@@ -97,7 +97,7 @@ function loadMiniAppScript(src, marker) {
       return;
     }
     const script = document.createElement('script');
-    script.src = `${src}?v=20260830-areaclick1`;
+    script.src = `${src}?v=20260830-scrollguard1`;
     script.dataset[marker.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = '1';
     script.onload = () => {
       script.dataset.loaded = '1';
