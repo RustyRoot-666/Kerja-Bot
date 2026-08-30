@@ -48,6 +48,7 @@ from services.google_sheet_reference import (
     initialize_sheet_config,
     sync_missing_orders_from_sheet,
 )
+from services.jagir_work_orders import capture_jagir_work_order, remember_technician_username
 from services.logic_dispatch import detect_logic_group, ignore_group_message
 from services.order_repository import OrderRepository
 from services.report_area_leaderboard import (
@@ -232,7 +233,7 @@ async def post_init(application: Application) -> None:
         )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, universal /leaderboard, area daily close, hourly REPORT progress, universal /sto parser, JAGIR internal report tracking, Telegram history import/export, private technician /laporan, group REPORT /laporan monitoring, /perintah technician guide, multi-topic /sto report, name-only /sto compatibility, /update kendala, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, and previous-week catch-up initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, universal /leaderboard, area daily close, hourly REPORT progress, universal /sto parser, JAGIR work-order parser, JAGIR internal report tracking, Telegram history import/export, private technician /laporan, group REPORT /laporan monitoring, /perintah technician guide, multi-topic /sto report, name-only /sto compatibility, /update kendala, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, and previous-week catch-up initialized"
     )
 
 
@@ -266,6 +267,10 @@ def build_application() -> Application:
 
     install_auto_close(order_flow_module)
 
+    # Catat username teknisi dari setiap update agar @tag WO dapat dipetakan ke NIK.
+    app.add_handler(MessageHandler(filters.ALL, remember_technician_username), group=-20)
+    # WORK ORDER JAGIR diproses sebelum handler grup lain dan selalu dikunci ke STO JGR.
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS, capture_jagir_work_order), group=-12)
     app.add_handler(
         MessageHandler(filters.ChatType.GROUPS, laporan_group_command),
         group=-11,
