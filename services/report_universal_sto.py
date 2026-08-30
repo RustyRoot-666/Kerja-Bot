@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import sqlite3
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 
@@ -59,6 +60,45 @@ def _norm_key(value: str) -> str:
 
 def _clean_value(value: str) -> str:
     return re.sub(r"\s+", " ", value.strip())
+
+
+def _norm_name(value: str) -> str:
+    return " ".join(str(value or "").strip().upper().split())
+
+
+def _registered_identity_by_name(database_path, technician_name: str) -> tuple[str, str] | None:
+    """Resolve a name-only /sto to a registered technician when the name is unique."""
+    wanted = _norm_name(technician_name)
+    if not wanted:
+        return None
+
+    with sqlite3.connect(database_path) as conn:
+        rows = conn.execute(
+            "SELECT nik, name FROM technicians WHERE TRIM(name) != ''"
+        ).fetchall()
+
+    matches: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for nik, name in rows:
+        clean_name = _clean_value(str(name or ""))
+        clean_nik = str(nik or "").strip()
+        if _norm_name(clean_name) != wanted or not clean_nik:
+            continue
+        key = (clean_nik, _norm_name(clean_name))
+        if key in seen:
+            continue
+        seen.add(key)
+        matches.append((clean_nik, clean_name))
+
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def _name_identity_key(technician_name: str) -> str:
+    """Stable fallback identity for explicit names that are not registered yet."""
+    normalized = _norm_name(technician_name)
+    return f"NAME-{normalized}" if normalized else "NAME-UNKNOWN"
 
 
 def _command_sto_value(text: str) -> str:
@@ -208,13 +248,25 @@ async def handle_universal_sto(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         raise ApplicationHandlerStop
 
+    # NAMA TEKNISI di isi /sto adalah sumber identitas utama. Jangan otomatis
+    # memakai NIK akun Telegram pengirim bila nama pada isi /sto berbeda, karena
+    # satu akun Telegram bisa dipakai untuk mengirim pekerjaan teknisi lain.
     if not technician_nik:
-        user = update.effective_user
-        if user is not None:
-            registered = await db.get_technician(user.id)
-            technician_nik = registered.nik.strip() if registered else f"TG-{user.id}"
+        resolved = await asyncio.to_thread(
+            _registered_identity_by_name,
+            db.db_path,
+            technician_name,
+        )
+        if resolved is not None:
+            technician_nik, canonical_name = resolved
+            technician_name = canonical_name
         else:
-            technician_nik = f"NAME-{technician_name.upper()}"
+            user = update.effective_user
+            registered = await db.get_technician(user.id) if user is not None else None
+            if registered and _norm_name(registered.name) == _norm_name(technician_name):
+                technician_nik = registered.nik.strip() or _name_identity_key(technician_name)
+            else:
+                technician_nik = _name_identity_key(technician_name)
 
     settings = context.application.bot_data["settings"]
     message_dt = message.date.astimezone(ZoneInfo(settings.timezone))
