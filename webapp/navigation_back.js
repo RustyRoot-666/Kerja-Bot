@@ -97,7 +97,7 @@ function loadMiniAppScript(src, marker) {
       return;
     }
     const script = document.createElement('script');
-    script.src = `${src}?v=20260830-fluid2`;
+    script.src = `${src}?v=20260830-ajax3`;
     script.dataset[marker.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = '1';
     script.onload = () => {
       script.dataset.loaded = '1';
@@ -127,6 +127,6 @@ loadMiniAppScript('/draft_history.js', 'draft-history')
 loadMiniAppScript('/order_detail.js', 'order-detail')
   .catch(error => console.error('Gagal memuat detail order', error));
 
-// Native-feeling interactions: fluid chart, haptic press, inline online badge, pull-to-refresh and transitions.
+// Native-feeling interactions + AJAX pipeline.
 loadMiniAppScript('/interactive_ui.js', 'interactive-ui')
   .catch(error => console.error('Gagal memuat interaction enhancement', error));
