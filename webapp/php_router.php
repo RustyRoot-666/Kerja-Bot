@@ -4,6 +4,7 @@ declare(strict_types=1);
 require __DIR__ . '/php_backend.php';
 require __DIR__ . '/php_compat.php';
 require __DIR__ . '/php_manja.php';
+require __DIR__ . '/php_orderanku_fix.php';
 
 function respond(mixed $payload, int $status=200): never {
     http_response_code($status);
@@ -58,7 +59,7 @@ try {
     if ($method === 'GET' && $path === '/api/my-open-orders') {
         $raw=trim((string)($_GET['telegram_id'] ?? ''));
         if (!ctype_digit($raw)) respond(['ok'=>false,'error'=>'telegram_id_required'],400);
-        $result=load_my_open_orders((int)$raw, ((string)($_GET['force'] ?? '0')) === '1');
+        $result=load_my_open_orders_fixed((int)$raw, ((string)($_GET['force'] ?? '0')) === '1');
         respond($result, $result['ok'] ? 200 : 404);
     }
     if ($method === 'GET' && $path === '/api/open-order-search') {
