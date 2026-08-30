@@ -23,7 +23,7 @@ from handlers.my_orders import (
 from services.google_sheet_reference import get_reference_statuses
 
 BRIDGE_URL = "http://127.0.0.1:8765/ask"
-MAX_ORDERS_IN_CONTEXT = 120
+MAX_ORDERS_IN_CONTEXT = 60
 
 
 def _norm(value: object) -> str:
@@ -220,7 +220,7 @@ async def _build_context(update: Update, context: ContextTypes.DEFAULT_TYPE, que
         "rules": {
             "ORDER SHEET": "MANYAR / MYR only",
             "WORK ORDER JAGIR": "JAGIR / JGR only",
-            "mode": "READ ONLY. Do not claim to change data or execute operational actions.",
+            "mode": "READ ONLY",
         },
         "open_summary": {
             "total": len(all_open),
@@ -231,7 +231,8 @@ async def _build_context(update: Update, context: ContextTypes.DEFAULT_TYPE, que
         "worst_rx_preview": worst,
         "report_summary": reports,
     }
-    return technician.name, json.dumps(snapshot, ensure_ascii=False, indent=2)
+    # Compact JSON keeps the user question safely inside the bridge prompt limit.
+    return technician.name, json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
 
 
 async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -256,25 +257,28 @@ async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     status = await message.reply_text("🤖 Hermes sedang membaca data pekerjaanmu...")
     try:
         technician_name, context_text = await _build_context(update, context, question)
+        # Put the actual user request before the potentially long dataset. The bridge
+        # has a prompt-size guard, so the request must never be the part that gets cut.
         prompt = f"""Kamu adalah Hermes, AI internal Kerja BOT untuk teknisi lapangan.
 
-Jawab dalam Bahasa Indonesia, ringkas, jelas, dan operasional.
-Nama teknisi: {technician_name}.
+PERTANYAAN USER YANG WAJIB KAMU JAWAB LANGSUNG:
+{question}
+
+Nama teknisi: {technician_name}
 
 ATURAN KERAS:
-1. Gunakan hanya DATA KERJA di bawah untuk fakta pekerjaan, INET, tiket, alamat, RX, status, jumlah, teknisi, dan STO.
-2. Jangan mengarang data yang tidak ada.
-3. ORDER SHEET selalu MANYAR/MYR. WORK ORDER JAGIR selalu JAGIR/JGR.
-4. Mode saat ini READ-ONLY. Jangan mengaku sudah mengubah database, menutup WO, membuat tiket, mengirim pesan, atau menjalankan aksi.
-5. Jika user meminta aksi tulis, jelaskan bahwa mode AI saat ini read-only dan berikan apa yang bisa dicek/diringkas.
-6. Kamu boleh menjawab pertanyaan bebas SELAMA dapat dijawab dari data pekerjaan ini. Jika pertanyaan di luar data kerja, katakan bahwa /ai saat ini difokuskan pada data Kerja BOT.
-7. Saat membandingkan RX, angka yang lebih negatif berarti redaman lebih buruk. Contoh -24 dBm lebih buruk daripada -17 dBm.
+- Jawab pertanyaan user di atas, jangan hanya memperkenalkan diri atau bertanya balik.
+- Gunakan hanya DATA KERJA di bawah untuk fakta pekerjaan, INET, tiket, alamat, RX, status, jumlah, teknisi, dan STO.
+- Jangan mengarang data yang tidak ada.
+- ORDER SHEET = MANYAR/MYR. WORK ORDER JAGIR = JAGIR/JGR.
+- Mode READ-ONLY: jangan mengaku mengubah database, menutup WO, membuat tiket, mengirim pesan, atau menjalankan aksi.
+- Jika user meminta daftar WO/order, tampilkan data yang relevan langsung. Jika terlalu banyak, ringkas total lalu tampilkan yang paling relevan.
+- Jika user meminta jumlah, hitung dari open_summary/data yang tersedia.
+- Jika user meminta RX terburuk, angka lebih negatif berarti lebih buruk (-24 lebih buruk daripada -17).
+- Jika data tidak tersedia, katakan data tidak tersedia. Jangan menanyakan kembali apa yang mau dicek jika pertanyaan sudah jelas.
 
 DATA KERJA:
 {context_text}
-
-PERTANYAAN:
-{question}
 """
         answer = await asyncio.to_thread(_bridge_call_sync, prompt)
         if not answer:
