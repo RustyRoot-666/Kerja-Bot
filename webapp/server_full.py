@@ -13,6 +13,8 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from webapp import server_ext as ext
+# Side-effect extension: merges WORK ORDER JAGIR into Orderanku and global INET search.
+from webapp import jagir_ext  # noqa: F401
 
 base = ext.base
 _original_get = base.Handler.do_GET
@@ -97,6 +99,16 @@ def _save_completed_workflow(payload: dict) -> dict:
         if not technician:
             return {"ok": False, "error": "technician_not_registered", "message": "Akun Telegram belum terdaftar sebagai teknisi."}
 
+        # Sumber order menentukan STO secara tegas: WO JAGIR selalu JGR.
+        try:
+            jagir_order = conn.execute(
+                "SELECT service_number FROM jagir_work_orders WHERE service_number=? LIMIT 1",
+                (service,),
+            ).fetchone()
+        except Exception:
+            jagir_order = None
+        effective_sto = "JGR" if jagir_order else str(data.get("sto") or technician["sto"] or "MYR").strip().upper()
+
         _ensure_completed_workflows(conn)
         history_ids: list[int] = []
         for kind, content in clean_outputs:
@@ -114,7 +126,7 @@ def _save_completed_workflow(payload: dict) -> dict:
                 str(data.get("old_sn") or "").strip(),
                 str(data.get("new_sn") or "").strip(),
                 str(data.get("ont_type") or "").strip(),
-                str(data.get("sto") or technician["sto"] or "").strip().upper(),
+                effective_sto,
                 str(data.get("valins_id") or "").strip(),
                 content,
             )
@@ -156,6 +168,18 @@ def _save_completed_workflow(payload: dict) -> dict:
             (int(technician["id"]), telegram_id, action, service, now),
         )
 
+        if jagir_order:
+            # Setelah tombol SUDAH DIKERJAKAN, WO keluar dari daftar OPEN Orderanku.
+            conn.execute(
+                """
+                UPDATE jagir_work_orders
+                SET status='DONE', assigned_telegram_id=?, assigned_nik=?, assigned_name=?,
+                    sto='JGR', area='JAGIR', updated_at=?
+                WHERE service_number=?
+                """,
+                (telegram_id, str(technician["nik"] or ""), str(technician["name"] or ""), now, service),
+            )
+
         try:
             conn.execute(
                 "DELETE FROM miniapp_workflow_drafts WHERE telegram_id=? AND action=? AND service_number=?",
@@ -171,6 +195,8 @@ def _save_completed_workflow(payload: dict) -> dict:
         "service_number": service,
         "history_ids": history_ids,
         "completed_at": now,
+        "sto": effective_sto,
+        "source": "WORK ORDER JAGIR" if jagir_order else "ORDER SHEET",
     }
 
 
@@ -233,7 +259,6 @@ def _load_my_report_with_completed(telegram_id: int) -> dict:
 
                 current = by_service.get(service, {})
                 current_day = str(current.get("raw_day") or current.get("message_day") or "")[:10]
-                # If Mini App completion is newer, use it as the visible completion date.
                 if not current_day or raw_day >= current_day:
                     current["raw_day"] = raw_day
                     current["message_day"] = raw_day
