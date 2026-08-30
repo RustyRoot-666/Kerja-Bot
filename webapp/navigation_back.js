@@ -97,7 +97,7 @@ function loadMiniAppScript(src, marker) {
       return;
     }
     const script = document.createElement('script');
-    script.src = `${src}?v=20260830-ajax3`;
+    script.src = `${src}?v=20260830-reportline4`;
     script.dataset[marker.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = '1';
     script.onload = () => {
       script.dataset.loaded = '1';
@@ -108,25 +108,19 @@ function loadMiniAppScript(src, marker) {
   });
 }
 
-// Rich report + editable history.
 loadMiniAppScript('/report_dashboard.js', 'report-dashboard')
   .then(() => loadMiniAppScript('/report_history_editor.js', 'report-history-editor'))
   .catch(error => console.error('Gagal memuat report enhancement', error));
 
-// Normalize technician identities.
 loadMiniAppScript('/leaderboard_identity_fix.js', 'leaderboard-identity-fix')
   .catch(error => console.error('Gagal memuat identity fix', error));
 
-// IMPORTANT: load draft persistence FIRST and code-result renderer SECOND.
-// This makes the renderer with the SUDAH DIKERJAKAN button the final workflow renderer.
 loadMiniAppScript('/draft_history.js', 'draft-history')
   .then(() => loadMiniAppScript('/input_code_editor.js', 'input-code-editor'))
   .catch(error => console.error('Gagal memuat workflow enhancement', error));
 
-// Interactive Orderanku detail.
 loadMiniAppScript('/order_detail.js', 'order-detail')
   .catch(error => console.error('Gagal memuat detail order', error));
 
-// Native-feeling interactions + AJAX pipeline.
 loadMiniAppScript('/interactive_ui.js', 'interactive-ui')
   .catch(error => console.error('Gagal memuat interaction enhancement', error));
