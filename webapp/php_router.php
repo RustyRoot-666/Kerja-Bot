@@ -3,6 +3,7 @@
 declare(strict_types=1);
 require __DIR__ . '/php_backend.php';
 require __DIR__ . '/php_compat.php';
+require __DIR__ . '/php_manja.php';
 
 function respond(mixed $payload, int $status=200): never {
     http_response_code($status);
@@ -66,6 +67,16 @@ try {
         $result=search_open_orders((int)$raw,(string)($_GET['q'] ?? ''),((string)($_GET['force'] ?? '0'))==='1');
         $status=$result['ok']?200:(($result['error']??'')==='query_too_short'?400:404);
         respond($result,$status);
+    }
+    if ($method === 'GET' && $path === '/api/manja') {
+        $raw=trim((string)($_GET['telegram_id'] ?? ''));
+        if (!ctype_digit($raw)) respond(['ok'=>false,'error'=>'telegram_id_required'],400);
+        $result=load_manja_for_technician((int)$raw);
+        respond($result,$result['ok']?200:404);
+    }
+    if ($method === 'POST' && $path === '/api/manja') {
+        $result=save_manja_from_miniapp(input_json());
+        respond($result,$result['ok']?200:400);
     }
     if ($method === 'GET' && $path === '/api/my-report') {
         $raw=trim((string)($_GET['telegram_id'] ?? ''));
