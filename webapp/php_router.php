@@ -77,12 +77,12 @@ try {
         $result=load_workflow_drafts((int)$raw); respond($result,$result['ok']?200:404);
     }
     if ($method === 'POST' && $path === '/api/workflow-drafts') {
-        $p=input_json();
-        if (($p['delete'] ?? false) === true) {
-            $raw=(string)($p['telegram_id']??''); if(!ctype_digit($raw))respond(['ok'=>false,'error'=>'telegram_id_required'],400);
-            respond(delete_workflow_draft((int)$raw,(string)($p['action']??''),(string)($p['service_number']??'')));
-        }
-        $result=save_workflow_draft($p); respond($result,$result['ok']?200:400);
+        $result=save_workflow_draft(input_json()); respond($result,$result['ok']?200:400);
+    }
+    if ($method === 'DELETE' && $path === '/api/workflow-drafts') {
+        $raw=trim((string)($_GET['telegram_id']??''));
+        if(!ctype_digit($raw))respond(['ok'=>false,'error'=>'telegram_id_required'],400);
+        respond(delete_workflow_draft((int)$raw,(string)($_GET['action']??''),(string)($_GET['service_number']??'')));
     }
     if ($method === 'GET' && $path === '/api/workflow-history') {
         $raw=trim((string)($_GET['telegram_id']??''));$service=trim((string)($_GET['service_number']??''));
