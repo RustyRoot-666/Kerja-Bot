@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from http import HTTPStatus
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -174,6 +174,111 @@ def _save_completed_workflow(payload: dict) -> dict:
     }
 
 
+def _date_label(raw_day: str) -> str:
+    try:
+        return datetime.fromisoformat(raw_day).strftime("%d %b %Y")
+    except Exception:
+        return raw_day or "-"
+
+
+def _load_my_report_with_completed(telegram_id: int) -> dict:
+    """Merge REPORT records with Mini App jobs marked SUDAH DIKERJAKAN.
+
+    This keeps a job visible in Laporan even when the technician has not yet sent
+    the generated REPORT message to the Telegram report group.
+    """
+    payload = ext.load_my_report(telegram_id)
+    if not payload.get("ok"):
+        return payload
+
+    by_service: dict[str, dict] = {}
+    for item in payload.get("orders", []):
+        service = base.sheet_ref.normalize_key(item.get("service_number"))
+        if not service:
+            continue
+        row = dict(item)
+        row["service_number"] = service
+        by_service[service] = row
+
+    try:
+        with base.connect() as conn:
+            _ensure_completed_workflows(conn)
+            completed = conn.execute(
+                """
+                SELECT service_number, MAX(completed_at) AS completed_at
+                FROM miniapp_completed_workflows
+                WHERE telegram_id=?
+                GROUP BY service_number
+                ORDER BY completed_at DESC
+                """,
+                (telegram_id,),
+            ).fetchall()
+
+            for done in completed:
+                service = base.sheet_ref.normalize_key(done["service_number"])
+                if not service:
+                    continue
+                completed_at = str(done["completed_at"] or "")
+                raw_day = completed_at[:10]
+
+                history = conn.execute(
+                    """
+                    SELECT ticket_id, sto, created_at
+                    FROM histories
+                    WHERE telegram_id=? AND service_number=?
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    (telegram_id, service),
+                ).fetchone()
+
+                current = by_service.get(service, {})
+                current_day = str(current.get("raw_day") or current.get("message_day") or "")[:10]
+                # If Mini App completion is newer, use it as the visible completion date.
+                if not current_day or raw_day >= current_day:
+                    current["raw_day"] = raw_day
+                    current["message_day"] = raw_day
+                    current["date_label"] = _date_label(completed_at)
+                current["service_number"] = service
+                current["ticket_id"] = str(current.get("ticket_id") or (history["ticket_id"] if history else "") or "MANUAL")
+                current["sto"] = str(current.get("sto") or (history["sto"] if history else "") or payload.get("technician", {}).get("sto") or "")
+                current["area_label"] = str(current.get("area_label") or current.get("sto") or "-")
+                current["source"] = "miniapp+report" if service in by_service else "miniapp"
+                by_service[service] = current
+    except Exception as exc:
+        print(f"[miniapp] gagal menggabungkan pekerjaan selesai ke laporan: {exc}")
+
+    orders = sorted(
+        by_service.values(),
+        key=lambda item: (str(item.get("raw_day") or ""), str(item.get("service_number") or "")),
+        reverse=True,
+    )
+
+    today = datetime.now().date()
+    days_since_friday = (today.weekday() - 4) % 7
+    week_start = today - timedelta(days=days_since_friday)
+    week_end = week_start + timedelta(days=6)
+
+    def order_day(item: dict):
+        raw = str(item.get("raw_day") or item.get("message_day") or "")[:10]
+        try:
+            return datetime.strptime(raw, "%Y-%m-%d").date()
+        except Exception:
+            return None
+
+    payload["orders"] = orders
+    payload["daily"] = sum(1 for item in orders if order_day(item) == today)
+    payload["weekly"] = sum(1 for item in orders if (d := order_day(item)) is not None and week_start <= d <= week_end)
+    payload["all"] = len(orders)
+
+    trend = []
+    for offset in range(6, -1, -1):
+        day = today - timedelta(days=offset)
+        total = sum(1 for item in orders if order_day(item) == day)
+        trend.append({"date": day.isoformat(), "label": base.DAYS[day.weekday()], "total": total})
+    payload["trend"] = trend
+    return payload
+
+
 def do_get(self) -> None:
     parsed = urlparse(self.path)
     if parsed.path == "/api/workflow-history":
@@ -186,6 +291,21 @@ def do_get(self) -> None:
         rows = _history_rows(int(raw_id), service)
         self._send_json({"ok": True, "service_number": service, "items": rows})
         return
+
+    if parsed.path == "/api/my-report":
+        query = parse_qs(parsed.query)
+        raw_id = (query.get("telegram_id") or [""])[0].strip()
+        if not raw_id.isdigit():
+            self._send_json({"ok": False, "error": "telegram_id_required"}, HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            payload = _load_my_report_with_completed(int(raw_id))
+            self._send_json(payload, HTTPStatus.OK if payload.get("ok") else HTTPStatus.NOT_FOUND)
+        except Exception as exc:
+            print(f"[miniapp] gagal membaca laporan gabungan: {exc}")
+            self._send_json({"ok": False, "error": "report_error", "message": "Gagal membaca laporan pribadi."}, HTTPStatus.INTERNAL_SERVER_ERROR)
+        return
+
     _original_get(self)
 
 
