@@ -51,6 +51,7 @@ from services.google_sheet_reference import (
 from services.hermes_ai import ai_command
 from services.jagir_work_orders import capture_jagir_work_order, remember_technician_username
 from services.logic_dispatch import detect_logic_group, ignore_group_message
+from services.manja_reminder import send_manja_reminders
 from services.order_repository import OrderRepository
 from services.report_area_leaderboard import (
     _leaderboard_rows,
@@ -89,6 +90,7 @@ from utils.logging import setup_logging
 
 AUTO_SHEET_SYNC_SECONDS = 180
 REPORT_PROGRESS_SECONDS = 3600
+MANJA_REMINDER_SECONDS = 900
 
 
 async def auto_sync_google_sheet(context) -> None:
@@ -191,7 +193,7 @@ async def post_init(application: Application) -> None:
 
     if application.job_queue is None:
         logging.warning(
-            "JobQueue unavailable; Google Sheet auto-sync, technician recaps, leaderboard, daily close, and hourly REPORT MANYAR progress are disabled. "
+            "JobQueue unavailable; Google Sheet auto-sync, technician recaps, leaderboard, daily close, hourly REPORT MANYAR progress, and MANJA reminders are disabled. "
             "Install python-telegram-bot[job-queue]."
         )
     else:
@@ -200,6 +202,12 @@ async def post_init(application: Application) -> None:
             interval=AUTO_SHEET_SYNC_SECONDS,
             first=5,
             name="google-sheet-auto-sync",
+        )
+        application.job_queue.run_repeating(
+            send_manja_reminders,
+            interval=MANJA_REMINDER_SECONDS,
+            first=60,
+            name="manja-reminders",
         )
         recap_tz = ZoneInfo(application.bot_data["settings"].timezone)
         now = datetime.now(recap_tz)
@@ -234,7 +242,7 @@ async def post_init(application: Application) -> None:
         )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, universal /leaderboard, area daily close, hourly REPORT progress, universal /sto parser, JAGIR work-order parser, JAGIR internal report tracking, Hermes /ai read-only assistant, Telegram history import/export, private technician /laporan, group REPORT /laporan monitoring, /perintah technician guide, multi-topic /sto report, name-only /sto compatibility, /update kendala, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, and previous-week catch-up initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, universal /leaderboard, area daily close, hourly REPORT progress, universal /sto parser, JAGIR work-order parser, JAGIR internal report tracking, Hermes /ai read-only assistant, Telegram history import/export, private technician /laporan, group REPORT /laporan monitoring, /perintah technician guide, multi-topic /sto report, name-only /sto compatibility, /update kendala, dual-source MANJA + reminders, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, and previous-week catch-up initialized"
     )
 
 
