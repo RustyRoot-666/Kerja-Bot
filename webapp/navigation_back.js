@@ -97,7 +97,7 @@ function loadMiniAppScript(src, marker) {
       return;
     }
     const script = document.createElement('script');
-    script.src = `${src}?v=20260830-orderfix1`;
+    script.src = `${src}?v=20260830-orderfix2`;
     script.dataset[marker.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = '1';
     script.onload = () => {
       script.dataset.loaded = '1';
@@ -120,6 +120,7 @@ loadMiniAppScript('/draft_history.js', 'draft-history')
   .catch(error => console.error('Gagal memuat workflow enhancement', error));
 
 loadMiniAppScript('/order_detail.js', 'order-detail')
+  .then(() => loadMiniAppScript('/orderanku_android_fix.js', 'orderanku-android-fix'))
   .then(() => loadMiniAppScript('/manja_ui.js', 'manja-ui'))
   .catch(error => console.error('Gagal memuat detail order/MANJA', error));
 
