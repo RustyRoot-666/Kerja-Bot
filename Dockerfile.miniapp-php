@@ -13,6 +13,7 @@ COPY webapp/ /app/webapp/
 RUN sed -i "s#\\\$rawNik=trim((string)\\\$r\\['nik'\\];#\\\$rawNik=trim((string)\\\$r['nik']);#" /app/webapp/php_backend.php \
     && php -l /app/webapp/php_backend.php \
     && php -l /app/webapp/php_compat.php \
+    && php -l /app/webapp/php_manja.php \
     && php -l /app/webapp/php_router.php
 
 ENV PHP_CLI_SERVER_WORKERS=4
