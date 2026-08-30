@@ -1,0 +1,33 @@
+name: Mini App PHP checks
+
+on:
+  push:
+    paths:
+      - 'webapp/*.php'
+      - 'webapp/*.js'
+      - 'Dockerfile.miniapp-php'
+      - 'docker-compose.yml'
+      - '.github/workflows/miniapp-php-check.yml'
+  pull_request:
+    paths:
+      - 'webapp/*.php'
+      - 'webapp/*.js'
+      - 'Dockerfile.miniapp-php'
+      - 'docker-compose.yml'
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: PHP syntax
+        run: |
+          php -l webapp/php_backend.php
+          php -l webapp/php_compat.php
+          php -l webapp/php_router.php
+      - name: JavaScript syntax
+        run: |
+          node --check webapp/interactive_ui.js
+          node --check webapp/navigation_back.js
+      - name: Compose config
+        run: docker compose config >/dev/null
