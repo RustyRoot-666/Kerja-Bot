@@ -30,23 +30,39 @@
   }
 
   function bindButtons() {
-    document.querySelectorAll('#myOrdersList .order-area-button[data-area-index]').forEach(button => {
+    const list = document.querySelector('#myOrdersList');
+    const areas = getAreas();
+    if (!list || !areas.length) return;
+
+    const buttons = [...list.querySelectorAll(':scope > button.tool-action')];
+
+    // Kalau sedang berada di detail area, jangan salah mengikat tombol Kembali
+    // sebagai area pertama.
+    if (buttons.some(button => /kembali ke daftar area/i.test(button.textContent || ''))) return;
+
+    // renderMyOrderAreas() menghasilkan tepat satu .tool-action per area.
+    // app.js lama belum menambahkan class/data-area-index, jadi lengkapi di sini.
+    if (buttons.length !== areas.length) return;
+
+    buttons.forEach((button, index) => {
+      button.classList.add('order-area-button');
+      button.dataset.areaIndex = String(index);
+
       if (button.dataset.androidBound === '1') return;
       button.dataset.androidBound = '1';
 
-      // Property handlers are intentional here: Telegram Android WebView has shown
-      // cases where delegated click listeners do not reliably fire after DOM replacement.
-      button.onclick = event => openAreaByButton(button, event);
-      button.ontouchend = event => openAreaByButton(button, event);
+      const activate = event => openAreaByButton(button, event);
+      button.onclick = activate;
+      button.ontouchend = activate;
       button.onpointerup = event => {
-        if (event.pointerType !== 'mouse') openAreaByButton(button, event);
+        if (event.pointerType !== 'mouse') activate(event);
       };
     });
   }
 
   const list = document.querySelector('#myOrdersList');
   if (list) {
-    new MutationObserver(() => bindButtons()).observe(list, { childList: true, subtree: true });
+    new MutationObserver(() => queueMicrotask(bindButtons)).observe(list, { childList: true, subtree: true });
   }
 
   const originalRenderAreas = window.renderMyOrderAreas;
