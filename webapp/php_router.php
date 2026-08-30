@@ -9,7 +9,7 @@ require __DIR__ . '/php_orderanku_fix.php';
 function respond(mixed $payload, int $status=200): never {
     http_response_code($status);
     header('Content-Type: application/json; charset=utf-8');
-    header('Cache-Control: no-store');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
     echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
@@ -20,20 +20,40 @@ function input_json(): array {
     return is_array($data) ? $data : [];
 }
 
+function serve_static_no_cache(string $file): never {
+    $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+    $types = [
+        'html' => 'text/html; charset=utf-8',
+        'js' => 'application/javascript; charset=utf-8',
+        'css' => 'text/css; charset=utf-8',
+        'json' => 'application/json; charset=utf-8',
+        'svg' => 'image/svg+xml',
+        'png' => 'image/png',
+        'jpg' => 'image/jpeg',
+        'jpeg' => 'image/jpeg',
+        'webp' => 'image/webp',
+        'ico' => 'image/x-icon',
+    ];
+    header('Content-Type: ' . ($types[$ext] ?? 'application/octet-stream'));
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    header('Pragma: no-cache');
+    header('Expires: 0');
+    readfile($file);
+    exit;
+}
+
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 
 if ($path === '/' || $path === '/index.html') {
-    header('Content-Type: text/html; charset=utf-8');
-    readfile(__DIR__ . '/index.html');
-    exit;
+    serve_static_no_cache(__DIR__ . '/index.html');
 }
 
 if (!str_starts_with($path, '/api/') && $path !== '/health') {
     $candidate = realpath(__DIR__ . $path);
     $base = realpath(__DIR__);
     if ($candidate && $base && str_starts_with($candidate, $base . DIRECTORY_SEPARATOR) && is_file($candidate)) {
-        return false;
+        serve_static_no_cache($candidate);
     }
     http_response_code(404);
     echo 'Not Found';
