@@ -97,7 +97,7 @@ function loadMiniAppScript(src, marker) {
       return;
     }
     const script = document.createElement('script');
-    script.src = `${src}?v=20260830-reportline4`;
+    script.src = `${src}?v=20260830-manja5`;
     script.dataset[marker.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = '1';
     script.onload = () => {
       script.dataset.loaded = '1';
@@ -124,3 +124,7 @@ loadMiniAppScript('/order_detail.js', 'order-detail')
 
 loadMiniAppScript('/interactive_ui.js', 'interactive-ui')
   .catch(error => console.error('Gagal memuat interaction enhancement', error));
+
+// MANJA (Manajemen Janji): highlight RCA MANJA in Orderanku and remind the logged-in technician.
+loadMiniAppScript('/manja_ui.js', 'manja-ui')
+  .catch(error => console.error('Gagal memuat MANJA enhancement', error));
