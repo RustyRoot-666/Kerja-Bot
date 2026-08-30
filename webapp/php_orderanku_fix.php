@@ -28,8 +28,16 @@ function orderanku_sheet_bucket(array $row): string {
     return 'open';
 }
 
+function orderanku_find_header(array $row, array $aliases): ?int {
+    $wanted = array_map('norm', $aliases);
+    foreach ($row as $index => $header) {
+        if (in_array(norm($header), $wanted, true)) return $index;
+    }
+    return null;
+}
+
 function orderanku_fetch_sheet(bool $force=false): array {
-    $cache = '/tmp/kerja-bot-orderanku-cache.json';
+    $cache = '/tmp/kerja-bot-orderanku-cache-v4.json';
     if (!$force && is_file($cache) && time() - filemtime($cache) < 30) {
         $decoded = json_decode((string)file_get_contents($cache), true);
         if (is_array($decoded)) return $decoded;
@@ -59,27 +67,34 @@ function orderanku_fetch_sheet(bool $force=false): array {
     foreach (array_slice($rows, 0, 20, true) as $i => $row) {
         $candidate = [];
         foreach ($aliases as $key => $opts) {
-            $candidate[$key] = null;
-            foreach ($row as $j => $header) {
-                if (in_array(norm($header), array_map('norm', $opts), true)) {
-                    $candidate[$key] = $j;
-                    break;
-                }
-            }
+            $candidate[$key] = orderanku_find_header($row, $opts);
         }
-        if ($candidate['service_number'] !== null && $candidate['status'] !== null) {
+
+        // ORDER sheet has more than one status source. STATUS is the manual/final
+        // order state, while STATUS TACPRO is the operational state used when the
+        // manual STATUS cell is still blank. Keep both instead of treating blank
+        // STATUS as OPEN.
+        $candidate['status_tacpro'] = orderanku_find_header($row, [
+            'STATUS TACPRO', 'STATUS TACTICAL', 'TACTICAL STATUS',
+        ]);
+        $candidate['status_insera'] = orderanku_find_header($row, [
+            'STATUS INSERA TODAY', 'STATUS INSERA', 'INSERA STATUS',
+        ]);
+
+        if ($candidate['service_number'] !== null && (
+            $candidate['status'] !== null
+            || $candidate['status_tacpro'] !== null
+            || $candidate['status_insera'] !== null
+        )) {
             $headerIndex = $i;
             $cols = $candidate;
             break;
         }
     }
     if ($headerIndex < 0) {
-        throw new RuntimeException('Kolom INET/STATUS tidak ditemukan di Google Sheet.');
+        throw new RuntimeException('Kolom INET/status tidak ditemukan di Google Sheet.');
     }
 
-    // Penting: samakan perilaku dengan services/google_sheet_reference.py.
-    // Identitas unik reference adalah pasangan ticket + service, bukan service saja.
-    // Ini mencegah baris CLOSE lama tertimpa baris OPEN lain yang kebetulan memakai INET sama.
     $out = [];
     for ($i = $headerIndex + 1; $i < count($rows); $i++) {
         $row = $rows[$i];
@@ -96,8 +111,16 @@ function orderanku_fetch_sheet(bool $force=false): array {
         $ticket = $inseraTicket ?: $primaryTicket;
         if ($service === '' && $ticket === '') continue;
 
+        $manualStatus = norm($v['status'] ?? '');
+        $tacproStatus = norm($v['status_tacpro'] ?? '');
+        $inseraStatus = norm($v['status_insera'] ?? '');
+        $effectiveStatus = $manualStatus ?: ($tacproStatus ?: $inseraStatus);
+
         $item = [
-            'status' => norm($v['status']),
+            'status' => $effectiveStatus,
+            'status_manual' => $manualStatus,
+            'status_tacpro' => $tacproStatus,
+            'status_insera' => $inseraStatus,
             'ticket_id' => $ticket,
             'service_number' => $service,
             'voip_number' => $v['voip_number'],
@@ -117,6 +140,7 @@ function orderanku_fetch_sheet(bool $force=false): array {
             'assigned_technician' => $v['assigned_technician'],
         ];
 
+        // Same identity model as the Python reference parser: ticket + service.
         $ticketKey = norm_key($ticket);
         $serviceKey = norm_key($service);
         if ($ticketKey === '' && $serviceKey === '') continue;
