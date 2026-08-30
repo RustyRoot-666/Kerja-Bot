@@ -120,11 +120,8 @@ loadMiniAppScript('/draft_history.js', 'draft-history')
   .catch(error => console.error('Gagal memuat workflow enhancement', error));
 
 loadMiniAppScript('/order_detail.js', 'order-detail')
-  .catch(error => console.error('Gagal memuat detail order', error));
+  .then(() => loadMiniAppScript('/manja_ui.js', 'manja-ui'))
+  .catch(error => console.error('Gagal memuat detail order/MANJA', error));
 
 loadMiniAppScript('/interactive_ui.js', 'interactive-ui')
   .catch(error => console.error('Gagal memuat interaction enhancement', error));
-
-// MANJA (Manajemen Janji): highlight RCA MANJA in Orderanku and remind the logged-in technician.
-loadMiniAppScript('/manja_ui.js', 'manja-ui')
-  .catch(error => console.error('Gagal memuat MANJA enhancement', error));
