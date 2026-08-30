@@ -5,6 +5,7 @@
   let manjaPayload={ok:true,count:0,items:[]};
 
   function telegramId(){ return window.Telegram?.WebApp?.initDataUnsafe?.user?.id || null; }
+  function orderData(){ try{return typeof state!=='undefined'?state.myOpenOrders:window.state?.myOpenOrders;}catch(_){return window.state?.myOpenOrders;} }
   function itemMap(){ return new Map((manjaPayload.items||[]).map(x=>[String(x.service_number||''),x])); }
   function findInet(text){ return (String(text||'').match(/\b\d{9,15}\b/)||[])[0]||''; }
 
@@ -19,7 +20,7 @@
   }
 
   function mergeIntoOrders(){
-    const map=itemMap(); const data=window.state?.myOpenOrders || window.state?.myOpenOrders;
+    const map=itemMap(); const data=orderData();
     (data?.areas||[]).forEach(area=>(area.orders||[]).forEach(order=>{
       const m=map.get(String(order.service_number||''));
       if(m){order.rca='MANJA';order.manja=m;order.manja_note=m.note||'';order.manja_source=m.source||'';}
@@ -68,7 +69,7 @@
 
   async function saveManja(inet,extra){const id=telegramId();if(!id)return;try{const r=await fetch('/api/manja',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telegram_id:String(id),service_number:inet,...extra})});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.message||'Gagal menyimpan MANJA');$('#manjaModal')?.classList.add('hidden');window.showToast?.(extra.status==='ACTIVE'?'📅 MANJA disimpan':'✅ MANJA diselesaikan');await refreshManja();}catch(e){window.showToast?.(`❌ ${e.message}`);}}
 
-  function renderManjaOnly(){const rows=manjaPayload.items||[];const data=window.state?.myOpenOrders;const orderMap=new Map();(data?.areas||[]).forEach(a=>(a.orders||[]).forEach(o=>orderMap.set(String(o.service_number||''),{...o,__area:a.area})));const list=$('#myOrdersList'),count=$('#myOrderCount');if(!list)return;list.replaceChildren();if(count)count.textContent=`${rows.length} MANJA`;const back=document.createElement('button');back.className='tool-action';back.innerHTML='<b>‹ Kembali ke semua order</b><span>📅</span>';back.onclick=()=>window.renderMyOrderAreas?.(data);list.appendChild(back);rows.forEach((m,i)=>{const o=orderMap.get(String(m.service_number))||{};const card=document.createElement('div');card.className='mini-order manja-order';card.innerHTML=`<div class="manja-chip">📅 MANJA</div><strong>${i+1}. ${esc(o.customer_name||'-')}</strong><small style="line-height:1.7">🌐 ${esc(m.service_number)}<br>🎫 ${esc(o.ticket_id||'MANUAL')}<br>📍 ${esc(o.__area||'-')}<br>📍 Sumber: ${esc(sourceText(m))}${scheduleText(m)?`<br>🕒 ${esc(scheduleText(m))}`:''}<br>📝 ${esc(m.note||'-')}<br>🏠 ${esc(o.address||'-')}</small>`;addAction(card,m.service_number,m);list.appendChild(card);});}
+  function renderManjaOnly(){const rows=manjaPayload.items||[];const data=orderData();const orderMap=new Map();(data?.areas||[]).forEach(a=>(a.orders||[]).forEach(o=>orderMap.set(String(o.service_number||''),{...o,__area:a.area})));const list=$('#myOrdersList'),count=$('#myOrderCount');if(!list)return;list.replaceChildren();if(count)count.textContent=`${rows.length} MANJA`;const back=document.createElement('button');back.className='tool-action';back.innerHTML='<b>‹ Kembali ke semua order</b><span>📅</span>';back.onclick=()=>{if(typeof renderMyOrderAreas==='function')renderMyOrderAreas(data);else window.renderMyOrderAreas?.(data);};list.appendChild(back);rows.forEach((m,i)=>{const o=orderMap.get(String(m.service_number))||{};const card=document.createElement('div');card.className='mini-order manja-order';card.innerHTML=`<div class="manja-chip">📅 MANJA</div><strong>${i+1}. ${esc(o.customer_name||'-')}</strong><small style="line-height:1.7">🌐 ${esc(m.service_number)}<br>🎫 ${esc(o.ticket_id||'MANUAL')}<br>📍 ${esc(o.__area||'-')}<br>📍 Sumber: ${esc(sourceText(m))}${scheduleText(m)?`<br>🕒 ${esc(scheduleText(m))}`:''}<br>📝 ${esc(m.note||'-')}<br>🏠 ${esc(o.address||'-')}</small>`;addAction(card,m.service_number,m);list.appendChild(card);});}
 
   function wrap(name){const fn=window[name];if(typeof fn!=='function'||fn.__manja)return;const w=function(...args){const out=fn.apply(this,args);queueMicrotask(()=>{refreshManja();decorate();});return out;};w.__manja=true;window[name]=w;}
   function init(){ensureStyles();ensureBanner();wrap('renderMyOrderAreas');wrap('renderMyOpenArea');refreshManja();const list=$('#myOrdersList');if(list)new MutationObserver(()=>decorate()).observe(list,{childList:true,subtree:true});}
