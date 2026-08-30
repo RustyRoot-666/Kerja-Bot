@@ -2,30 +2,22 @@
   if (window.__orderankuAndroidFixInstalled) return;
   window.__orderankuAndroidFixInstalled = true;
 
-  let lastOpenAt = 0;
-  let lastIndex = -1;
+  const getAreas = () => {
+    try {
+      return (typeof state !== 'undefined' ? state.myOpenOrders?.areas : window.state?.myOpenOrders?.areas) || [];
+    } catch (_) {
+      return window.state?.myOpenOrders?.areas || [];
+    }
+  };
 
-  function openFromTarget(target, event) {
-    const button = target?.closest?.('#myOrdersList .order-area-button[data-area-index]');
+  function openAreaByButton(button, event) {
     if (!button) return false;
-
     const index = Number(button.dataset.areaIndex);
-    const areas = (typeof state !== 'undefined' ? state.myOpenOrders?.areas : window.state?.myOpenOrders?.areas) || [];
-    const area = areas[index];
+    const area = getAreas()[index];
     if (!area || typeof window.renderMyOpenArea !== 'function') return false;
 
-    const now = Date.now();
-    if (index === lastIndex && now - lastOpenAt < 700) {
-      event?.preventDefault?.();
-      event?.stopPropagation?.();
-      return true;
-    }
-
-    lastIndex = index;
-    lastOpenAt = now;
     event?.preventDefault?.();
     event?.stopPropagation?.();
-
     try {
       window.renderMyOpenArea(area);
       window.scrollTo({ top: 0, behavior: 'auto' });
@@ -37,16 +29,36 @@
     }
   }
 
-  document.addEventListener('pointerup', event => {
-    if (event.pointerType === 'mouse') return;
-    openFromTarget(event.target, event);
-  }, true);
+  function bindButtons() {
+    document.querySelectorAll('#myOrdersList .order-area-button[data-area-index]').forEach(button => {
+      if (button.dataset.androidBound === '1') return;
+      button.dataset.androidBound = '1';
 
-  document.addEventListener('touchend', event => {
-    openFromTarget(event.target, event);
-  }, { capture: true, passive: false });
+      // Property handlers are intentional here: Telegram Android WebView has shown
+      // cases where delegated click listeners do not reliably fire after DOM replacement.
+      button.onclick = event => openAreaByButton(button, event);
+      button.ontouchend = event => openAreaByButton(button, event);
+      button.onpointerup = event => {
+        if (event.pointerType !== 'mouse') openAreaByButton(button, event);
+      };
+    });
+  }
 
-  document.addEventListener('click', event => {
-    openFromTarget(event.target, event);
-  }, true);
+  const list = document.querySelector('#myOrdersList');
+  if (list) {
+    new MutationObserver(() => bindButtons()).observe(list, { childList: true, subtree: true });
+  }
+
+  const originalRenderAreas = window.renderMyOrderAreas;
+  if (typeof originalRenderAreas === 'function' && !originalRenderAreas.__directTouchBound) {
+    const wrapped = function(...args) {
+      const result = originalRenderAreas.apply(this, args);
+      queueMicrotask(bindButtons);
+      return result;
+    };
+    wrapped.__directTouchBound = true;
+    window.renderMyOrderAreas = wrapped;
+  }
+
+  bindButtons();
 })();
