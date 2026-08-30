@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 require __DIR__ . '/php_backend.php';
+require __DIR__ . '/php_compat.php';
 
 function respond(mixed $payload, int $status=200): never {
     http_response_code($status);
@@ -42,10 +43,10 @@ try {
         respond(['ok'=>true,'backend'=>'php','php'=>PHP_VERSION,'database'=>db_path()]);
     }
     if ($method === 'GET' && $path === '/api/dashboard') {
-        respond(load_dashboard((string)($_GET['area'] ?? 'ALL'), (string)($_GET['period'] ?? 'daily')));
+        respond(load_dashboard_php((string)($_GET['area'] ?? 'ALL'), (string)($_GET['period'] ?? 'daily')));
     }
     if ($method === 'GET' && $path === '/api/rca-summary') {
-        respond(load_rca_summary((string)($_GET['area'] ?? 'ALL')));
+        respond(load_rca_summary_php((string)($_GET['area'] ?? 'ALL')));
     }
     if ($method === 'GET' && $path === '/api/technician') {
         $key = trim((string)($_GET['key'] ?? $_GET['nik'] ?? ''));
@@ -69,7 +70,7 @@ try {
     if ($method === 'GET' && $path === '/api/my-report') {
         $raw=trim((string)($_GET['telegram_id'] ?? ''));
         if (!ctype_digit($raw)) respond(['ok'=>false,'error'=>'telegram_id_required'],400);
-        $result=load_my_report((int)$raw); respond($result,$result['ok']?200:404);
+        $result=load_my_report_php((int)$raw); respond($result,$result['ok']?200:404);
     }
     if ($method === 'GET' && $path === '/api/workflow-drafts') {
         $raw=trim((string)($_GET['telegram_id'] ?? ''));
