@@ -28,6 +28,106 @@ function orderanku_sheet_bucket(array $row): string {
     return 'open';
 }
 
+function orderanku_fetch_sheet(bool $force=false): array {
+    $cache = '/tmp/kerja-bot-orderanku-cache.json';
+    if (!$force && is_file($cache) && time() - filemtime($cache) < 30) {
+        $decoded = json_decode((string)file_get_contents($cache), true);
+        if (is_array($decoded)) return $decoded;
+    }
+
+    $ctx = stream_context_create([
+        'http' => [
+            'timeout' => 20,
+            'header' => "User-Agent: Kerja-Bot-PHP/1.0\r\n",
+        ],
+    ]);
+    $raw = @file_get_contents(sheet_csv_url(), false, $ctx);
+    if ($raw === false || trim($raw) === '') {
+        throw new RuntimeException('Google Sheets tidak dapat dibaca.');
+    }
+
+    $fp = fopen('php://temp', 'r+');
+    fwrite($fp, preg_replace('/^\xEF\xBB\xBF/', '', $raw));
+    rewind($fp);
+    $rows = [];
+    while (($row = fgetcsv($fp)) !== false) $rows[] = $row;
+    fclose($fp);
+
+    $aliases = header_aliases();
+    $headerIndex = -1;
+    $cols = [];
+    foreach (array_slice($rows, 0, 20, true) as $i => $row) {
+        $candidate = [];
+        foreach ($aliases as $key => $opts) {
+            $candidate[$key] = null;
+            foreach ($row as $j => $header) {
+                if (in_array(norm($header), array_map('norm', $opts), true)) {
+                    $candidate[$key] = $j;
+                    break;
+                }
+            }
+        }
+        if ($candidate['service_number'] !== null && $candidate['status'] !== null) {
+            $headerIndex = $i;
+            $cols = $candidate;
+            break;
+        }
+    }
+    if ($headerIndex < 0) {
+        throw new RuntimeException('Kolom INET/STATUS tidak ditemukan di Google Sheet.');
+    }
+
+    // Penting: samakan perilaku dengan services/google_sheet_reference.py.
+    // Identitas unik reference adalah pasangan ticket + service, bukan service saja.
+    // Ini mencegah baris CLOSE lama tertimpa baris OPEN lain yang kebetulan memakai INET sama.
+    $out = [];
+    for ($i = $headerIndex + 1; $i < count($rows); $i++) {
+        $row = $rows[$i];
+        $v = [];
+        foreach ($cols as $key => $col) {
+            $v[$key] = ($col !== null && array_key_exists($col, $row))
+                ? trim((string)$row[$col])
+                : '';
+        }
+
+        $service = trim($v['service_number']);
+        $primaryTicket = normalize_ticket($v['ticket']);
+        $inseraTicket = normalize_ticket($v['insera_ticket']);
+        $ticket = $inseraTicket ?: $primaryTicket;
+        if ($service === '' && $ticket === '') continue;
+
+        $item = [
+            'status' => norm($v['status']),
+            'ticket_id' => $ticket,
+            'service_number' => $service,
+            'voip_number' => $v['voip_number'],
+            'customer_name' => $v['customer_name'],
+            'address' => $v['address'],
+            'customer_phone' => $v['customer_phone'],
+            'package' => $v['package'],
+            'onu_rx' => $v['onu_rx'],
+            'rca' => $v['rca'],
+            'old_sn' => norm($v['old_sn']),
+            'new_sn' => norm($v['new_sn']),
+            'ont_type' => norm($v['ont_type']),
+            'sto' => norm($v['sto']),
+            'valins_id' => $v['valins_id'],
+            'config_description' => $v['config_description'],
+            'report_description' => $v['report_description'],
+            'assigned_technician' => $v['assigned_technician'],
+        ];
+
+        $ticketKey = norm_key($ticket);
+        $serviceKey = norm_key($service);
+        if ($ticketKey === '' && $serviceKey === '') continue;
+        $key = $ticketKey . '|' . $serviceKey;
+        $out[$key] = $item;
+    }
+
+    @file_put_contents($cache, json_encode($out, JSON_UNESCAPED_UNICODE));
+    return $out;
+}
+
 function load_my_open_orders_fixed(int $telegramId, bool $force=false): array {
     $tech = technician_by_telegram($telegramId);
     if (!$tech) {
@@ -38,7 +138,7 @@ function load_my_open_orders_fixed(int $telegramId, bool $force=false): array {
         ];
     }
 
-    $refs = fetch_sheet($force);
+    $refs = orderanku_fetch_sheet($force);
     $wanted = norm_name($tech['name'] ?? '');
     $summary = [];
     $groups = [];

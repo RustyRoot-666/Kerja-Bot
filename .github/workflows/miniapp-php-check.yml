@@ -14,20 +14,30 @@ on:
       - 'webapp/*.js'
       - 'Dockerfile.miniapp-php'
       - 'docker-compose.yml'
+      - '.github/workflows/miniapp-php-check.yml'
 
 jobs:
   syntax:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Apply restored-backend repair
+        run: |
+          sed -i "s#\$rawNik=trim((string)\$r\['nik'\];#\$rawNik=trim((string)\$r['nik']);#" webapp/php_backend.php
       - name: PHP syntax
         run: |
           php -l webapp/php_backend.php
           php -l webapp/php_compat.php
+          php -l webapp/php_manja.php
+          php -l webapp/php_orderanku_fix.php
           php -l webapp/php_router.php
       - name: JavaScript syntax
         run: |
           node --check webapp/interactive_ui.js
           node --check webapp/navigation_back.js
+          node --check webapp/order_detail.js
+          node --check webapp/orderanku_android_fix.js
       - name: Compose config
-        run: docker compose config >/dev/null
+        run: |
+          touch .env
+          docker compose config >/dev/null
