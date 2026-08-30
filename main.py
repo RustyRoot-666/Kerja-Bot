@@ -48,6 +48,7 @@ from services.google_sheet_reference import (
     initialize_sheet_config,
     sync_missing_orders_from_sheet,
 )
+from services.hermes_ai import ai_command
 from services.jagir_work_orders import capture_jagir_work_order, remember_technician_username
 from services.logic_dispatch import detect_logic_group, ignore_group_message
 from services.order_repository import OrderRepository
@@ -233,7 +234,7 @@ async def post_init(application: Application) -> None:
         )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, universal /leaderboard, area daily close, hourly REPORT progress, universal /sto parser, JAGIR work-order parser, JAGIR internal report tracking, Telegram history import/export, private technician /laporan, group REPORT /laporan monitoring, /perintah technician guide, multi-topic /sto report, name-only /sto compatibility, /update kendala, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, and previous-week catch-up initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, universal /leaderboard, area daily close, hourly REPORT progress, universal /sto parser, JAGIR work-order parser, JAGIR internal report tracking, Hermes /ai read-only assistant, Telegram history import/export, private technician /laporan, group REPORT /laporan monitoring, /perintah technician guide, multi-topic /sto report, name-only /sto compatibility, /update kendala, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, and previous-week catch-up initialized"
     )
 
 
@@ -321,6 +322,7 @@ def build_application() -> Application:
     app.add_handler(order_conv)
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("ai", ai_command))
     app.add_handler(CommandHandler("perintah", perintah_command))
     app.add_handler(CommandHandler("daftar_teknisi", start))
     app.add_handler(CommandHandler("cancel", cancel))
