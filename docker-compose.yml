@@ -24,6 +24,6 @@ services:
       DATABASE_PATH: /app/database/bot.sqlite3
       MINIAPP_BACKEND: php
     ports:
-      - "127.0.0.1:8080:80"
+      - "127.0.0.1:8080:8080"
     volumes:
       - ./database:/app/database
