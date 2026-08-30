@@ -33,6 +33,10 @@ def _command_from_text(text: str) -> str:
     return token.rstrip(":")
 
 
+def _norm_name(value: str) -> str:
+    return " ".join(str(value or "").strip().upper().split())
+
+
 def _ensure_metadata_table(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -218,6 +222,61 @@ def _format_period(start_iso: str) -> str:
     return f"{start.day:02d} {MONTH_SHORT[start.month - 1]} {start.year} - {end.day:02d} {MONTH_SHORT[end.month - 1]} {end.year}"
 
 
+def _registered_exact_name(database_path: Path, query: str) -> tuple[str, str] | None:
+    """Return the unique registered technician for an exact normalized name."""
+    wanted = _norm_name(query)
+    if not wanted:
+        return None
+    with sqlite3.connect(database_path) as conn:
+        rows = conn.execute("SELECT nik, name FROM technicians WHERE TRIM(name) != ''").fetchall()
+
+    matches: list[tuple[str, str]] = []
+    seen_nik: set[str] = set()
+    for nik, name in rows:
+        clean_nik = str(nik or "").strip()
+        clean_name = " ".join(str(name or "").strip().split())
+        if not clean_nik or _norm_name(clean_name) != wanted or clean_nik in seen_nik:
+            continue
+        seen_nik.add(clean_nik)
+        matches.append((clean_nik, clean_name))
+    return matches[0] if len(matches) == 1 else None
+
+
+def _merge_legacy_name_rows(
+    database_path: Path,
+    canonical_nik: str,
+    canonical_name: str,
+) -> int:
+    """Move old rows with the same explicit technician name to the registered NIK.
+
+    This repairs records created by the old name-only /sto fallback that borrowed
+    the Telegram sender's NIK. Only rows whose stored technician name exactly
+    normalizes to the registered name are touched, so unrelated work on the same
+    sender NIK remains intact.
+    """
+    wanted = _norm_name(canonical_name)
+    changed = 0
+    with sqlite3.connect(database_path) as conn:
+        rows = conn.execute(
+            "SELECT service_number, period_start, technician_nik, technician_name FROM report_group_orders"
+        ).fetchall()
+        for service_number, period_start, old_nik, old_name in rows:
+            if _norm_name(str(old_name or "")) != wanted:
+                continue
+            if str(old_nik or "").strip() == canonical_nik and str(old_name or "").strip() == canonical_name:
+                continue
+            conn.execute(
+                """
+                UPDATE report_group_orders
+                SET technician_nik = ?, technician_name = ?
+                WHERE service_number = ? AND period_start = ?
+                """,
+                (canonical_nik, canonical_name, str(service_number), str(period_start)),
+            )
+            changed += 1
+    return changed
+
+
 def _find_technicians(database_path: Path, query: str) -> list[tuple[str, str]]:
     query = query.strip()
     with sqlite3.connect(database_path) as conn:
@@ -231,19 +290,30 @@ def _find_technicians(database_path: Path, query: str) -> list[tuple[str, str]]:
                 """,
                 (query,),
             ).fetchall()
-        else:
-            normalized = " ".join(query.upper().split())
-            rows = conn.execute(
-                """
-                SELECT technician_nik, MAX(technician_name)
-                FROM report_group_orders
-                WHERE UPPER(TRIM(technician_name)) LIKE ?
-                GROUP BY technician_nik
-                ORDER BY UPPER(MAX(technician_name))
-                LIMIT 10
-                """,
-                (f"%{normalized}%",),
-            ).fetchall()
+            return [(str(nik), str(name)) for nik, name in rows]
+
+    # Untuk pencarian nama, registry teknisi adalah sumber identitas utama. Jika
+    # nama cocok persis dan unik, satukan otomatis histori legacy yang dulu salah
+    # memakai NIK akun Telegram pengirim.
+    registered = _registered_exact_name(database_path, query)
+    if registered is not None:
+        canonical_nik, canonical_name = registered
+        _merge_legacy_name_rows(database_path, canonical_nik, canonical_name)
+        return [(canonical_nik, canonical_name)]
+
+    normalized = " ".join(query.upper().split())
+    with sqlite3.connect(database_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT technician_nik, MAX(technician_name)
+            FROM report_group_orders
+            WHERE UPPER(TRIM(technician_name)) LIKE ?
+            GROUP BY technician_nik
+            ORDER BY UPPER(MAX(technician_name))
+            LIMIT 10
+            """,
+            (f"%{normalized}%",),
+        ).fetchall()
     return [(str(nik), str(name)) for nik, name in rows]
 
 
