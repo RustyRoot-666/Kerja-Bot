@@ -5,6 +5,8 @@ on:
     paths:
       - 'webapp/*.php'
       - 'webapp/*.js'
+      - 'services/dismantle_orders.py'
+      - 'services/jagir_work_orders.py'
       - 'Dockerfile.miniapp-php'
       - 'docker-compose.yml'
       - '.github/workflows/miniapp-php-check.yml'
@@ -12,6 +14,8 @@ on:
     paths:
       - 'webapp/*.php'
       - 'webapp/*.js'
+      - 'services/dismantle_orders.py'
+      - 'services/jagir_work_orders.py'
       - 'Dockerfile.miniapp-php'
       - 'docker-compose.yml'
       - '.github/workflows/miniapp-php-check.yml'
@@ -40,6 +44,9 @@ jobs:
           node --check webapp/orderanku_android_fix.js
           node --check webapp/manja_ui_v2.js
           node --check webapp/dismantle_ui.js
+      - name: Python syntax
+        run: |
+          python -m py_compile services/dismantle_orders.py services/jagir_work_orders.py
       - name: Compose config
         run: |
           touch .env
