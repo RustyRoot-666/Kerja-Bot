@@ -51,4 +51,21 @@ if($path==='/api/technician-master' && strtoupper($_SERVER['REQUEST_METHOD']??'G
     }
 }
 
+// Dashboard identity repair is read-only: fill a missing NIK from the registered
+// technician directory only when the name match is unique. No master bootstrap,
+// normalization, or database writes run on this hot endpoint.
+if($path==='/api/dashboard' && strtoupper($_SERVER['REQUEST_METHOD']??'GET')==='GET') {
+    require_once __DIR__.'/php_backend.php';
+    require_once __DIR__.'/php_dashboard_identity_readonly.php';
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    try {
+        $payload=load_dashboard_php((string)($_GET['area']??'ALL'),(string)($_GET['period']??'daily'));
+        echo json_encode(dashboard_identity_fill_missing_nik($payload),JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);exit;
+    } catch(Throwable $e) {
+        error_log('[miniapp-php] dashboard identity read: '.$e->getMessage().' @ '.$e->getFile().':'.$e->getLine());
+        http_response_code(500);echo json_encode(['ok'=>false,'error'=>'internal_error','message'=>'Dashboard gagal dimuat.']);exit;
+    }
+}
+
 require __DIR__.'/php_router.php';
