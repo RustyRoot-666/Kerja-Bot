@@ -40,6 +40,8 @@ jobs:
           php -l webapp/php_supervisor_report.php
           php -l webapp/php_supervisor_orders.php
           php -l webapp/php_unified_workflow.php
+          php -l webapp/php_technician_master.php
+          php -l webapp/php_technician_master_bootstrap.php
           php -l webapp/php_router.php
       - name: JavaScript syntax
         run: |
@@ -52,6 +54,7 @@ jobs:
           node --check webapp/dashboard_chart_switch.js
           node --check webapp/report_supervisor.js
           node --check webapp/unified_workflow_ui.js
+          node --check webapp/technician_master_ui.js
       - name: Python syntax
         run: |
           python -m py_compile main.py services/dismantle_orders.py services/jagir_work_orders.py
