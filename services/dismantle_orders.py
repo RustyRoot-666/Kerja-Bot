@@ -11,13 +11,33 @@ SIGNATURE = "OPEN WO DISMANTLING NTE CRASH"
 TARGET_GROUP_FRAGMENT = "PLACEMENT NTE MANYAR"
 
 SEED_ORDERS = [
-    ("M****", "MULYOREJO TENGAH 1 NO 26 SURABAYA Jalan Ngagel Surabaya 60246 Surabaya Indonesia", "152303278616", "JAWA TIMUR"),
-    ("S****", "Mulyorejo Tengah 1/30 Jalan Dokter Ir. Haji Soekarno Surabaya 60115 Surabaya Indonesia", "152303277738", "JAWA TIMUR"),
-    ("B*******", "Mulyorejo Tengah Gang V No. 14 Mulyorejo Tengah Gang V Surabaya 00000 Surabaya Indonesia", "152303272481", "JAWA TIMUR"),
-    ("D****", "Mulyorejo Tengah Gang V Surabaya", "152303271125", "JAWA TIMUR"),
-    ("N****", "mulyorejo tengah gg 1 no 16", "152303272779", "JAWA TIMUR"),
-    ("M********", "MULYOREJO TENGAH NO 51 SURABAYA", "152303279918", "JAWA TIMUR"),
-    ("*****", "MULYOREJO TENGAH NO.37", "152303277003", "JAWA TIMUR"),
+    ("M****", "MULYOREJO TENGAH 1 NO 26 SURABAYA Jalan Ngagel Surabaya 60246 Surabaya Indonesia", "152303278616", "JAWA TIMUR", "26050138", "THOMAS GUSTIAN BAGYO", "ThomasGustian"),
+    ("S****", "Mulyorejo Tengah 1/30 Jalan Dokter Ir. Haji Soekarno Surabaya 60115 Surabaya Indonesia", "152303277738", "JAWA TIMUR", "26050138", "THOMAS GUSTIAN BAGYO", "ThomasGustian"),
+    ("B*******", "Mulyorejo Tengah Gang V No. 14 Mulyorejo Tengah Gang V Surabaya 00000 Surabaya Indonesia", "152303272481", "JAWA TIMUR", "26050138", "THOMAS GUSTIAN BAGYO", "ThomasGustian"),
+    ("D****", "Mulyorejo Tengah Gang V Surabaya", "152303271125", "JAWA TIMUR", "26050138", "THOMAS GUSTIAN BAGYO", "ThomasGustian"),
+    ("N****", "mulyorejo tengah gg 1 no 16", "152303272779", "JAWA TIMUR", "26050138", "THOMAS GUSTIAN BAGYO", "ThomasGustian"),
+    ("M********", "MULYOREJO TENGAH NO 51 SURABAYA", "152303279918", "JAWA TIMUR", "26050138", "THOMAS GUSTIAN BAGYO", "ThomasGustian"),
+    ("*****", "MULYOREJO TENGAH NO.37", "152303277003", "JAWA TIMUR", "26050138", "THOMAS GUSTIAN BAGYO", "ThomasGustian"),
+
+    ("H*****", "RAYA SEMAMPIR NO.2 (KEDAI PYJAH", "152303279073", "JAWA TIMUR", "26970105", "VICO INDIRA PURNOMO", ""),
+    ("ME*************", "RAYA SEMAMPIR NO.95 /", "152303270561", "JAWA TIMUR", "26970105", "VICO INDIRA PURNOMO", "Vico_ip"),
+    ("M********", "Raya Semolowaru 151", "152303271464", "JAWA TIMUR", "26970105", "VICO INDIRA PURNOMO", "Vico_ip"),
+    ("M********", "RAYA SEMOLOWARU NO 89", "152303279530", "JAWA TIMUR", "26970105", "VICO INDIRA PURNOMO", "Vico_ip"),
+    ("*****", "RAYA SEMOLOWARU NO.56", "152303278994", "JAWA TIMUR", "26970105", "VICO INDIRA PURNOMO", "Vico_ip"),
+    ("C*********", "RAYA SUTOREJO NO.6, MULYOREJO", "152303279420", "JAWA TIMUR", "26970105", "VICO INDIRA PURNOMO", "Vico_ip"),
+    ("F*****", "Ruko 21 klampis blok F 19", "152303272328", "JAWA TIMUR", "26970105", "VICO INDIRA PURNOMO", "Vico_ip"),
+    ("P******", "RUKO KLAMPIS 21 F-2", "152303201639", "JAWA TIMUR", "26970105", "VICO INDIRA PURNOMO", "Vico_ip"),
+
+    ("L*********", "SEMAMPIR AWS 2 NO 17 B JALAN MEDOKAN SEMAMPIR", "152303277849", "JAWA TIMUR", "26880016", "SENDRY FIRMANSYAH", "Msbajoel"),
+    ("LU*************", "Semampir barat 2 no 26", "152303277762", "JAWA TIMUR", "26880016", "SENDRY FIRMANSYAH", "Msbajoel"),
+    ("R*****", "SEMAMPIR KELURAHAN NO 12", "152303279317", "JAWA TIMUR", "26880016", "SENDRY FIRMANSYAH", "Msbajoel"),
+    ("N****", "semampir tengah 2 no 41A belakang Jalan Dokter Ir. Haji Soekarno Surabaya 60115 Surabaya Indonesia", "152303272655", "JAWA TIMUR", "26880016", "SENDRY FIRMANSYAH", "Msbajoel"),
+    ("A*****", "SEMAMPIR TENGAH 5A NO 19 SURABAYA", "152303270978", "JAWA TIMUR", "26880016", "SENDRY FIRMANSYAH", "Msbajoel"),
+    ("N****", "Semampir tengah 8 blok E no 4", "152303271755", "JAWA TIMUR", "26880016", "SENDRY FIRMANSYAH", "Msbajoel"),
+    ("C*****", "SEMAMPIR TENGAH GANG 6A NO 22", "152303280382", "JAWA TIMUR", "26880016", "SENDRY FIRMANSYAH", "Msbajoel"),
+    ("W*****", "SEMAMPIR TENGAH VIII C NO.13", "152303203053", "JAWA TIMUR", "26880016", "SENDRY FIRMANSYAH", "Msbajoel"),
+    ("G*******", "Semampir Utara NO.20", "152303278337", "JAWA TIMUR", "26880016", "SENDRY FIRMANSYAH", "Msbajoel"),
+    ("*****", "semanpir selatan 3a/71 Jalan Semolowaru Elok Surabaya 60119 Surabaya Indonesia", "152303277832", "JAWA TIMUR", "26880016", "SENDRY FIRMANSYAH", "Msbajoel"),
 ]
 
 
@@ -60,16 +80,17 @@ def _ensure_schema_sync(db_path: Path | str) -> None:
             """
         )
         now = _utc_now()
-        for name, address, inet, cp in SEED_ORDERS:
+        for name, address, inet, cp, nik, technician, username in SEED_ORDERS:
+            telegram_id = _resolve_telegram_id(conn, nik, username)
             conn.execute(
                 """
                 INSERT OR IGNORE INTO dismantle_orders (
                     service_number, customer_name, address, customer_phone,
-                    assigned_nik, assigned_name, assigned_username,
+                    assigned_nik, assigned_name, assigned_username, assigned_telegram_id,
                     status, raw_source, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, '26050138', 'THOMAS GUSTIAN BAGYO', 'ThomasGustian', 'OPEN', 'SEED OSA MYR', ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', 'SEED OSA MYR', ?, ?)
                 """,
-                (inet, name, address, cp, now, now),
+                (inet, name, address, cp, nik, technician, username, telegram_id, now, now),
             )
 
 
