@@ -34,8 +34,9 @@ function technician_profile_save(array $payload): array {
     $name=trim(preg_replace('/\s+/',' ',(string)($payload['name']??'')) ?: '');
     $sto=strtoupper(trim((string)($payload['sto']??'')));
     $username=ltrim(trim((string)($payload['username']??'')),'@');
+    $nameLen=strlen($name);
 
-    if($name==='' || mb_strlen($name)<3 || mb_strlen($name)>80) return ['ok'=>false,'error'=>'invalid_name','message'=>'Nama harus 3-80 karakter.'];
+    if($name==='' || $nameLen<3 || $nameLen>80) return ['ok'=>false,'error'=>'invalid_name','message'=>'Nama harus 3-80 karakter.'];
     if($sto!=='' && !preg_match('/^[A-Z0-9]{2,8}$/',$sto)) return ['ok'=>false,'error'=>'invalid_sto','message'=>'Format STO tidak valid.'];
     if($username!=='' && !preg_match('/^[A-Za-z0-9_]{5,32}$/',$username)) return ['ok'=>false,'error'=>'invalid_username','message'=>'Username Telegram tidak valid.'];
 
@@ -65,8 +66,6 @@ function technician_profile_save(array $payload): array {
         throw $e;
     }
 
-    // Best-effort canonical master sync. Never fail the profile save if the
-    // optional master tables are unavailable or SQLite is temporarily busy.
     try {
         if(table_exists('technician_master')) {
             $nik=trim((string)($tech['nik']??''));
