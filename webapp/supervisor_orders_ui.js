@@ -4,9 +4,24 @@
   window.__orderTargetNik = '';
   let supervisorMeta = null;
 
-  const escS = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[c]));
-  const originalFetchMyOpenOrders = window.fetchMyOpenOrders;
+  const escS = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const originalRenderMyOpenArea = window.renderMyOpenArea;
+  const nativeFetch = window.fetch.bind(window);
+
+  window.fetch = function supervisorAwareFetch(input, init) {
+    let url = typeof input === 'string' ? input : input?.url;
+    if (url && url.includes('/api/dismantle-orders?') && !url.includes('target_nik=')) {
+      const target = String(window.__orderTargetNik || '').trim();
+      if (target) {
+        const u = new URL(url, window.location.origin);
+        u.searchParams.set('target_nik', target);
+        url = u.pathname + u.search;
+        if (typeof input === 'string') input = url;
+        else input = new Request(url, input);
+      }
+    }
+    return nativeFetch(input, init);
+  };
 
   window.fetchMyOpenOrders = async function fetchMyOpenOrdersSupervisor(force=false) {
     const u=telegramUser(); if(!u?.id)throw new Error('Mini App harus dibuka dari Telegram.');
@@ -47,4 +62,12 @@
     const back=document.createElement('button');back.className='tool-action';back.innerHTML='<b>‹ Kembali ke daftar area</b><span>📍</span>';back.addEventListener('click',()=>renderMyOrderAreas(state.myOpenOrders));list.appendChild(back);
     (area.orders||[]).forEach((o,i)=>{const c=document.createElement('div');c.className='mini-order';c.innerHTML=`<strong>${i+1}. ${esc(o.customer_name||'-')}</strong><small style="line-height:1.65">👷 ${esc(o.technician_nik||'-')} • ${esc(o.technician_name||'-')}<br>🎫 ${esc(o.ticket_id||'MANUAL')}<br>🌐 ${esc(o.service_number||'-')}<br>📞 ${esc(o.customer_phone||'-')}<br>⚡ ${esc(o.package||'-')}<br>📡 ONU RX: ${esc(o.onu_rx||'-')}<br>📝 RCA: ${esc(o.rca||'-')}<br>🏠 ${esc(o.address||'-')}</small>`;list.appendChild(c);});
   };
+
+  function enforceReadOnlyDismantle() {
+    if (!supervisorMeta?.supervisor) return;
+    document.querySelectorAll('.dismantle-done').forEach(button => button.remove());
+    const head = document.querySelector('#dismantleOverlay .dismantle-head p');
+    if (head) head.textContent = 'NTE CRASH • mode atasan read only';
+  }
+  new MutationObserver(enforceReadOnlyDismantle).observe(document.body,{childList:true,subtree:true});
 })();
