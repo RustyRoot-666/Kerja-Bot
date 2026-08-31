@@ -3,12 +3,16 @@
 // technician when the shorter name is an unambiguous prefix of the longer name.
 
 function technicianDisplayName(value) {
-  return String(value || '-').trim().toUpperCase();
+  return String(value || '-')
+    .trim()
+    .toUpperCase()
+    .replace(/^(?:(?:NAME|NAMA)\s*)?[-:=|]+\s*/, '')
+    .trim() || '-';
 }
 
 function technicianNameKey(value) {
   return technicianDisplayName(value)
-    .replace(/^(?:NAME|NAMA)\s*[-:=]\s*/, '')
+    .replace(/^(?:NAME|NAMA)\s*[-:=|]*\s*/, '')
     .replace(/[^A-Z0-9]+/g, ' ')
     .trim()
     .replace(/\s+/g, ' ');
@@ -18,8 +22,8 @@ function mergeTechnicianAliases(rows) {
   const source = (rows || []).map(row => ({
     ...row,
     name: technicianDisplayName(row.name),
-    _keys: [row.key || (row.nik ? `NIK:${row.nik}` : '')].filter(Boolean),
-    _nikList: [String(row.nik || '').trim()].filter(Boolean),
+    _keys: [row.key || (row.nik && row.nik !== '-' ? `NIK:${row.nik}` : '')].filter(Boolean),
+    _nikList: [String(row.nik || '').trim()].filter(nik => nik && nik !== '-'),
   }));
 
   const consumed = new Set();
@@ -123,7 +127,7 @@ renderRecentActivity = function renderRecentActivityUppercase() {
 async function openMergedTechnician(item) {
   try {
     const keys = item._keys?.length ? item._keys : [item.key || item.nik];
-    const details = await Promise.all(keys.map(key => fetchTechnician(key, state.area)));
+    const details = await Promise.all(keys.filter(Boolean).map(key => fetchTechnician(key, state.area)));
     const ordersByServicePeriod = new Map();
     details.forEach(detail => (detail.orders || []).forEach(order => {
       const k = `${order.service_number || ''}|${order.date_label || ''}`;
@@ -131,7 +135,7 @@ async function openMergedTechnician(item) {
     }));
     const orders = [...ordersByServicePeriod.values()];
     document.querySelector('#detailName').textContent = technicianDisplayName(item.name);
-    document.querySelector('#detailNik').textContent = `NIK ${(item._nikList || [item.nik]).filter(Boolean).join(' • ') || '-'}`;
+    document.querySelector('#detailNik').textContent = `NIK ${(item._nikList || [item.nik]).filter(nik => nik && nik !== '-').join(' • ') || '-'}`;
     document.querySelector('#detailDaily').textContent = fmt(details.reduce((sum, d) => sum + Number(d.daily || 0), 0));
     document.querySelector('#detailWeekly').textContent = fmt(details.reduce((sum, d) => sum + Number(d.weekly || 0), 0));
     document.querySelector('#detailAll').textContent = fmt(orders.length);
@@ -157,3 +161,10 @@ setWelcome = function setWelcomeUppercase() {
   const el = document.querySelector('#welcomeName');
   if (el) el.textContent = technicianDisplayName(el.textContent);
 };
+
+// This enhancement is loaded dynamically after app.js. The first dashboard request
+// may already have completed, so normalize the existing payload immediately too.
+if (state?.payload) {
+  normalizeDashboardTechnicians();
+  render();
+}
