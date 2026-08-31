@@ -10,7 +10,12 @@ function report_is_supervisor(array $tech): bool {
 
 function report_canonical_technician(array $row): array {
     if (!function_exists('technician_master_resolve')) return $row;
-    $master=technician_master_resolve((string)($row['nik']??''),(string)($row['name']??''));
+    try {
+        $master=technician_master_resolve((string)($row['nik']??''),(string)($row['name']??''));
+    } catch (Throwable $e) {
+        error_log('[miniapp-php] technician master resolve fallback: '.$e->getMessage());
+        return $row;
+    }
     if(!$master)return$row;
     $row['nik']=$master['nik'];$row['name']=$master['canonical_name'];
     if(trim((string)($master['sto']??''))!=='')$row['sto']=$master['sto'];
