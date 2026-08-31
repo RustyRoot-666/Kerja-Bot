@@ -12,6 +12,8 @@ function currentWorkflowArea() {
 }
 
 function smartBack() {
+  const profileOverlay = document.querySelector('#technicianProfileOverlay');
+  if (profileOverlay) { profileOverlay.remove(); return; }
   const masterOverlay = document.querySelector('#technicianMasterOverlay');
   if (masterOverlay) { masterOverlay.remove(); return; }
   const page = currentVisiblePage();
@@ -45,11 +47,12 @@ function loadMiniAppScript(src, marker) {
   return new Promise((resolve,reject)=>{
     const existing=document.querySelector(`script[data-${marker}]`);
     if(existing){if(existing.dataset.loaded==='1')resolve();else{existing.addEventListener('load',resolve,{once:true});existing.addEventListener('error',reject,{once:true});}return;}
-    const script=document.createElement('script');script.src=`${src}?v=20260831-technician-master1`;script.dataset[marker.replace(/-([a-z])/g,(_,c)=>c.toUpperCase())]='1';
+    const script=document.createElement('script');script.src=`${src}?v=20260831-profile-edit1`;script.dataset[marker.replace(/-([a-z])/g,(_,c)=>c.toUpperCase())]='1';
     script.onload=()=>{script.dataset.loaded='1';resolve();};script.onerror=reject;document.body.appendChild(script);
   });
 }
 
+loadMiniAppScript('/technician_profile_ui.js','technician-profile-ui').catch(error=>console.error('Gagal memuat profile editor',error));
 loadMiniAppScript('/report_dashboard.js','report-dashboard')
   .then(()=>loadMiniAppScript('/report_supervisor.js','report-supervisor'))
   .then(()=>loadMiniAppScript('/technician_master_ui.js','technician-master-ui'))

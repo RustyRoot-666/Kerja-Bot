@@ -16,8 +16,10 @@ RUN sed -i "s#\$rawNik=trim((string)\$r\['nik'\];#\$rawNik=trim((string)\$r['nik
     && php -l /app/webapp/php_manja.php \
     && php -l /app/webapp/php_orderanku_fix.php \
     && php -l /app/webapp/php_dismantle.php \
+    && php -l /app/webapp/php_technician_profile.php \
+    && php -l /app/webapp/php_profile_prepend.php \
     && php -l /app/webapp/php_router.php
 
 ENV PHP_CLI_SERVER_WORKERS=4
 EXPOSE 8080
-CMD ["php", "-S", "0.0.0.0:8080", "-t", "/app/webapp", "/app/webapp/php_router.php"]
+CMD ["php", "-d", "auto_prepend_file=/app/webapp/php_profile_prepend.php", "-S", "0.0.0.0:8080", "-t", "/app/webapp", "/app/webapp/php_router.php"]
