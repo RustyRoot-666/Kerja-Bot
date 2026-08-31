@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SIGNATURE = "OPEN WO DISMANTLING NTE CRASH"
+TARGET_GROUP_FRAGMENT = "PLACEMENT NTE MANYAR"
 
 SEED_ORDERS = [
     ("M****", "MULYOREJO TENGAH 1 NO 26 SURABAYA Jalan Ngagel Surabaya 60246 Surabaya Indonesia", "152303278616", "JAWA TIMUR"),
@@ -170,23 +171,36 @@ def _save_orders_sync(db_path: Path | str, orders: list[dict[str, str]], chat_id
     return saved
 
 
+def _normalize_group_title(title: str) -> str:
+    return " ".join((title or "").upper().split())
+
+
 async def capture_dismantle_order(update, context) -> None:
+    chat = update.effective_chat
     message = update.effective_message
-    if not message:
+    if not chat or not message or chat.type not in {"group", "supergroup"}:
         return
+    if TARGET_GROUP_FRAGMENT not in _normalize_group_title(chat.title or ""):
+        return
+
     text = message.text or message.caption or ""
     orders = parse_dismantle_message(text)
     if not orders:
         return
+
     db_path = context.application.bot_data["settings"].database_path
     try:
         saved = await asyncio.to_thread(
             _save_orders_sync,
             db_path,
             orders,
-            update.effective_chat.id if update.effective_chat else None,
+            chat.id,
             message.message_id,
         )
-        logging.info("Captured dismantle work orders: %s", saved)
+        logging.info(
+            "Captured dismantle work orders from %s: %s",
+            chat.title,
+            saved,
+        )
     except Exception:
         logging.exception("Failed to capture dismantle work order")
