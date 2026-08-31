@@ -2,7 +2,9 @@
   if (window.__reportSupervisorInstalled) return;
   window.__reportSupervisorInstalled = true;
 
-  let selectedNik = 'ALL';
+  // First request must not force ALL. The backend decides whether the viewer
+  // is a supervisor (blank target => ALL) or a normal technician (own report).
+  let selectedNik = '';
 
   function ensureStyles() {
     if (document.querySelector('#reportSupervisorStyles')) return;
@@ -23,6 +25,7 @@
     let box = document.querySelector('#supervisorReportFilter');
     if (!data?.can_filter_nik) {
       box?.remove();
+      selectedNik = '';
       return;
     }
     if (!box) {
