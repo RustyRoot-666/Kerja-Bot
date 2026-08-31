@@ -44,6 +44,7 @@ jobs:
           node --check webapp/orderanku_android_fix.js
           node --check webapp/manja_ui_v2.js
           node --check webapp/dismantle_ui.js
+          node --check webapp/dashboard_chart_switch.js
       - name: Python syntax
         run: |
           python -m py_compile services/dismantle_orders.py services/jagir_work_orders.py

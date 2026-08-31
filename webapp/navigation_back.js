@@ -103,7 +103,7 @@ function loadMiniAppScript(src, marker) {
       return;
     }
     const script = document.createElement('script');
-    script.src = `${src}?v=20260831-dismantle1`;
+    script.src = `${src}?v=20260831-chart-switch1`;
     script.dataset[marker.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = '1';
     script.onload = () => {
       script.dataset.loaded = '1';
@@ -132,4 +132,5 @@ loadMiniAppScript('/order_detail.js', 'order-detail')
   .catch(error => console.error('Gagal memuat detail order/MANJA/DISMANTLE', error));
 
 loadMiniAppScript('/interactive_ui.js', 'interactive-ui')
-  .catch(error => console.error('Gagal memuat interaction enhancement', error));
+  .then(() => loadMiniAppScript('/dashboard_chart_switch.js', 'dashboard-chart-switch'))
+  .catch(error => console.error('Gagal memuat interaction/dashboard chart enhancement', error));
