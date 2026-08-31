@@ -47,7 +47,7 @@ function loadMiniAppScript(src, marker) {
   return new Promise((resolve,reject)=>{
     const existing=document.querySelector(`script[data-${marker}]`);
     if(existing){if(existing.dataset.loaded==='1')resolve();else{existing.addEventListener('load',resolve,{once:true});existing.addEventListener('error',reject,{once:true});}return;}
-    const script=document.createElement('script');script.src=`${src}?v=20260831-profile-edit1`;script.dataset[marker.replace(/-([a-z])/g,(_,c)=>c.toUpperCase())]='1';
+    const script=document.createElement('script');script.src=`${src}?v=20260831-nik-link1`;script.dataset[marker.replace(/-([a-z])/g,(_,c)=>c.toUpperCase())]='1';
     script.onload=()=>{script.dataset.loaded='1';resolve();};script.onerror=reject;document.body.appendChild(script);
   });
 }
