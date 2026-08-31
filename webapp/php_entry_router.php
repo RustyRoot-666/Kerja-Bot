@@ -56,6 +56,7 @@ if($path==='/api/technician-master' && strtoupper($_SERVER['REQUEST_METHOD']??'G
 // normalization, or database writes run on this hot endpoint.
 if($path==='/api/dashboard' && strtoupper($_SERVER['REQUEST_METHOD']??'GET')==='GET') {
     require_once __DIR__.'/php_backend.php';
+    require_once __DIR__.'/php_compat.php';
     require_once __DIR__.'/php_dashboard_identity_readonly.php';
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
