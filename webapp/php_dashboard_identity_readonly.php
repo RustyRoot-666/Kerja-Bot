@@ -43,16 +43,42 @@ function dashboard_identity_fill_missing_nik(array $payload): array {
     if(!isset($payload['leaderboard'])||!is_array($payload['leaderboard']))return $payload;
     $techs=dashboard_identity_technicians();
     if(!$techs)return $payload;
-    foreach($payload['leaderboard'] as &$row){
+
+    $byNik=[];
+    foreach($techs as $t)$byNik[(string)$t['nik']]=$t;
+
+    $normalized=[];
+    foreach($payload['leaderboard'] as $row){
         $nik=preg_replace('/\D/','',(string)($row['nik']??''))?:'';
-        if($nik!=='')continue;
-        $match=dashboard_identity_match((string)($row['name']??''),$techs);
-        if(!$match)continue;
-        $row['nik']=$match['nik'];
-        $row['name']=$match['name'];
-        if(trim((string)($row['sto']??''))==='')$row['sto']=$match['sto'];
-        $row['key']='NIK:'.$match['nik'];
+        $match=$nik!==''?($byNik[$nik]??null):dashboard_identity_match((string)($row['name']??''),$techs);
+        if($match){
+            $nik=(string)$match['nik'];
+            $row['nik']=$nik;
+            $row['name']=$match['name'];
+            if(trim((string)($row['sto']??''))==='')$row['sto']=$match['sto'];
+            $row['key']='NIK:'.$nik;
+        }
+
+        $mergeKey=$nik!==''?'NIK:'.$nik:(string)($row['key']??('NAME:'.dashboard_identity_clean_name($row['name']??'')));
+        if(!isset($normalized[$mergeKey])){
+            $row['key']=$mergeKey;
+            $normalized[$mergeKey]=$row;
+        }else{
+            $normalized[$mergeKey]['total']=(int)($normalized[$mergeKey]['total']??0)+(int)($row['total']??0);
+            if(trim((string)($normalized[$mergeKey]['area_label']??''))==='')$normalized[$mergeKey]['area_label']=$row['area_label']??'';
+            if(trim((string)($normalized[$mergeKey]['sto']??''))==='')$normalized[$mergeKey]['sto']=$row['sto']??'';
+        }
     }
-    unset($row);
+
+    $payload['leaderboard']=array_values($normalized);
+    usort($payload['leaderboard'],fn($a,$b)=>(int)($b['total']??0)<=>(int)($a['total']??0));
+
+    if(isset($payload['summary'])&&is_array($payload['summary'])){
+        $total=array_sum(array_map(fn($r)=>(int)($r['total']??0),$payload['leaderboard']));
+        $active=count(array_filter($payload['leaderboard'],fn($r)=>(int)($r['total']??0)>0));
+        $payload['summary']['total_close']=$total;
+        $payload['summary']['active_technicians']=$active;
+        $payload['summary']['average_close']=$active?round($total/$active,1):0;
+    }
     return $payload;
 }
