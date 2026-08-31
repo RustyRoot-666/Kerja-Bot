@@ -103,7 +103,7 @@ function loadMiniAppScript(src, marker) {
       return;
     }
     const script = document.createElement('script');
-    script.src = `${src}?v=20260831-supervisor-orders1`;
+    script.src = `${src}?v=20260831-report403fix1`;
     script.dataset[marker.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = '1';
     script.onload = () => {
       script.dataset.loaded = '1';
