@@ -32,4 +32,23 @@ if($path==='/api/technician-profile') {
     }
 }
 
+// Fast read-only route: opening/searching Master Teknisi must never run legacy normalization.
+if($path==='/api/technician-master' && strtoupper($_SERVER['REQUEST_METHOD']??'GET')==='GET') {
+    require_once __DIR__.'/php_backend.php';
+    require_once __DIR__.'/php_technician_master.php';
+    require_once __DIR__.'/php_technician_master_fast.php';
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    try {
+        $raw=trim((string)($_GET['telegram_id']??''));
+        if(!ctype_digit($raw)){http_response_code(400);echo json_encode(['ok'=>false,'error'=>'telegram_id_required']);exit;}
+        $result=technician_master_for_viewer_fast((int)$raw);
+        http_response_code(($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:404));
+        echo json_encode($result,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);exit;
+    } catch(Throwable $e) {
+        error_log('[miniapp-php] technician master fast read: '.$e->getMessage().' @ '.$e->getFile().':'.$e->getLine());
+        http_response_code(500);echo json_encode(['ok'=>false,'error'=>'internal_error','message'=>'Master Teknisi gagal dimuat.']);exit;
+    }
+}
+
 require __DIR__.'/php_router.php';
