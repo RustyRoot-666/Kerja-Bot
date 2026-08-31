@@ -103,7 +103,7 @@ function loadMiniAppScript(src, marker) {
       return;
     }
     const script = document.createElement('script');
-    script.src = `${src}?v=20260831-chart-switch1`;
+    script.src = `${src}?v=20260831-supervisor-report1`;
     script.dataset[marker.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = '1';
     script.onload = () => {
       script.dataset.loaded = '1';
@@ -115,6 +115,7 @@ function loadMiniAppScript(src, marker) {
 }
 
 loadMiniAppScript('/report_dashboard.js', 'report-dashboard')
+  .then(() => loadMiniAppScript('/report_supervisor.js', 'report-supervisor'))
   .then(() => loadMiniAppScript('/report_history_editor.js', 'report-history-editor'))
   .catch(error => console.error('Gagal memuat report enhancement', error));
 

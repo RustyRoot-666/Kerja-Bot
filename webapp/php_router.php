@@ -6,6 +6,7 @@ require __DIR__ . '/php_compat.php';
 require __DIR__ . '/php_manja.php';
 require __DIR__ . '/php_orderanku_fix.php';
 require __DIR__ . '/php_dismantle.php';
+require __DIR__ . '/php_supervisor_report.php';
 
 function respond(mixed $payload, int $status=200): never {
     http_response_code($status);
@@ -113,7 +114,9 @@ try {
     if ($method === 'GET' && $path === '/api/my-report') {
         $raw=trim((string)($_GET['telegram_id'] ?? ''));
         if (!ctype_digit($raw)) respond(['ok'=>false,'error'=>'telegram_id_required'],400);
-        $result=load_my_report_php((int)$raw); respond($result,$result['ok']?200:404);
+        $result=load_report_for_viewer_php((int)$raw,(string)($_GET['target_nik'] ?? ''));
+        $status=($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:404);
+        respond($result,$status);
     }
     if ($method === 'GET' && $path === '/api/workflow-drafts') {
         $raw=trim((string)($_GET['telegram_id'] ?? ''));
