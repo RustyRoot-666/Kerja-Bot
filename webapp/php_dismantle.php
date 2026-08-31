@@ -27,19 +27,47 @@ function ensure_dismantle_schema(): void {
     db()->exec("CREATE INDEX IF NOT EXISTS idx_dismantle_completed ON dismantle_orders(completed_at)");
 
     $seed = [
-        ['152303278616','M****','MULYOREJO TENGAH 1 NO 26 SURABAYA Jalan Ngagel Surabaya 60246 Surabaya Indonesia','JAWA TIMUR'],
-        ['152303277738','S****','Mulyorejo Tengah 1/30 Jalan Dokter Ir. Haji Soekarno Surabaya 60115 Surabaya Indonesia','JAWA TIMUR'],
-        ['152303272481','B*******','Mulyorejo Tengah Gang V No. 14 Mulyorejo Tengah Gang V Surabaya 00000 Surabaya Indonesia','JAWA TIMUR'],
-        ['152303271125','D****','Mulyorejo Tengah Gang V Surabaya','JAWA TIMUR'],
-        ['152303272779','N****','mulyorejo tengah gg 1 no 16','JAWA TIMUR'],
-        ['152303279918','M********','MULYOREJO TENGAH NO 51 SURABAYA','JAWA TIMUR'],
-        ['152303277003','*****','MULYOREJO TENGAH NO.37','JAWA TIMUR'],
+        ['152303278616','M****','MULYOREJO TENGAH 1 NO 26 SURABAYA Jalan Ngagel Surabaya 60246 Surabaya Indonesia','JAWA TIMUR','26050138','THOMAS GUSTIAN BAGYO','ThomasGustian'],
+        ['152303277738','S****','Mulyorejo Tengah 1/30 Jalan Dokter Ir. Haji Soekarno Surabaya 60115 Surabaya Indonesia','JAWA TIMUR','26050138','THOMAS GUSTIAN BAGYO','ThomasGustian'],
+        ['152303272481','B*******','Mulyorejo Tengah Gang V No. 14 Mulyorejo Tengah Gang V Surabaya 00000 Surabaya Indonesia','JAWA TIMUR','26050138','THOMAS GUSTIAN BAGYO','ThomasGustian'],
+        ['152303271125','D****','Mulyorejo Tengah Gang V Surabaya','JAWA TIMUR','26050138','THOMAS GUSTIAN BAGYO','ThomasGustian'],
+        ['152303272779','N****','mulyorejo tengah gg 1 no 16','JAWA TIMUR','26050138','THOMAS GUSTIAN BAGYO','ThomasGustian'],
+        ['152303279918','M********','MULYOREJO TENGAH NO 51 SURABAYA','JAWA TIMUR','26050138','THOMAS GUSTIAN BAGYO','ThomasGustian'],
+        ['152303277003','*****','MULYOREJO TENGAH NO.37','JAWA TIMUR','26050138','THOMAS GUSTIAN BAGYO','ThomasGustian'],
+
+        ['152303279073','H*****','RAYA SEMAMPIR NO.2 (KEDAI PYJAH','JAWA TIMUR','26970105','VICO INDIRA PURNOMO',''],
+        ['152303270561','ME*************','RAYA SEMAMPIR NO.95 /','JAWA TIMUR','26970105','VICO INDIRA PURNOMO','Vico_ip'],
+        ['152303271464','M********','Raya Semolowaru 151','JAWA TIMUR','26970105','VICO INDIRA PURNOMO','Vico_ip'],
+        ['152303279530','M********','RAYA SEMOLOWARU NO 89','JAWA TIMUR','26970105','VICO INDIRA PURNOMO','Vico_ip'],
+        ['152303278994','*****','RAYA SEMOLOWARU NO.56','JAWA TIMUR','26970105','VICO INDIRA PURNOMO','Vico_ip'],
+        ['152303279420','C*********','RAYA SUTOREJO NO.6, MULYOREJO','JAWA TIMUR','26970105','VICO INDIRA PURNOMO','Vico_ip'],
+        ['152303272328','F*****','Ruko 21 klampis blok F 19','JAWA TIMUR','26970105','VICO INDIRA PURNOMO','Vico_ip'],
+        ['152303201639','P******','RUKO KLAMPIS 21 F-2','JAWA TIMUR','26970105','VICO INDIRA PURNOMO','Vico_ip'],
+
+        ['152303277849','L*********','SEMAMPIR AWS 2 NO 17 B JALAN MEDOKAN SEMAMPIR','JAWA TIMUR','26880016','SENDRY FIRMANSYAH','Msbajoel'],
+        ['152303277762','LU*************','Semampir barat 2 no 26','JAWA TIMUR','26880016','SENDRY FIRMANSYAH','Msbajoel'],
+        ['152303279317','R*****','SEMAMPIR KELURAHAN NO 12','JAWA TIMUR','26880016','SENDRY FIRMANSYAH','Msbajoel'],
+        ['152303272655','N****','semampir tengah 2 no 41A belakang Jalan Dokter Ir. Haji Soekarno Surabaya 60115 Surabaya Indonesia','JAWA TIMUR','26880016','SENDRY FIRMANSYAH','Msbajoel'],
+        ['152303270978','A*****','SEMAMPIR TENGAH 5A NO 19 SURABAYA','JAWA TIMUR','26880016','SENDRY FIRMANSYAH','Msbajoel'],
+        ['152303271755','N****','Semampir tengah 8 blok E no 4','JAWA TIMUR','26880016','SENDRY FIRMANSYAH','Msbajoel'],
+        ['152303280382','C*****','SEMAMPIR TENGAH GANG 6A NO 22','JAWA TIMUR','26880016','SENDRY FIRMANSYAH','Msbajoel'],
+        ['152303203053','W*****','SEMAMPIR TENGAH VIII C NO.13','JAWA TIMUR','26880016','SENDRY FIRMANSYAH','Msbajoel'],
+        ['152303278337','G*******','Semampir Utara NO.20','JAWA TIMUR','26880016','SENDRY FIRMANSYAH','Msbajoel'],
+        ['152303277832','*****','semanpir selatan 3a/71 Jalan Semolowaru Elok Surabaya 60119 Surabaya Indonesia','JAWA TIMUR','26880016','SENDRY FIRMANSYAH','Msbajoel'],
     ];
     $st = db()->prepare("INSERT OR IGNORE INTO dismantle_orders (
-        service_number,customer_name,address,customer_phone,assigned_nik,assigned_name,assigned_username,
+        service_number,customer_name,address,customer_phone,assigned_nik,assigned_name,assigned_username,assigned_telegram_id,
         status,raw_source,created_at,updated_at
-    ) VALUES (?,?,?,?, '26050138','THOMAS GUSTIAN BAGYO','ThomasGustian','OPEN','SEED OSA MYR',datetime('now'),datetime('now'))");
-    foreach ($seed as $row) $st->execute($row);
+    ) VALUES (?,?,?,?,?,?,?,?,'OPEN','SEED OSA MYR',datetime('now'),datetime('now'))");
+    foreach ($seed as $row) {
+        [$inet,$name,$address,$cp,$nik,$assignedName,$username] = $row;
+        $telegramId = null;
+        $find = db()->prepare("SELECT telegram_id FROM technicians WHERE TRIM(nik)=? LIMIT 1");
+        $find->execute([$nik]);
+        $found = $find->fetchColumn();
+        if ($found !== false && $found !== null && $found !== '') $telegramId = (int)$found;
+        $st->execute([$inet,$name,$address,$cp,$nik,$assignedName,$username,$telegramId]);
+    }
     $ready = true;
 }
 
