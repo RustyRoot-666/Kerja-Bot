@@ -10,6 +10,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from database import Database
+from services.dismantle_orders import capture_dismantle_order
 
 TARGET_GROUP = "WORK ORDER JAGIR"
 BLOCK_SPLIT_RE = re.compile(r"\n\s*==\s*\n", re.IGNORECASE)
@@ -76,7 +77,6 @@ def _remember_username_sync(database_path, telegram_id: int, username: str, nik:
     now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
     with sqlite3.connect(database_path) as conn:
         _ensure_tables(conn)
-        # Username Telegram dapat pindah akun; hapus mapping lama sebelum upsert.
         conn.execute("DELETE FROM technician_usernames WHERE username=? AND telegram_id<>?", (username, telegram_id))
         conn.execute(
             """
@@ -117,7 +117,6 @@ def _resolve_tag(conn: sqlite3.Connection, username: str) -> tuple[int | None, s
     if row:
         return int(row[0]), str(row[1] or ""), str(row[2] or "")
 
-    # Fallback aman untuk nama Telegram yang memang sama dengan nama teknisi tanpa spasi.
     candidates = conn.execute("SELECT telegram_id, nik, name FROM technicians WHERE TRIM(name) != ''").fetchall()
     compact_tag = re.sub(r"[^a-z0-9]", "", username)
     exact = []
@@ -227,6 +226,10 @@ def _store_batch(database_path, text: str, chat_id: int, message_id: int) -> tup
 
 
 async def capture_jagir_work_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Handler ini sudah berada di jalur awal semua pesan grup. Gunakan jalur yang sama
+    # untuk menangkap WO dismantling dari grup Replacement NTE MANYAR.
+    await capture_dismantle_order(update, context)
+
     chat = update.effective_chat
     message = update.effective_message
     if not chat or not message or chat.type not in {"group", "supergroup"}:
