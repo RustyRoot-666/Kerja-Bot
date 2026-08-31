@@ -42,6 +42,7 @@ function smartBack() {
 
     if (document.querySelector('#wfOrders')) {
       if (action) renderWorkflowAreas(action, state.myOpenOrders);
+      else if (action) renderWorkflowHome();
       else renderWorkflowHome();
       return;
     }
@@ -103,7 +104,7 @@ function loadMiniAppScript(src, marker) {
       return;
     }
     const script = document.createElement('script');
-    script.src = `${src}?v=20260831-unified-workflow1`;
+    script.src = `${src}?v=20260831-dashboard-identity2`;
     script.dataset[marker.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = '1';
     script.onload = () => {
       script.dataset.loaded = '1';
