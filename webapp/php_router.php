@@ -8,6 +8,7 @@ require __DIR__ . '/php_orderanku_fix.php';
 require __DIR__ . '/php_dismantle.php';
 require __DIR__ . '/php_supervisor_report.php';
 require __DIR__ . '/php_supervisor_orders.php';
+require __DIR__ . '/php_unified_workflow.php';
 
 function respond(mixed $payload, int $status=200): never {
     http_response_code($status);
@@ -83,6 +84,7 @@ try {
         $raw=trim((string)($_GET['telegram_id'] ?? ''));
         if (!ctype_digit($raw)) respond(['ok'=>false,'error'=>'telegram_id_required'],400);
         $result=load_orders_for_viewer_php((int)$raw,(string)($_GET['target_nik'] ?? ''),((string)($_GET['force'] ?? '0')) === '1');
+        if ($result['ok'] ?? false) $result=unified_enrich_open_orders_result($result,(int)$raw);
         $status=($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:404);
         respond($result,$status);
     }
@@ -121,13 +123,31 @@ try {
         $status=($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:404);
         respond($result,$status);
     }
+    if ($method === 'GET' && $path === '/api/unified-workflow') {
+        $raw=trim((string)($_GET['telegram_id'] ?? ''));
+        if (!ctype_digit($raw)) respond(['ok'=>false,'error'=>'telegram_id_required'],400);
+        $result=unified_get_workflow_state((int)$raw,(string)($_GET['service_number'] ?? ''),(string)($_GET['ticket_id'] ?? ''));
+        $status=($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:404);
+        respond($result,$status);
+    }
+    if ($method === 'POST' && $path === '/api/unified-workflow') {
+        $result=unified_sync_workflow_payload(input_json());
+        respond($result,($result['ok']??false)?200:400);
+    }
     if ($method === 'GET' && $path === '/api/workflow-drafts') {
         $raw=trim((string)($_GET['telegram_id'] ?? ''));
         if (!ctype_digit($raw)) respond(['ok'=>false,'error'=>'telegram_id_required'],400);
         $result=load_workflow_drafts((int)$raw); respond($result,$result['ok']?200:404);
     }
     if ($method === 'POST' && $path === '/api/workflow-drafts') {
-        $result=save_workflow_draft(input_json()); respond($result,$result['ok']?200:400);
+        $payload=input_json();
+        $result=save_workflow_draft($payload);
+        if ($result['ok'] ?? false) {
+            $sync=unified_sync_workflow_payload($payload);
+            $result['unified_sync']=$sync['ok']??false;
+            if ($sync['ok']??false) $result['master_updated_at']=$sync['updated_at']??null;
+        }
+        respond($result,$result['ok']?200:400);
     }
     if ($method === 'DELETE' && $path === '/api/workflow-drafts') {
         $raw=trim((string)($_GET['telegram_id']??''));
@@ -145,7 +165,11 @@ try {
         $ok=update_history((int)$raw,(int)$hid,(string)($p['content']??'')); respond(['ok'=>$ok],$ok?200:404);
     }
     if ($method === 'POST' && $path === '/api/workflow-complete') {
-        $result=complete_workflow(input_json()); respond($result,$result['ok']?200:400);
+        $payload=input_json();
+        $sync=unified_sync_workflow_payload($payload);
+        $result=complete_workflow($payload);
+        $result['unified_sync']=$sync['ok']??false;
+        respond($result,$result['ok']?200:400);
     }
     respond(['ok'=>false,'error'=>'not_found','path'=>$path],404);
 } catch (Throwable $e) {

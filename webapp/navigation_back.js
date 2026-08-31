@@ -103,7 +103,7 @@ function loadMiniAppScript(src, marker) {
       return;
     }
     const script = document.createElement('script');
-    script.src = `${src}?v=20260831-report403fix1`;
+    script.src = `${src}?v=20260831-unified-workflow1`;
     script.dataset[marker.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = '1';
     script.onload = () => {
       script.dataset.loaded = '1';
@@ -123,6 +123,7 @@ loadMiniAppScript('/leaderboard_identity_fix.js', 'leaderboard-identity-fix')
   .catch(error => console.error('Gagal memuat identity fix', error));
 
 loadMiniAppScript('/draft_history.js', 'draft-history')
+  .then(() => loadMiniAppScript('/unified_workflow_ui.js', 'unified-workflow-ui'))
   .then(() => loadMiniAppScript('/input_code_editor.js', 'input-code-editor'))
   .catch(error => console.error('Gagal memuat workflow enhancement', error));
 

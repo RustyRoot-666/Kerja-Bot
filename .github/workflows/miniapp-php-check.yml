@@ -38,6 +38,8 @@ jobs:
           php -l webapp/php_orderanku_fix.php
           php -l webapp/php_dismantle.php
           php -l webapp/php_supervisor_report.php
+          php -l webapp/php_supervisor_orders.php
+          php -l webapp/php_unified_workflow.php
           php -l webapp/php_router.php
       - name: JavaScript syntax
         run: |
@@ -49,6 +51,7 @@ jobs:
           node --check webapp/dismantle_ui.js
           node --check webapp/dashboard_chart_switch.js
           node --check webapp/report_supervisor.js
+          node --check webapp/unified_workflow_ui.js
       - name: Python syntax
         run: |
           python -m py_compile main.py services/dismantle_orders.py services/jagir_work_orders.py
