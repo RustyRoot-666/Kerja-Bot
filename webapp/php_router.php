@@ -9,6 +9,8 @@ require __DIR__ . '/php_dismantle.php';
 require __DIR__ . '/php_supervisor_report.php';
 require __DIR__ . '/php_supervisor_orders.php';
 require __DIR__ . '/php_unified_workflow.php';
+require __DIR__ . '/php_technician_master.php';
+require __DIR__ . '/php_technician_master_bootstrap.php';
 
 function respond(mixed $payload, int $status=200): never {
     http_response_code($status);
@@ -49,128 +51,79 @@ function serve_static_no_cache(string $file): never {
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 
-if ($path === '/' || $path === '/index.html') {
-    serve_static_no_cache(__DIR__ . '/index.html');
-}
-
+if ($path === '/' || $path === '/index.html') serve_static_no_cache(__DIR__ . '/index.html');
 if (!str_starts_with($path, '/api/') && $path !== '/health') {
-    $candidate = realpath(__DIR__ . $path);
-    $base = realpath(__DIR__);
-    if ($candidate && $base && str_starts_with($candidate, $base . DIRECTORY_SEPARATOR) && is_file($candidate)) {
-        serve_static_no_cache($candidate);
-    }
-    http_response_code(404);
-    echo 'Not Found';
-    exit;
+    $candidate = realpath(__DIR__ . $path); $base = realpath(__DIR__);
+    if ($candidate && $base && str_starts_with($candidate, $base . DIRECTORY_SEPARATOR) && is_file($candidate)) serve_static_no_cache($candidate);
+    http_response_code(404); echo 'Not Found'; exit;
 }
 
 try {
-    if ($method === 'GET' && $path === '/health') {
-        respond(['ok'=>true,'backend'=>'php','php'=>PHP_VERSION,'database'=>db_path()]);
-    }
+    technician_master_bootstrap();
+    if ($method === 'GET' && $path === '/health') respond(['ok'=>true,'backend'=>'php','php'=>PHP_VERSION,'database'=>db_path()]);
     if ($method === 'GET' && $path === '/api/dashboard') {
-        respond(load_dashboard_php((string)($_GET['area'] ?? 'ALL'), (string)($_GET['period'] ?? 'daily')));
+        $result=load_dashboard_php((string)($_GET['area'] ?? 'ALL'), (string)($_GET['period'] ?? 'daily'));
+        respond(canonicalize_dashboard_payload($result));
     }
-    if ($method === 'GET' && $path === '/api/rca-summary') {
-        respond(load_rca_summary_php((string)($_GET['area'] ?? 'ALL')));
-    }
+    if ($method === 'GET' && $path === '/api/rca-summary') respond(load_rca_summary_php((string)($_GET['area'] ?? 'ALL')));
     if ($method === 'GET' && $path === '/api/technician') {
         $key = trim((string)($_GET['key'] ?? $_GET['nik'] ?? ''));
         if ($key === '') respond(['error'=>'key required'], 400);
         if (!str_starts_with($key,'NAME:') && !str_starts_with($key,'NIK:')) $key='NIK:'.norm_key($key);
         respond(load_technician($key,(string)($_GET['area'] ?? 'ALL')));
     }
+    if ($method === 'GET' && $path === '/api/technician-master') {
+        $raw=trim((string)($_GET['telegram_id'] ?? ''));
+        if(!ctype_digit($raw))respond(['ok'=>false,'error'=>'telegram_id_required'],400);
+        $result=technician_master_for_viewer((int)$raw);
+        respond($result,($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:404));
+    }
+    if ($method === 'POST' && $path === '/api/technician-master') {
+        $result=save_technician_master(input_json());
+        respond($result,($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:400));
+    }
+    if ($method === 'POST' && $path === '/api/technician-master/normalize') {
+        $p=input_json();$raw=trim((string)($p['telegram_id']??''));
+        if(!ctype_digit($raw))respond(['ok'=>false,'error'=>'invalid_request'],400);
+        $viewer=technician_by_telegram((int)$raw);
+        if(!$viewer||!report_is_supervisor($viewer))respond(['ok'=>false,'error'=>'forbidden'],403);
+        respond(normalize_technician_data());
+    }
     if ($method === 'GET' && $path === '/api/my-open-orders') {
         $raw=trim((string)($_GET['telegram_id'] ?? ''));
         if (!ctype_digit($raw)) respond(['ok'=>false,'error'=>'telegram_id_required'],400);
         $result=load_orders_for_viewer_php((int)$raw,(string)($_GET['target_nik'] ?? ''),((string)($_GET['force'] ?? '0')) === '1');
         if ($result['ok'] ?? false) $result=unified_enrich_open_orders_result($result,(int)$raw);
-        $status=($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:404);
-        respond($result,$status);
+        $status=($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:404); respond($result,$status);
     }
     if ($method === 'GET' && $path === '/api/dismantle-orders') {
-        $raw=trim((string)($_GET['telegram_id'] ?? ''));
-        if (!ctype_digit($raw)) respond(['ok'=>false,'error'=>'telegram_id_required'],400);
-        $result=load_dismantle_for_viewer_php((int)$raw,(string)($_GET['target_nik'] ?? ''));
-        $status=($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:404);
-        respond($result,$status);
+        $raw=trim((string)($_GET['telegram_id'] ?? '')); if (!ctype_digit($raw)) respond(['ok'=>false,'error'=>'telegram_id_required'],400);
+        $result=load_dismantle_for_viewer_php((int)$raw,(string)($_GET['target_nik'] ?? '')); $status=($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:404); respond($result,$status);
     }
-    if ($method === 'POST' && $path === '/api/dismantle-orders/complete') {
-        $result=complete_dismantle_order(input_json());
-        respond($result,$result['ok']?200:400);
-    }
+    if ($method === 'POST' && $path === '/api/dismantle-orders/complete') {$result=complete_dismantle_order(input_json());respond($result,$result['ok']?200:400);}
     if ($method === 'GET' && $path === '/api/open-order-search') {
-        $raw=trim((string)($_GET['telegram_id'] ?? ''));
-        if (!ctype_digit($raw)) respond(['ok'=>false,'error'=>'telegram_id_required'],400);
-        $result=search_open_orders((int)$raw,(string)($_GET['q'] ?? ''),((string)($_GET['force'] ?? '0'))==='1');
-        $status=$result['ok']?200:(($result['error']??'')==='query_too_short'?400:404);
-        respond($result,$status);
+        $raw=trim((string)($_GET['telegram_id'] ?? ''));if (!ctype_digit($raw)) respond(['ok'=>false,'error'=>'telegram_id_required'],400);
+        $result=search_open_orders((int)$raw,(string)($_GET['q'] ?? ''),((string)($_GET['force'] ?? '0'))==='1');$status=$result['ok']?200:(($result['error']??'')==='query_too_short'?400:404);respond($result,$status);
     }
-    if ($method === 'GET' && $path === '/api/manja') {
-        $raw=trim((string)($_GET['telegram_id'] ?? ''));
-        if (!ctype_digit($raw)) respond(['ok'=>false,'error'=>'telegram_id_required'],400);
-        $result=load_manja_for_technician((int)$raw);
-        respond($result,$result['ok']?200:404);
-    }
-    if ($method === 'POST' && $path === '/api/manja') {
-        $result=save_manja_from_miniapp(input_json());
-        respond($result,$result['ok']?200:400);
-    }
+    if ($method === 'GET' && $path === '/api/manja') {$raw=trim((string)($_GET['telegram_id'] ?? ''));if (!ctype_digit($raw)) respond(['ok'=>false,'error'=>'telegram_id_required'],400);$result=load_manja_for_technician((int)$raw);respond($result,$result['ok']?200:404);}
+    if ($method === 'POST' && $path === '/api/manja') {$result=save_manja_from_miniapp(input_json());respond($result,$result['ok']?200:400);}
     if ($method === 'GET' && $path === '/api/my-report') {
-        $raw=trim((string)($_GET['telegram_id'] ?? ''));
-        if (!ctype_digit($raw)) respond(['ok'=>false,'error'=>'telegram_id_required'],400);
-        $result=load_report_for_viewer_php((int)$raw,(string)($_GET['target_nik'] ?? ''));
-        $status=($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:404);
-        respond($result,$status);
+        $raw=trim((string)($_GET['telegram_id'] ?? ''));if (!ctype_digit($raw)) respond(['ok'=>false,'error'=>'telegram_id_required'],400);
+        $result=load_report_for_viewer_php((int)$raw,(string)($_GET['target_nik'] ?? ''));$status=($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:404);respond($result,$status);
     }
     if ($method === 'GET' && $path === '/api/unified-workflow') {
-        $raw=trim((string)($_GET['telegram_id'] ?? ''));
-        if (!ctype_digit($raw)) respond(['ok'=>false,'error'=>'telegram_id_required'],400);
-        $result=unified_get_workflow_state((int)$raw,(string)($_GET['service_number'] ?? ''),(string)($_GET['ticket_id'] ?? ''));
-        $status=($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:404);
-        respond($result,$status);
+        $raw=trim((string)($_GET['telegram_id'] ?? ''));if (!ctype_digit($raw)) respond(['ok'=>false,'error'=>'telegram_id_required'],400);
+        $result=unified_get_workflow_state((int)$raw,(string)($_GET['service_number'] ?? ''),(string)($_GET['ticket_id'] ?? ''));$status=($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:404);respond($result,$status);
     }
-    if ($method === 'POST' && $path === '/api/unified-workflow') {
-        $result=unified_sync_workflow_payload(input_json());
-        respond($result,($result['ok']??false)?200:400);
-    }
-    if ($method === 'GET' && $path === '/api/workflow-drafts') {
-        $raw=trim((string)($_GET['telegram_id'] ?? ''));
-        if (!ctype_digit($raw)) respond(['ok'=>false,'error'=>'telegram_id_required'],400);
-        $result=load_workflow_drafts((int)$raw); respond($result,$result['ok']?200:404);
-    }
+    if ($method === 'POST' && $path === '/api/unified-workflow') {$result=unified_sync_workflow_payload(input_json());respond($result,($result['ok']??false)?200:400);}
+    if ($method === 'GET' && $path === '/api/workflow-drafts') {$raw=trim((string)($_GET['telegram_id'] ?? ''));if (!ctype_digit($raw)) respond(['ok'=>false,'error'=>'telegram_id_required'],400);$result=load_workflow_drafts((int)$raw);respond($result,$result['ok']?200:404);}
     if ($method === 'POST' && $path === '/api/workflow-drafts') {
-        $payload=input_json();
-        $result=save_workflow_draft($payload);
-        if ($result['ok'] ?? false) {
-            $sync=unified_sync_workflow_payload($payload);
-            $result['unified_sync']=$sync['ok']??false;
-            if ($sync['ok']??false) $result['master_updated_at']=$sync['updated_at']??null;
-        }
-        respond($result,$result['ok']?200:400);
+        $payload=input_json();$result=save_workflow_draft($payload);if ($result['ok'] ?? false) {$sync=unified_sync_workflow_payload($payload);$result['unified_sync']=$sync['ok']??false;if ($sync['ok']??false) $result['master_updated_at']=$sync['updated_at']??null;}respond($result,$result['ok']?200:400);
     }
-    if ($method === 'DELETE' && $path === '/api/workflow-drafts') {
-        $raw=trim((string)($_GET['telegram_id']??''));
-        if(!ctype_digit($raw))respond(['ok'=>false,'error'=>'telegram_id_required'],400);
-        respond(delete_workflow_draft((int)$raw,(string)($_GET['action']??''),(string)($_GET['service_number']??'')));
-    }
-    if ($method === 'GET' && $path === '/api/workflow-history') {
-        $raw=trim((string)($_GET['telegram_id']??''));$service=trim((string)($_GET['service_number']??''));
-        if(!ctype_digit($raw)||$service==='')respond(['ok'=>false,'error'=>'invalid_request'],400);
-        respond(['ok'=>true,'service_number'=>$service,'items'=>workflow_history((int)$raw,$service)]);
-    }
-    if ($method === 'POST' && $path === '/api/workflow-history') {
-        $p=input_json();$raw=(string)($p['telegram_id']??'');$hid=(string)($p['history_id']??'');
-        if(!ctype_digit($raw)||!ctype_digit($hid))respond(['ok'=>false,'error'=>'invalid_request'],400);
-        $ok=update_history((int)$raw,(int)$hid,(string)($p['content']??'')); respond(['ok'=>$ok],$ok?200:404);
-    }
-    if ($method === 'POST' && $path === '/api/workflow-complete') {
-        $payload=input_json();
-        $sync=unified_sync_workflow_payload($payload);
-        $result=complete_workflow($payload);
-        $result['unified_sync']=$sync['ok']??false;
-        respond($result,$result['ok']?200:400);
-    }
+    if ($method === 'DELETE' && $path === '/api/workflow-drafts') {$raw=trim((string)($_GET['telegram_id']??''));if(!ctype_digit($raw))respond(['ok'=>false,'error'=>'telegram_id_required'],400);respond(delete_workflow_draft((int)$raw,(string)($_GET['action']??''),(string)($_GET['service_number']??'')));}
+    if ($method === 'GET' && $path === '/api/workflow-history') {$raw=trim((string)($_GET['telegram_id']??''));$service=trim((string)($_GET['service_number']??''));if(!ctype_digit($raw)||$service==='')respond(['ok'=>false,'error'=>'invalid_request'],400);respond(['ok'=>true,'service_number'=>$service,'items'=>workflow_history((int)$raw,$service)]);}
+    if ($method === 'POST' && $path === '/api/workflow-history') {$p=input_json();$raw=(string)($p['telegram_id']??'');$hid=(string)($p['history_id']??'');if(!ctype_digit($raw)||!ctype_digit($hid))respond(['ok'=>false,'error'=>'invalid_request'],400);$ok=update_history((int)$raw,(int)$hid,(string)($p['content']??''));respond(['ok'=>$ok],$ok?200:404);}
+    if ($method === 'POST' && $path === '/api/workflow-complete') {$payload=input_json();$sync=unified_sync_workflow_payload($payload);$result=complete_workflow($payload);$result['unified_sync']=$sync['ok']??false;respond($result,$result['ok']?200:400);}
     respond(['ok'=>false,'error'=>'not_found','path'=>$path],404);
 } catch (Throwable $e) {
     error_log('[miniapp-php] '.$e->getMessage().' @ '.$e->getFile().':'.$e->getLine());
