@@ -63,10 +63,10 @@ function load_report_for_viewer_php(int $viewerTelegramId,string $targetNik=''):
     if(!$supervisor){
         if($target!==''&&$target!==trim((string)($viewer['nik']??'')))return['ok'=>false,'error'=>'forbidden','message'=>'Anda tidak memiliki akses laporan teknisi lain.'];
         $payload=load_my_report_php($viewerTelegramId);
+        if($payload['ok']??false)$payload['technician']=report_canonical_technician($payload['technician']);
     } elseif($target===''||strtoupper($target)==='ALL') {$payload=load_all_technician_reports_php($viewerTelegramId);}
     else {$tech=report_target_by_nik($target);if(!$tech)return['ok'=>false,'error'=>'technician_not_found','message'=>'NIK teknisi tidak ditemukan.'];$tid=(int)($tech['telegram_id']??0);if($tid<=0)return['ok'=>false,'error'=>'technician_not_linked','message'=>'Teknisi belum terhubung ke akun Telegram.'];$payload=load_my_report_php($tid);if($payload['ok']??false){$payload['technician']['name']=$tech['name'];$payload['technician']['nik']=$tech['nik'];$payload['technician']['sto']=$tech['sto'];foreach($payload['orders'] as &$order){$order['technician_nik']=(string)$tech['nik'];$order['technician_name']=(string)$tech['name'];}unset($order);}}
     if(!($payload['ok']??false))return$payload;
-    if(($payload['technician']['nik']??'')!=='ALL')$payload['technician']=array_merge($payload['technician'],array_intersect_key($viewer,array_flip(['name','nik','sto'])));
     $payload['viewer']=['telegram_id'=>$viewerTelegramId,'nik'=>(string)($viewer['nik']??''),'name'=>(string)($viewer['name']??'-'),'sto'=>strtoupper(trim((string)($viewer['sto']??'')))];
     $payload['supervisor']=$supervisor;$payload['can_filter_nik']=$supervisor;$payload['selected_nik']=$supervisor?($target===''?'ALL':strtoupper($target)):(string)($viewer['nik']??'');$payload['technicians']=$supervisor?report_filter_technicians():[];
     return$payload;
