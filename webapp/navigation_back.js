@@ -15,6 +15,12 @@ function smartBack() {
   const page = currentVisiblePage();
   if (!page) return;
 
+  const dismantleOverlay = document.querySelector('#dismantleOverlay');
+  if (dismantleOverlay && !dismantleOverlay.classList.contains('hidden')) {
+    dismantleOverlay.classList.add('hidden');
+    return;
+  }
+
   if (page.id === 'inputPage') {
     const action = state.workflow?.action;
 
@@ -97,7 +103,7 @@ function loadMiniAppScript(src, marker) {
       return;
     }
     const script = document.createElement('script');
-    script.src = `${src}?v=20260830-scrollguard1`;
+    script.src = `${src}?v=20260831-dismantle1`;
     script.dataset[marker.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = '1';
     script.onload = () => {
       script.dataset.loaded = '1';
@@ -122,7 +128,8 @@ loadMiniAppScript('/draft_history.js', 'draft-history')
 loadMiniAppScript('/order_detail.js', 'order-detail')
   .then(() => loadMiniAppScript('/orderanku_android_fix.js', 'orderanku-android-fix'))
   .then(() => loadMiniAppScript('/manja_ui_v2.js', 'manja-ui-v2'))
-  .catch(error => console.error('Gagal memuat detail order/MANJA', error));
+  .then(() => loadMiniAppScript('/dismantle_ui.js', 'dismantle-ui'))
+  .catch(error => console.error('Gagal memuat detail order/MANJA/DISMANTLE', error));
 
 loadMiniAppScript('/interactive_ui.js', 'interactive-ui')
   .catch(error => console.error('Gagal memuat interaction enhancement', error));
