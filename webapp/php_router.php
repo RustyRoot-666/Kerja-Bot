@@ -5,6 +5,7 @@ require __DIR__ . '/php_backend.php';
 require __DIR__ . '/php_compat.php';
 require __DIR__ . '/php_manja.php';
 require __DIR__ . '/php_orderanku_fix.php';
+require __DIR__ . '/php_dismantle.php';
 
 function respond(mixed $payload, int $status=200): never {
     http_response_code($status);
@@ -81,6 +82,16 @@ try {
         if (!ctype_digit($raw)) respond(['ok'=>false,'error'=>'telegram_id_required'],400);
         $result=load_my_open_orders_fixed((int)$raw, ((string)($_GET['force'] ?? '0')) === '1');
         respond($result, $result['ok'] ? 200 : 404);
+    }
+    if ($method === 'GET' && $path === '/api/dismantle-orders') {
+        $raw=trim((string)($_GET['telegram_id'] ?? ''));
+        if (!ctype_digit($raw)) respond(['ok'=>false,'error'=>'telegram_id_required'],400);
+        $result=load_dismantle_orders((int)$raw);
+        respond($result,$result['ok']?200:404);
+    }
+    if ($method === 'POST' && $path === '/api/dismantle-orders/complete') {
+        $result=complete_dismantle_order(input_json());
+        respond($result,$result['ok']?200:400);
     }
     if ($method === 'GET' && $path === '/api/open-order-search') {
         $raw=trim((string)($_GET['telegram_id'] ?? ''));
