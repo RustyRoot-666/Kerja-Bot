@@ -3,6 +3,7 @@ name: Mini App PHP checks
 on:
   push:
     paths:
+      - 'main.py'
       - 'webapp/*.php'
       - 'webapp/*.js'
       - 'services/dismantle_orders.py'
@@ -12,6 +13,7 @@ on:
       - '.github/workflows/miniapp-php-check.yml'
   pull_request:
     paths:
+      - 'main.py'
       - 'webapp/*.php'
       - 'webapp/*.js'
       - 'services/dismantle_orders.py'
@@ -49,7 +51,7 @@ jobs:
           node --check webapp/report_supervisor.js
       - name: Python syntax
         run: |
-          python -m py_compile services/dismantle_orders.py services/jagir_work_orders.py
+          python -m py_compile main.py services/dismantle_orders.py services/jagir_work_orders.py
       - name: Compose config
         run: |
           touch .env

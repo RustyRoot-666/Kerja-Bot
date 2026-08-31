@@ -43,6 +43,7 @@ from services.daily_recap import (
     send_previous_week_recaps_once,
     send_weekly_recaps,
 )
+from services.dismantle_orders import capture_dismantle_order, initialize_dismantle_orders
 from services.google_sheet_reference import (
     get_reference_statuses,
     initialize_sheet_config,
@@ -181,6 +182,7 @@ async def post_init(application: Application) -> None:
     await db.initialize()
     await orders.initialize()
     await initialize_sheet_config(application.bot_data["settings"].database_path)
+    await initialize_dismantle_orders(application.bot_data["settings"].database_path)
     await initialize_recap_delivery_log(db)
 
     try:
@@ -242,7 +244,7 @@ async def post_init(application: Application) -> None:
         )
 
     logging.info(
-        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, universal /leaderboard, area daily close, hourly REPORT progress, universal /sto parser, JAGIR work-order parser, JAGIR internal report tracking, Hermes /ai read-only assistant, Telegram history import/export, private technician /laporan, group REPORT /laporan monitoring, /perintah technician guide, multi-topic /sto report, name-only /sto compatibility, /update kendala, dual-source MANJA + reminders, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, and previous-week catch-up initialized"
+        "Bot started; technician, order, Google Sheets config, auto-sync, daily recap, weekly recap, universal /leaderboard, area daily close, hourly REPORT progress, universal /sto parser, JAGIR work-order parser, DISMANTLE NTE Manyar auto-capture, JAGIR internal report tracking, Hermes /ai read-only assistant, Telegram history import/export, private technician /laporan, group REPORT /laporan monitoring, /perintah technician guide, multi-topic /sto report, name-only /sto compatibility, /update kendala, dual-source MANJA + reminders, public evidence links, /assign NTE Manyar, private /tiket, /format WhatsApp customer, and previous-week catch-up initialized"
     )
 
 
@@ -278,6 +280,8 @@ def build_application() -> Application:
 
     # Catat username teknisi dari setiap update agar @tag WO dapat dipetakan ke NIK.
     app.add_handler(MessageHandler(filters.ALL, remember_technician_username), group=-20)
+    # WO DISMANTLE dari grup Replacement NTE MANYAR ditangkap sebelum handler grup lain.
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS, capture_dismantle_order), group=-13)
     # WORK ORDER JAGIR diproses sebelum handler grup lain dan selalu dikunci ke STO JGR.
     app.add_handler(MessageHandler(filters.ChatType.GROUPS, capture_jagir_work_order), group=-12)
     app.add_handler(
