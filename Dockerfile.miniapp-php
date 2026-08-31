@@ -17,6 +17,7 @@ RUN sed -i "s#\$rawNik=trim((string)\$r\['nik'\];#\$rawNik=trim((string)\$r['nik
     && php -l /app/webapp/php_orderanku_fix.php \
     && php -l /app/webapp/php_dismantle.php \
     && php -l /app/webapp/php_technician_profile.php \
+    && php -l /app/webapp/php_dashboard_identity_readonly.php \
     && php -l /app/webapp/php_entry_router.php \
     && php -l /app/webapp/php_router.php
 
