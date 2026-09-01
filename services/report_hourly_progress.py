@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -30,6 +31,19 @@ SECONDARY_STO_CODE = "JGR"
 
 def _normalized(value: str | None) -> str:
     return " ".join(str(value or "").strip().upper().split())
+
+
+def _clean_technician_name(value: str | None) -> str:
+    text = _normalized(value)
+    text = re.sub(r"^(?:(?:NAME|NAMA)\s*)?[-:=|]+\s*", "", text).strip()
+    text = re.sub(r"^(?:NAME|NAMA)\s*[-:=|]*\s*", "", text).strip()
+    text = re.sub(r"[^A-Z0-9]+", " ", text)
+    return _normalized(text)
+
+
+def _digits(value: object) -> str:
+    raw = str(value or "").strip()
+    return raw if raw.isdigit() else ""
 
 
 def _target_title() -> str:
@@ -89,17 +103,78 @@ def _get_target(database_path: Path) -> int | None:
     return _get_setting(database_path, TARGET_SETTING_KEY)
 
 
+def _technician_registry(conn: sqlite3.Connection) -> tuple[dict[str, dict[str, str]], dict[int, dict[str, str]], list[dict[str, str]]]:
+    try:
+        rows = conn.execute(
+            "SELECT telegram_id, nik, name, sto FROM technicians WHERE TRIM(COALESCE(nik,'')) <> '' AND TRIM(COALESCE(name,'')) <> ''"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {}, {}, []
+
+    by_nik: dict[str, dict[str, str]] = {}
+    by_telegram: dict[int, dict[str, str]] = {}
+    all_rows: list[dict[str, str]] = []
+    for row in rows:
+        nik = _digits(row["nik"])
+        name = _clean_technician_name(row["name"])
+        if not nik or not name:
+            continue
+        item = {
+            "nik": nik,
+            "name": name,
+            "sto": _normalized(row["sto"]),
+        }
+        by_nik[nik] = item
+        telegram_id = int(row["telegram_id"] or 0)
+        if telegram_id:
+            by_telegram[telegram_id] = item
+        all_rows.append(item)
+    return by_nik, by_telegram, all_rows
+
+
+def _resolve_by_name(name: str, registry: list[dict[str, str]]) -> dict[str, str] | None:
+    key = _clean_technician_name(name)
+    if not key:
+        return None
+    matches: dict[str, dict[str, str]] = {}
+    for item in registry:
+        canonical = item["name"]
+        if canonical == key or canonical.startswith(key + " ") or key.startswith(canonical + " "):
+            matches[item["nik"]] = item
+    if len(matches) != 1:
+        return None
+    return next(iter(matches.values()))
+
+
+def _canonical_identity(
+    raw_nik: object,
+    raw_name: object,
+    by_nik: dict[str, dict[str, str]],
+    registry: list[dict[str, str]],
+) -> tuple[str, str, str]:
+    nik = _digits(raw_nik)
+    if nik and nik in by_nik:
+        item = by_nik[nik]
+        return f"NIK:{nik}", item["name"], nik
+    match = _resolve_by_name(str(raw_name or ""), registry)
+    if match:
+        return f"NIK:{match['nik']}", match["name"], match["nik"]
+    clean = _clean_technician_name(str(raw_name or "")) or "-"
+    return f"NAME:{clean}", clean, nik
+
+
 def _today_progress_rows(
     database_path: Path,
     day_iso: str,
     sto_code: str,
 ) -> list[tuple[str, int, int]]:
-    """Return CLOSE/UPDATE per technician for one local day and one STO."""
+    """Return CLOSE/UPDATE per canonical technician for one local day and one STO."""
     conn = sqlite3.connect(database_path)
     conn.row_factory = sqlite3.Row
     sto_code = _normalized(sto_code)
     try:
         ensure_area_tracking_table(conn)
+        by_nik, by_telegram, registry = _technician_registry(conn)
         try:
             area_predicate, area_params = area_order_condition(sto_code, "r")
             close_rows = conn.execute(
@@ -117,9 +192,6 @@ def _today_progress_rows(
         except sqlite3.OperationalError:
             close_rows = []
 
-        # /update saat ini berasal dari workflow Manyar/Sheet. JAGIR tidak memiliki
-        # Sheet/Excel, jadi progress JAGIR tidak mencoba mengklasifikasikan UPDATE
-        # lewat tabel orders. Close JAGIR sepenuhnya berasal dari catatan /sto internal.
         if sto_code == "JGR":
             update_rows = []
         else:
@@ -148,15 +220,29 @@ def _today_progress_rows(
         combined: dict[str, dict[str, object]] = {}
 
         for row in close_rows:
-            name = str(row["technician_name"] or "-").strip().upper()
-            key = _normalized(name)
-            combined[key] = {"name": name, "close": int(row["total"] or 0), "update": 0}
+            key, name, nik = _canonical_identity(
+                row["technician_nik"], row["technician_name"], by_nik, registry
+            )
+            item = combined.setdefault(
+                key,
+                {"name": name, "nik": nik, "close": 0, "update": 0},
+            )
+            item["close"] = int(item["close"]) + int(row["total"] or 0)
 
         for row in update_rows:
-            name = str(row["technician_name"] or "-").strip().upper()
-            key = _normalized(name)
-            item = combined.setdefault(key, {"name": name, "close": 0, "update": 0})
-            item["update"] = int(row["total"] or 0)
+            telegram_id = int(row["telegram_id"] or 0)
+            registered = by_telegram.get(telegram_id)
+            if registered:
+                key = f"NIK:{registered['nik']}"
+                name = registered["name"]
+                nik = registered["nik"]
+            else:
+                key, name, nik = _canonical_identity("", row["technician_name"], by_nik, registry)
+            item = combined.setdefault(
+                key,
+                {"name": name, "nik": nik, "close": 0, "update": 0},
+            )
+            item["update"] = int(item["update"]) + int(row["total"] or 0)
 
         rows = [
             (str(item["name"]), int(item["close"]), int(item["update"]))
