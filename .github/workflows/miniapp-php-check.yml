@@ -8,6 +8,7 @@ on:
       - 'webapp/*.js'
       - 'services/dismantle_orders.py'
       - 'services/jagir_work_orders.py'
+      - 'services/report_hourly_progress.py'
       - 'Dockerfile.miniapp-php'
       - 'docker-compose.yml'
       - '.github/workflows/miniapp-php-check.yml'
@@ -18,6 +19,7 @@ on:
       - 'webapp/*.js'
       - 'services/dismantle_orders.py'
       - 'services/jagir_work_orders.py'
+      - 'services/report_hourly_progress.py'
       - 'Dockerfile.miniapp-php'
       - 'docker-compose.yml'
       - '.github/workflows/miniapp-php-check.yml'
@@ -61,7 +63,7 @@ jobs:
           node --check webapp/technician_profile_ui.js
       - name: Python syntax
         run: |
-          python -m py_compile main.py services/dismantle_orders.py services/jagir_work_orders.py
+          python -m py_compile main.py services/dismantle_orders.py services/jagir_work_orders.py services/report_hourly_progress.py
       - name: Compose config
         run: |
           touch .env
