@@ -46,6 +46,7 @@ jobs:
           php -l webapp/php_technician_master_bootstrap.php
           php -l webapp/php_technician_profile.php
           php -l webapp/php_dashboard_identity_readonly.php
+          php -l webapp/php_technician_detail_readonly.php
           php -l webapp/php_entry_router.php
           php -l webapp/php_router.php
       - name: JavaScript syntax
