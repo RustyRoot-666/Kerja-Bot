@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from html import escape
+from urllib.parse import quote_plus
 
 from telegram import (
     InlineKeyboardButton,
@@ -101,6 +102,13 @@ def displayed_package(reference: ReferenceStatus | None) -> str:
     return value
 
 
+def google_maps_url(address: str) -> str | None:
+    cleaned = str(address or "").strip()
+    if not cleaned or cleaned == "-":
+        return None
+    return f"https://www.google.com/maps/search/?api=1&query={quote_plus(cleaned)}"
+
+
 def orderanku_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
@@ -114,13 +122,16 @@ def orderanku_menu() -> ReplyKeyboardMarkup:
     )
 
 
-def copy_buttons(service: str, phone: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [[
-            InlineKeyboardButton("📋 Salin INET", callback_data=f"copy_inet:{service}"),
-            InlineKeyboardButton("📋 Salin CP", callback_data=f"copy_cp:{phone}"),
-        ]]
-    )
+def copy_buttons(service: str, phone: str, address: str = "") -> InlineKeyboardMarkup:
+    buttons = [
+        InlineKeyboardButton("📋 Salin INET", callback_data=f"copy_inet:{service}"),
+        InlineKeyboardButton("📋 Salin CP", callback_data=f"copy_cp:{phone}"),
+    ]
+    maps = google_maps_url(address)
+    rows = [buttons]
+    if maps:
+        rows.append([InlineKeyboardButton("📍 Buka Google Maps", url=maps)])
+    return InlineKeyboardMarkup(rows)
 
 
 def normalize_address(address: str) -> str:
@@ -165,7 +176,6 @@ def address_sort_key(address: str) -> tuple:
     house_number = 10**9
     stem = text
 
-    # Contoh: SEMOLO WARU INDAH 1 NO 4Q -> stem sama, blok Q, nomor 4.
     match = re.search(r"\b(?:NO|NOMOR)?\s*(\d+)\s*([A-Z])\b", text)
     if match:
         house_number = int(match.group(1))
@@ -380,7 +390,7 @@ async def show_area_open(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.message.reply_text(
             format_reference_open(reference, index),
             parse_mode="HTML",
-            reply_markup=copy_buttons(service, phone),
+            reply_markup=copy_buttons(service, phone, reference.address),
         )
     if len(open_orders) > 50:
         await query.message.reply_text(
@@ -502,7 +512,6 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if current:
             messages.append(current)
 
-        # Callback harus memakai daftar area aktif yang sama dengan show_area_open.
         callback_areas = sorted(summary)
         for index, message in enumerate(messages):
             reply_markup = (
@@ -574,10 +583,11 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             reference = references.get(order.id)
             service = displayed_service(order, reference)
             phone = displayed_value(order.customer_phone, reference.customer_phone if reference else "")
+            address = displayed_value(order.address, reference.address if reference else "")
             await update.effective_message.reply_text(
                 format_order(order, index, reference, status),
                 parse_mode="HTML",
-                reply_markup=copy_buttons(service, phone),
+                reply_markup=copy_buttons(service, phone, address),
             )
     else:
         chunks: list[str] = []
