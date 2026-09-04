@@ -1,10 +1,44 @@
 // Google Maps integration for Mini App Orderanku.
-// Adds a Maps button to every rendered order without changing the order data/API.
+// Normalizes Indonesian gang/street numbering before opening Google Maps.
+// Example: KEDUNG TARUKAN BARU 4 55 -> KEDUNG TARUKAN BARU IV NO 55.
 
 (function () {
-  function mapsUrl(address) {
-    const value = String(address || '').trim();
+  const ROMAN = [
+    '', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X',
+    'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX',
+    'XXI', 'XXII', 'XXIII', 'XXIV', 'XXV', 'XXVI', 'XXVII', 'XXVIII', 'XXIX', 'XXX',
+    'XXXI', 'XXXII', 'XXXIII', 'XXXIV', 'XXXV', 'XXXVI', 'XXXVII', 'XXXVIII', 'XXXIX', 'XL',
+    'XLI', 'XLII', 'XLIII', 'XLIV', 'XLV', 'XLVI', 'XLVII', 'XLVIII', 'XLIX', 'L'
+  ];
+
+  function toRoman(value) {
+    const number = Number(value);
+    return Number.isInteger(number) && number > 0 && number < ROMAN.length
+      ? ROMAN[number]
+      : String(value);
+  }
+
+  function normalizeMapsAddress(address) {
+    let value = String(address || '').trim().replace(/\s+/g, ' ');
     if (!value || value === '-') return '';
+
+    // Common format used in the Orderanku data:
+    // "NAMA GANG 4 55" => "NAMA GANG IV NO 55"
+    // Also handles an existing NO before the house number.
+    const match = value.match(/^(.*?\D)\s+(\d{1,2})\s+(?:NO\.?\s*)?(\d+[A-Z]?)$/i);
+    if (match) {
+      const gangNumber = Number(match[2]);
+      if (gangNumber >= 1 && gangNumber <= 50) {
+        return `${match[1].trim()} ${toRoman(gangNumber)} NO ${match[3].toUpperCase()}`;
+      }
+    }
+
+    return value;
+  }
+
+  function mapsUrl(address) {
+    const value = normalizeMapsAddress(address);
+    if (!value) return '';
     return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(value)}`;
   }
 
