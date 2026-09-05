@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 $path=parse_url($_SERVER['REQUEST_URI']??'',PHP_URL_PATH)?:'';
+require_once __DIR__.'/php_web_auth_router.php';
+
 if($path==='/api/technician-profile') {
     require_once __DIR__.'/php_backend.php';
     require_once __DIR__.'/php_technician_master.php';
@@ -32,7 +34,6 @@ if($path==='/api/technician-profile') {
     }
 }
 
-// Fast read-only route: opening/searching Master Teknisi must never run legacy normalization.
 if($path==='/api/technician-master' && strtoupper($_SERVER['REQUEST_METHOD']??'GET')==='GET') {
     require_once __DIR__.'/php_backend.php';
     require_once __DIR__.'/php_technician_master.php';
@@ -51,9 +52,6 @@ if($path==='/api/technician-master' && strtoupper($_SERVER['REQUEST_METHOD']??'G
     }
 }
 
-// Dashboard identity repair is read-only: fill a missing NIK from the registered
-// technician directory only when the name match is unique. No master bootstrap,
-// normalization, or database writes run on this hot endpoint.
 if($path==='/api/dashboard' && strtoupper($_SERVER['REQUEST_METHOD']??'GET')==='GET') {
     require_once __DIR__.'/php_backend.php';
     require_once __DIR__.'/php_compat.php';
@@ -69,7 +67,6 @@ if($path==='/api/dashboard' && strtoupper($_SERVER['REQUEST_METHOD']??'GET')==='
     }
 }
 
-// Technician detail must use the same canonical NIK resolver as the leaderboard.
 if($path==='/api/technician' && strtoupper($_SERVER['REQUEST_METHOD']??'GET')==='GET') {
     require_once __DIR__.'/php_backend.php';
     require_once __DIR__.'/php_dashboard_identity_readonly.php';
@@ -82,7 +79,7 @@ if($path==='/api/technician' && strtoupper($_SERVER['REQUEST_METHOD']??'GET')===
         $payload=technician_detail_readonly($key,(string)($_GET['area']??'ALL'));
         echo json_encode($payload,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);exit;
     } catch(Throwable $e) {
-        error_log('[miniapp-php] technician detail canonical read: '.$e->getMessage().' @ '.$e->getFile().':'.$e->getLine());
+        error_log('[miniapp-php] technician detail canonical read: '.$e->getMessage().' @ '.$e->getLine());
         http_response_code(500);echo json_encode(['ok'=>false,'error'=>'internal_error','message'=>'Detail teknisi gagal dimuat.']);exit;
     }
 }
