@@ -47,7 +47,7 @@ function loadMiniAppScript(src, marker) {
   return new Promise((resolve,reject)=>{
     const existing=document.querySelector(`script[data-${marker}]`);
     if(existing){if(existing.dataset.loaded==='1')resolve();else{existing.addEventListener('load',resolve,{once:true});existing.addEventListener('error',reject,{once:true});}return;}
-    const script=document.createElement('script');script.src=`${src}?v=20260904-maps1`;script.dataset[marker.replace(/-([a-z])/g,(_,c)=>c.toUpperCase())]='1';
+    const script=document.createElement('script');script.src=`${src}?v=20260905-order2`;script.dataset[marker.replace(/-([a-z])/g,(_,c)=>c.toUpperCase())]='1';
     script.onload=()=>{script.dataset.loaded='1';resolve();};script.onerror=reject;document.body.appendChild(script);
   });
 }
@@ -63,3 +63,4 @@ loadMiniAppScript('/draft_history.js','draft-history').then(()=>loadMiniAppScrip
 loadMiniAppScript('/order_detail.js','order-detail').then(()=>loadMiniAppScript('/orderanku_android_fix.js','orderanku-android-fix')).then(()=>loadMiniAppScript('/supervisor_orders_ui.js','supervisor-orders-ui')).then(()=>loadMiniAppScript('/manja_ui_v2.js','manja-ui-v2')).then(()=>loadMiniAppScript('/dismantle_ui.js','dismantle-ui')).catch(error=>console.error('Gagal memuat detail order/MANJA/DISMANTLE',error));
 loadMiniAppScript('/interactive_ui.js','interactive-ui').then(()=>loadMiniAppScript('/dashboard_chart_switch.js','dashboard-chart-switch')).catch(error=>console.error('Gagal memuat interaction/dashboard chart enhancement',error));
 loadMiniAppScript('/maps_orderanku.js','maps-orderanku').catch(error=>console.error('Gagal memuat Google Maps Orderanku',error));
+loadMiniAppScript('/order_ui_upgrade.js','order-ui-upgrade').catch(error=>console.error('Gagal memuat Smart Order Card',error));
