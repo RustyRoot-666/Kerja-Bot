@@ -6,6 +6,15 @@ const REPORT_SUPERVISOR_NIKS = ['91260038', '94250015'];
 
 function report_is_supervisor(array $tech): bool {
     $role = strtolower(trim((string)($tech['role'] ?? '')));
+    if ($role === '') {
+        try {
+            $st = db()->prepare('SELECT role FROM technicians WHERE id=? LIMIT 1');
+            $st->execute([(int)($tech['id'] ?? 0)]);
+            $role = strtolower(trim((string)($st->fetchColumn() ?: '')));
+        } catch (Throwable) {
+            $role = '';
+        }
+    }
     if (in_array($role, ['admin', 'superadmin'], true)) return true;
     return in_array(trim((string)($tech['nik'] ?? '')), REPORT_SUPERVISOR_NIKS, true);
 }
