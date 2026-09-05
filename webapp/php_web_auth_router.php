@@ -3,6 +3,7 @@
 declare(strict_types=1);
 require_once __DIR__.'/php_backend.php';
 require_once __DIR__.'/php_auth.php';
+require_once __DIR__.'/php_superadmin_view_fix.php';
 auth_ensure_schema();
 
 function web_auth_respond(mixed $payload,int $status=200):never{http_response_code($status);header('Content-Type: application/json; charset=utf-8');header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');echo json_encode($payload,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);exit;}
@@ -58,6 +59,6 @@ if($path==='/api/auth/password'&&$method==='POST'){
 }
 if($path==='/api/auth/logout'&&$method==='POST'){auth_logout();web_auth_respond(['ok'=>true]);}
 if($path==='/api/web/my-report'&&$method==='GET'){$tech=auth_require(['technician','admin','superadmin']);require_once __DIR__.'/php_orderanku_fix.php';$result=load_report_for_viewer_php((int)$tech['telegram_id'],'');web_auth_respond($result,($result['ok']??false)?200:404);}
-if($path==='/api/web/open-orders'&&$method==='GET'){$tech=auth_require(['technician','admin','superadmin']);require_once __DIR__.'/php_orderanku_fix.php';require_once __DIR__.'/php_unified_workflow.php';$result=load_orders_for_viewer_php((int)$tech['telegram_id'],'',false);if($result['ok']??false)$result=unified_enrich_open_orders_result($result,(int)$tech['telegram_id']);web_auth_respond($result,($result['ok']??false)?200:404);}
-if($path==='/api/web/dashboard'&&$method==='GET'){$tech=auth_require(['admin','superadmin']);web_auth_respond(load_dashboard_php((string)($_GET['area']??'ALL'),(string)($_GET['period']??'daily')));}
+if($path==='/api/web/open-orders'&&$method==='GET'){$tech=auth_require(['technician','admin','superadmin']);require_once __DIR__.'/php_orderanku_fix.php';require_once __DIR__.'/php_unified_workflow.php';if(report_is_supervisor($tech)){$result=superadmin_open_orders_php(false);}else{$result=load_orders_for_viewer_php((int)$tech['telegram_id'],'',false);}if($result['ok']??false)$result=unified_enrich_open_orders_result($result,(int)$tech['telegram_id']);web_auth_respond($result,($result['ok']??false)?200:404);}
+if($path==='/api/web/dashboard'&&$method==='GET'){$tech=auth_require(['admin','superadmin']);web_auth_respond(load_superadmin_dashboard_php((string)($_GET['area']??'ALL'),(string)($_GET['period']??'daily')));}
 return;
