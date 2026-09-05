@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#07111f"><title>Kerja-Bot — Portal Teknisi</title>
+<link rel="stylesheet" href="/website/style.css">
+</head>
+<body>
+<div class="bg"></div>
+<main class="shell">
+<section id="authCard" class="card">
+  <div class="brand"><span>◆</span><div><b>KERJA-BOT</b><small>Portal Teknisi</small></div></div>
+  <div id="linkView">
+    <p class="eyebrow">HUBUNGKAN TELEGRAM</p>
+    <h1>Masuk ke ekosistem Kerja-Bot.</h1>
+    <p class="muted">Telegram menjadi identitas utama. Masukkan Telegram ID, lalu konfirmasi permintaan yang dikirim oleh bot ke Telegram Anda.</p>
+    <label>Telegram ID<input id="telegramId" inputmode="numeric" placeholder="Contoh: 1189386983"></label>
+    <button id="linkBtn" class="primary">HUBUNGKAN TELEGRAM</button>
+    <p id="linkStatus" class="status"></p>
+    <div class="divider"><span>atau</span></div>
+    <button id="showLogin" class="secondary">SUDAH PUNYA AKUN — MASUK</button>
+  </div>
+  <div id="loginView" class="hidden">
+    <p class="eyebrow">LOGIN WEBSITE</p>
+    <h1>Selamat datang kembali.</h1>
+    <p class="muted">Gunakan NIK dan password yang dibuat melalui Chatbot Kerja-Bot.</p>
+    <label>NIK<input id="nik" autocomplete="username" placeholder="Masukkan NIK"></label>
+    <label>Password<input id="password" type="password" autocomplete="current-password" placeholder="Masukkan password"></label>
+    <button id="loginBtn" class="primary">MASUK</button>
+    <p id="loginStatus" class="status"></p>
+    <button id="showLink" class="textbtn">← Kembali ke hubungkan Telegram</button>
+  </div>
+</section>
+<section id="dashboard" class="dashboard hidden">
+  <header><div class="brand"><span>◆</span><div><b>KERJA-BOT</b><small>Portal Teknisi</small></div></div><button id="logoutBtn" class="secondary small">KELUAR</button></header>
+  <section class="hero"><div><p class="eyebrow">DASHBOARD TEKNISI</p><h1 id="welcome">Halo.</h1><p id="identity" class="muted"></p></div><div id="role" class="role">TECHNICIAN</div></section>
+  <div class="grid"><article><small>ORDER HARI INI</small><strong id="daily">0</strong></article><article><small>ORDER MINGGU INI</small><strong id="weekly">0</strong></article><article><small>TOTAL ORDER</small><strong id="total">0</strong></article></div>
+  <section class="panel"><div class="panelhead"><b>Orderanku</b><span id="orderCount">0</span></div><div id="orders" class="orders"><p class="muted">Memuat...</p></div></section>
+</section>
+</main>
+<script src="/website/app.js"></script>
+</body>
+</html>
