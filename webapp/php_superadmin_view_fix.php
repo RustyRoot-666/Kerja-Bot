@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 // This helper is also used directly by diagnostic/CLI scripts. Keep its
-dependencies explicit so it can never rely on router include order.
+// dependencies explicit so it can never rely on router include order.
 require_once __DIR__.'/php_backend.php';
 require_once __DIR__.'/php_compat.php';
 
