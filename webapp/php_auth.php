@@ -6,7 +6,7 @@ function auth_json(mixed $payload, int $status=200): never { http_response_code(
 function auth_random_token(int $bytes=32): string { return bin2hex(random_bytes($bytes)); }
 function auth_hash_token(string $token): string { return hash('sha256',$token); }
 function auth_password_hash(string $password): string { $salt=random_bytes(16); $iterations=310000; $hash=hash_pbkdf2('sha256',$password,$salt,$iterations,32,true); return 'pbkdf2_sha256$'.$iterations.'$'.base64_encode($salt).'$'.base64_encode($hash); }
-function auth_password_verify(string $password,string $stored): bool { $parts=explode('$',$stored); if(count($parts)!==4||$parts[0]!=='pbkdf2_sha256') return false; $iterations=(int)$parts[1]; $salt=base64_decode($parts[2],true); $expected=base64_decode($parts[3],true); if($iterations<100000||$salt===false||$expected===false)return false; return hash_equals($expected,hash_pbkdf2('sha256',$password,$salt,32,true)); }
+function auth_password_verify(string $password,string $stored): bool { $parts=explode('$',$stored); if(count($parts)!==4||$parts[0]!=='pbkdf2_sha256') return false; $iterations=(int)$parts[1]; $salt=base64_decode($parts[2],true); $expected=base64_decode($parts[3],true); if($iterations<100000||$salt===false||$expected===false)return false; return hash_equals($expected,hash_pbkdf2('sha256',$password,$salt,$iterations,32,true)); }
 
 function auth_ensure_schema(): void {
     $pdo=db();
