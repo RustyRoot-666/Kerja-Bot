@@ -2,135 +2,33 @@
 
 declare(strict_types=1);
 
-function auth_json(mixed $payload, int $status=200): never {
-    http_response_code($status);
-    header('Content-Type: application/json; charset=utf-8');
-    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
-    echo json_encode($payload, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
-    exit;
-}
-
+function auth_json(mixed $payload, int $status=200): never { http_response_code($status); header('Content-Type: application/json; charset=utf-8'); header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0'); echo json_encode($payload, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); exit; }
 function auth_random_token(int $bytes=32): string { return bin2hex(random_bytes($bytes)); }
-function auth_hash_token(string $token): string { return hash('sha256', $token); }
-
-function auth_password_hash(string $password): string {
-    $salt=random_bytes(16);
-    $iterations=310000;
-    $hash=hash_pbkdf2('sha256',$password,$salt,$iterations,32,true);
-    return 'pbkdf2_sha256$'.$iterations.'$'.base64_encode($salt).'$'.base64_encode($hash);
-}
-
-function auth_password_verify(string $password,string $stored): bool {
-    $parts=explode('$',$stored);
-    if(count($parts)!==4 || $parts[0]!=='pbkdf2_sha256') return false;
-    $iterations=(int)$parts[1];
-    $salt=base64_decode($parts[2],true);
-    $expected=base64_decode($parts[3],true);
-    if($iterations<100000 || $salt===false || $expected===false) return false;
-    $actual=hash_pbkdf2('sha256',$password,$salt,$iterations,32,true);
-    return hash_equals($expected,$actual);
-}
+function auth_hash_token(string $token): string { return hash('sha256',$token); }
+function auth_password_hash(string $password): string { $salt=random_bytes(16); $iterations=310000; $hash=hash_pbkdf2('sha256',$password,$salt,$iterations,32,true); return 'pbkdf2_sha256$'.$iterations.'$'.base64_encode($salt).'$'.base64_encode($hash); }
+function auth_password_verify(string $password,string $stored): bool { $parts=explode('$',$stored); if(count($parts)!==4||$parts[0]!=='pbkdf2_sha256') return false; $iterations=(int)$parts[1]; $salt=base64_decode($parts[2],true); $expected=base64_decode($parts[3],true); if($iterations<100000||$salt===false||$expected===false)return false; return hash_equals($expected,hash_pbkdf2('sha256',$password,$salt,$iterations,32,true)); }
 
 function auth_ensure_schema(): void {
     $pdo=db();
+    if(!table_exists('technicians')) return;
+    $cols=$pdo->query('PRAGMA table_info(technicians)')->fetchAll(); $names=[]; foreach($cols as $c)$names[]=$c['name'];
+    if(!in_array('password_hash',$names,true))$pdo->exec('ALTER TABLE technicians ADD COLUMN password_hash TEXT');
+    if(!in_array('role',$names,true))$pdo->exec("ALTER TABLE technicians ADD COLUMN role TEXT NOT NULL DEFAULT 'technician'");
+    if(!in_array('is_active',$names,true))$pdo->exec('ALTER TABLE technicians ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1');
     $pdo->exec("CREATE TABLE IF NOT EXISTS web_link_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, token_hash TEXT NOT NULL UNIQUE, telegram_id INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', expires_at TEXT NOT NULL, confirmed_at TEXT, created_at TEXT NOT NULL)");
-    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_web_link_requests_telegram ON web_link_requests(telegram_id,status)");
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_web_link_requests_telegram ON web_link_requests(telegram_id,status)');
     $pdo->exec("CREATE TABLE IF NOT EXISTS web_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, token_hash TEXT NOT NULL UNIQUE, technician_id INTEGER NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, FOREIGN KEY(technician_id) REFERENCES technicians(id) ON DELETE CASCADE)");
-    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_web_sessions_technician ON web_sessions(technician_id)");
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_web_sessions_technician ON web_sessions(technician_id)');
 }
-
 function auth_iso(int $seconds=0): string { return gmdate('Y-m-d H:i:s',time()+$seconds); }
-
-function auth_technician_by_telegram(int $telegramId): ?array {
-    $st=db()->prepare('SELECT id,telegram_id,nik,name,sto,password_hash,role,is_active FROM technicians WHERE telegram_id=? LIMIT 1');
-    $st->execute([$telegramId]); $r=$st->fetch(); return $r?:null;
-}
-
-function auth_technician_by_nik(string $nik): ?array {
-    $normalized=norm_key($nik);
-    $st=db()->prepare('SELECT id,telegram_id,nik,name,sto,password_hash,role,is_active FROM technicians WHERE UPPER(REPLACE(REPLACE(nik,"-","")," ",""))=? LIMIT 1');
-    $st->execute([$normalized]); $r=$st->fetch(); return $r?:null;
-}
-
-function auth_request_link(int $telegramId): array {
-    auth_ensure_schema();
-    $tech=auth_technician_by_telegram($telegramId);
-    if(!$tech) return ['ok'=>false,'error'=>'telegram_not_registered','message'=>'Telegram ID belum terdaftar di Kerja-Bot. Silakan daftar melalui bot terlebih dahulu.'];
-    $token=auth_random_token(24); $now=auth_iso(); $expires=auth_iso(600);
-    db()->prepare("UPDATE web_link_requests SET status='expired' WHERE telegram_id=? AND status='pending'")->execute([$telegramId]);
-    db()->prepare('INSERT INTO web_link_requests(token_hash,telegram_id,status,expires_at,created_at) VALUES(?,?,\'pending\',?,?)')->execute([auth_hash_token($token),$telegramId,$expires,$now]);
-    return ['ok'=>true,'token'=>$token,'expires_at'=>$expires,'technician'=>['name'=>$tech['name'],'nik'=>$tech['nik'],'sto'=>$tech['sto']]];
-}
-
-function auth_link_status(string $token): array {
-    auth_ensure_schema();
-    if(strlen($token)<20) return ['ok'=>false,'error'=>'invalid_token'];
-    $st=db()->prepare('SELECT * FROM web_link_requests WHERE token_hash=? LIMIT 1'); $st->execute([auth_hash_token($token)]); $req=$st->fetch();
-    if(!$req) return ['ok'=>false,'error'=>'invalid_token'];
-    if($req['status']==='pending' && strtotime($req['expires_at'])<time()) { db()->prepare("UPDATE web_link_requests SET status='expired' WHERE id=?")->execute([$req['id']]); $req['status']='expired'; }
-    $tech=auth_technician_by_telegram((int)$req['telegram_id']);
-    return ['ok'=>true,'status'=>$req['status'],'has_web_account'=>(bool)($tech&&$tech['password_hash']&&$tech['is_active']),'technician'=>$tech?['name'=>$tech['name'],'nik'=>$tech['nik'],'sto'=>$tech['sto']]:null];
-}
-
-function auth_confirm_link(string $token,int $telegramId): bool {
-    auth_ensure_schema();
-    $st=db()->prepare('SELECT id,telegram_id,status,expires_at FROM web_link_requests WHERE token_hash=? LIMIT 1'); $st->execute([auth_hash_token($token)]); $req=$st->fetch();
-    if(!$req || (int)$req['telegram_id']!==$telegramId || $req['status']!=='pending' || strtotime($req['expires_at'])<time()) return false;
-    db()->prepare("UPDATE web_link_requests SET status='confirmed',confirmed_at=? WHERE id=?")->execute([auth_iso(),$req['id']]);
-    return true;
-}
-
-function auth_send_telegram_confirmation(int $telegramId,string $token): bool {
-    $botToken=trim((string)(getenv('BOT_TOKEN')?:getenv('TELEGRAM_BOT_TOKEN')?:''));
-    if($botToken==='') return false;
-    $keyboard=['inline_keyboard'=>[[['text'=>'✅ KONFIRMASI HUBUNGKAN WEBSITE','callback_data'=>'webconfirm:'.$token]]]];
-    $payload=json_encode(['chat_id'=>$telegramId,'text'=>'🔐 Kerja-Bot Website\n\nAda permintaan untuk menghubungkan akun Telegram Anda ke Website Kerja-Bot.\n\nJika ini Anda, tekan tombol konfirmasi di bawah. Permintaan berlaku 10 menit.','reply_markup'=>$keyboard],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
-    $url='https://api.telegram.org/bot'.$botToken.'/sendMessage';
-    $ctx=stream_context_create(['http'=>['method'=>'POST','header'=>"Content-Type: application/json\r\n","content'=>$payload,'timeout'=>10,'ignore_errors'=>true]]);
-    $raw=@file_get_contents($url,false,$ctx);
-    if($raw===false) return false;
-    $decoded=json_decode($raw,true); return is_array($decoded)&&($decoded['ok']??false)===true;
-}
-
-function auth_create_session(array $tech): string {
-    auth_ensure_schema();
-    $token=auth_random_token(32); $now=auth_iso(); $expires=auth_iso(86400*7);
-    db()->prepare('DELETE FROM web_sessions WHERE expires_at < ?')->execute([$now]);
-    db()->prepare('INSERT INTO web_sessions(token_hash,technician_id,expires_at,created_at,last_seen_at) VALUES(?,?,?,?,?)')->execute([auth_hash_token($token),$tech['id'],$expires,$now,$now]);
-    $secure=(!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS']!=='off')?' Secure;':'';
-    header('Set-Cookie: kerjabot_session='.$token.'; Max-Age=604800; Path=/; HttpOnly; SameSite=Lax;'.$secure);
-    return $token;
-}
-
-function auth_current(): ?array {
-    auth_ensure_schema();
-    $cookie=$_COOKIE['kerjabot_session']??'';
-    if(!is_string($cookie)||strlen($cookie)<40) return null;
-    $st=db()->prepare('SELECT s.id AS session_id,t.id,t.telegram_id,t.nik,t.name,t.sto,t.role,t.is_active,t.password_hash,s.expires_at FROM web_sessions s JOIN technicians t ON t.id=s.technician_id WHERE s.token_hash=? LIMIT 1');
-    $st->execute([auth_hash_token($cookie)]); $r=$st->fetch();
-    if(!$r || !$r['is_active'] || strtotime($r['expires_at'])<time()) return null;
-    db()->prepare('UPDATE web_sessions SET last_seen_at=? WHERE id=?')->execute([auth_iso(),$r['session_id']]);
-    return $r;
-}
-
-function auth_require(array $roles=[]): array {
-    $tech=auth_current();
-    if(!$tech) auth_json(['ok'=>false,'error'=>'unauthorized'],401);
-    if($roles && !in_array(strtolower((string)$tech['role']),$roles,true)) auth_json(['ok'=>false,'error'=>'forbidden'],403);
-    return $tech;
-}
-
-function auth_login(string $nik,string $password): array {
-    auth_ensure_schema();
-    if(strlen($password)<8) return ['ok'=>false,'error'=>'invalid_credentials','message'=>'NIK atau password salah.'];
-    $tech=auth_technician_by_nik($nik);
-    if(!$tech || !$tech['is_active'] || !$tech['password_hash'] || !auth_password_verify($password,(string)$tech['password_hash'])) return ['ok'=>false,'error'=>'invalid_credentials','message'=>'NIK atau password salah.'];
-    auth_create_session($tech);
-    return ['ok'=>true,'technician'=>['id'=>(int)$tech['id'],'telegram_id'=>(int)$tech['telegram_id'],'nik'=>$tech['nik'],'name'=>$tech['name'],'sto'=>$tech['sto'],'role'=>$tech['role']]];
-}
-
-function auth_logout(): void {
-    $cookie=$_COOKIE['kerjabot_session']??'';
-    if(is_string($cookie)&&$cookie!=='') db()->prepare('DELETE FROM web_sessions WHERE token_hash=?')->execute([auth_hash_token($cookie)]);
-    header('Set-Cookie: kerjabot_session=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax');
-}
+function auth_technician_by_telegram(int $telegramId): ?array { $st=db()->prepare('SELECT id,telegram_id,nik,name,sto,password_hash,role,is_active FROM technicians WHERE telegram_id=? LIMIT 1'); $st->execute([$telegramId]); $r=$st->fetch(); return $r?:null; }
+function auth_technician_by_nik(string $nik): ?array { $normalized=norm_key($nik); $st=db()->prepare('SELECT id,telegram_id,nik,name,sto,password_hash,role,is_active FROM technicians WHERE UPPER(REPLACE(REPLACE(nik,"-","")," ",""))=? LIMIT 1'); $st->execute([$normalized]); $r=$st->fetch(); return $r?:null; }
+function auth_request_link(int $telegramId): array { auth_ensure_schema(); $tech=auth_technician_by_telegram($telegramId); if(!$tech)return ['ok'=>false,'error'=>'telegram_not_registered','message'=>'Telegram ID belum terdaftar di Kerja-Bot. Silakan daftar melalui bot terlebih dahulu.']; $token=auth_random_token(24); $now=auth_iso(); $expires=auth_iso(600); db()->prepare("UPDATE web_link_requests SET status='expired' WHERE telegram_id=? AND status='pending'")->execute([$telegramId]); db()->prepare("INSERT INTO web_link_requests(token_hash,telegram_id,status,expires_at,created_at) VALUES(?,?,'pending',?,?)")->execute([auth_hash_token($token),$telegramId,$expires,$now]); return ['ok'=>true,'token'=>$token,'expires_at'=>$expires,'technician'=>['name'=>$tech['name'],'nik'=>$tech['nik'],'sto'=>$tech['sto']]]; }
+function auth_link_status(string $token): array { auth_ensure_schema(); if(strlen($token)<20)return ['ok'=>false,'error'=>'invalid_token']; $st=db()->prepare('SELECT * FROM web_link_requests WHERE token_hash=? LIMIT 1'); $st->execute([auth_hash_token($token)]); $req=$st->fetch(); if(!$req)return ['ok'=>false,'error'=>'invalid_token']; if($req['status']==='pending'&&strtotime($req['expires_at'])<time()){db()->prepare("UPDATE web_link_requests SET status='expired' WHERE id=?")->execute([$req['id']]);$req['status']='expired';} $tech=auth_technician_by_telegram((int)$req['telegram_id']); return ['ok'=>true,'status'=>$req['status'],'has_web_account'=>(bool)($tech&&$tech['password_hash']&&$tech['is_active']),'technician'=>$tech?['name'=>$tech['name'],'nik'=>$tech['nik'],'sto'=>$tech['sto']]:null]; }
+function auth_confirm_link(string $token,int $telegramId): bool { auth_ensure_schema(); $st=db()->prepare('SELECT id,telegram_id,status,expires_at FROM web_link_requests WHERE token_hash=? LIMIT 1'); $st->execute([auth_hash_token($token)]); $req=$st->fetch(); if(!$req||(int)$req['telegram_id']!==$telegramId||$req['status']!=='pending'||strtotime($req['expires_at'])<time())return false; db()->prepare("UPDATE web_link_requests SET status='confirmed',confirmed_at=? WHERE id=?")->execute([auth_iso(),$req['id']]); return true; }
+function auth_send_telegram_confirmation(int $telegramId,string $token): bool { $botToken=trim((string)(getenv('BOT_TOKEN')?:getenv('TELEGRAM_BOT_TOKEN')?:'')); if($botToken==='')return false; $keyboard=['inline_keyboard'=>[[['text'=>'✅ KONFIRMASI HUBUNGKAN WEBSITE','callback_data'=>'webconfirm:'.$token]]]]; $payload=json_encode(['chat_id'=>$telegramId,'text'=>'🔐 Kerja-Bot Website\n\nAda permintaan untuk menghubungkan akun Telegram Anda ke Website Kerja-Bot.\n\nJika ini Anda, tekan tombol konfirmasi di bawah. Permintaan berlaku 10 menit.','reply_markup'=>$keyboard],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); $ctx=stream_context_create(['http'=>['method'=>'POST','header'=>"Content-Type: application/json\r\n",'content'=>$payload,'timeout'=>10,'ignore_errors'=>true]]); $raw=@file_get_contents('https://api.telegram.org/bot'.$botToken.'/sendMessage',false,$ctx); if($raw===false)return false; $decoded=json_decode($raw,true); return is_array($decoded)&&($decoded['ok']??false)===true; }
+function auth_create_session(array $tech): string { auth_ensure_schema(); $token=auth_random_token(32);$now=auth_iso();$expires=auth_iso(86400*7);db()->prepare('DELETE FROM web_sessions WHERE expires_at < ?')->execute([$now]);db()->prepare('INSERT INTO web_sessions(token_hash,technician_id,expires_at,created_at,last_seen_at) VALUES(?,?,?,?,?)')->execute([auth_hash_token($token),$tech['id'],$expires,$now,$now]); $secure=(!empty($_SERVER['HTTPS'])&&$_SERVER['HTTPS']!=='off'); setcookie('kerjabot_session',$token,['expires'=>time()+604800,'path'=>'/','secure'=>$secure,'httponly'=>true,'samesite'=>'Lax']); return $token; }
+function auth_current(): ?array { auth_ensure_schema(); $cookie=$_COOKIE['kerjabot_session']??''; if(!is_string($cookie)||strlen($cookie)<40)return null; $st=db()->prepare('SELECT s.id AS session_id,t.id,t.telegram_id,t.nik,t.name,t.sto,t.role,t.is_active,t.password_hash,s.expires_at FROM web_sessions s JOIN technicians t ON t.id=s.technician_id WHERE s.token_hash=? LIMIT 1');$st->execute([auth_hash_token($cookie)]);$r=$st->fetch();if(!$r||!$r['is_active']||strtotime($r['expires_at'])<time()){return null;}db()->prepare('UPDATE web_sessions SET last_seen_at=? WHERE id=?')->execute([auth_iso(),$r['session_id']]);return $r; }
+function auth_require(array $roles=[]): array { $tech=auth_current();if(!$tech)auth_json(['ok'=>false,'error'=>'unauthorized'],401);if($roles&&!in_array(strtolower((string)$tech['role']),$roles,true))auth_json(['ok'=>false,'error'=>'forbidden'],403);return $tech; }
+function auth_login(string $nik,string $password): array { auth_ensure_schema();if(strlen($password)<8)return ['ok'=>false,'error'=>'invalid_credentials','message'=>'NIK atau password salah.'];$tech=auth_technician_by_nik($nik);if(!$tech||!$tech['is_active']||!$tech['password_hash']||!auth_password_verify($password,(string)$tech['password_hash']))return ['ok'=>false,'error'=>'invalid_credentials','message'=>'NIK atau password salah.'];auth_create_session($tech);return ['ok'=>true,'technician'=>['id'=>(int)$tech['id'],'telegram_id'=>(int)$tech['telegram_id'],'nik'=>$tech['nik'],'name'=>$tech['name'],'sto'=>$tech['sto'],'role'=>$tech['role']]]; }
+function auth_logout(): void { $cookie=$_COOKIE['kerjabot_session']??'';if(is_string($cookie)&&$cookie!=='')db()->prepare('DELETE FROM web_sessions WHERE token_hash=?')->execute([auth_hash_token($cookie)]);setcookie('kerjabot_session','',['expires'=>time()-3600,'path'=>'/','secure'=>(!empty($_SERVER['HTTPS'])&&$_SERVER['HTTPS']!=='off'),'httponly'=>true,'samesite'=>'Lax']); }
