@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import logging
 import secrets
+import sqlite3
+from datetime import datetime, timezone
 
 from telegram import Update
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
@@ -32,59 +35,37 @@ async def webaccount_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if update.effective_user.id not in settings.admin_ids:
         await update.effective_message.reply_text("⛔ Anda tidak memiliki akses mengatur akun Website.")
         return
-
     args = context.args or []
     if not args or not args[0].isdigit():
-        await update.effective_message.reply_text(
-            "Format:\n/webaccount <telegram_id> [technician|admin|superadmin]\n\n"
-            "Contoh:\n/webaccount 1189386983 technician"
-        )
+        await update.effective_message.reply_text("Format:\n/webaccount <telegram_id> [technician|admin|superadmin]\n\nContoh:\n/webaccount 1189386983 technician")
         return
-
     telegram_id = int(args[0])
-    role = (args[1].strip().lower() if len(args) > 1 else "technician")
+    role = args[1].strip().lower() if len(args) > 1 else "technician"
     if role not in ROLES:
         await update.effective_message.reply_text("Role tidak valid. Pilih: technician, admin, atau superadmin.")
         return
-
     db: Database = context.application.bot_data["db"]
     technician = await db.get_technician(telegram_id)
     if not technician:
         await update.effective_message.reply_text("❌ Telegram ID tersebut belum terdaftar sebagai teknisi. Minta akun menjalankan /start terlebih dahulu.")
         return
-
     password = temporary_password()
     saved = await db.set_web_account(telegram_id, password_hash(password), role)
     if not saved:
         await update.effective_message.reply_text("❌ Gagal membuat akun Website.")
         return
-
     try:
-        await context.bot.send_message(
-            chat_id=telegram_id,
-            text=(
-                "🌐 AKUN WEBSITE KERJA-BOT AKTIF\n\n"
-                f"Nama: {saved.name}\n"
-                f"NIK: {saved.nik}\n"
-                f"Role: {saved.role}\n\n"
-                f"Password sementara: {password}\n\n"
-                "Gunakan NIK + password tersebut untuk masuk ke Website Kerja-Bot. "
-                "Jangan bagikan password kepada orang lain."
-            ),
-        )
+        await context.bot.send_message(chat_id=telegram_id, text=(
+            "🌐 AKUN WEBSITE KERJA-BOT AKTIF\n\n"
+            f"Nama: {saved.name}\nNIK: {saved.nik}\nRole: {saved.role}\n\n"
+            f"Password sementara: {password}\n\n"
+            "Gunakan NIK + password tersebut untuk masuk ke Website Kerja-Bot. Jangan bagikan password kepada orang lain."
+        ))
     except Exception:
         logging.exception("Failed to deliver web account credentials to telegram_id=%s", telegram_id)
-        await update.effective_message.reply_text(
-            f"⚠️ Akun dibuat, tetapi password gagal dikirim ke Telegram {telegram_id}. "
-            "Reset ulang setelah koneksi Telegram normal."
-        )
+        await update.effective_message.reply_text("⚠️ Akun dibuat, tetapi password gagal dikirim ke Telegram teknisi. Reset ulang setelah koneksi Telegram normal.")
         return
-
-    await update.effective_message.reply_text(
-        "✅ Akun Website berhasil dibuat.\n\n"
-        f"Nama: {saved.name}\nNIK: {saved.nik}\nRole: {saved.role}\n"
-        "Kredensial sudah dikirim langsung ke Telegram teknisi."
-    )
+    await update.effective_message.reply_text("✅ Akun Website berhasil dibuat.\n\n" f"Nama: {saved.name}\nNIK: {saved.nik}\nRole: {saved.role}\nKredensial sudah dikirim langsung ke Telegram teknisi.")
 
 
 async def webaccount_reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -118,6 +99,25 @@ async def webaccount_reset_command(update: Update, context: ContextTypes.DEFAULT
     await update.effective_message.reply_text(f"✅ Password Website {saved.name} berhasil di-reset dan dikirim ke Telegram teknisi.")
 
 
+def _confirm_link_sync(db_path, token: str, telegram_id: int) -> bool:
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute("SELECT id,telegram_id,status,expires_at FROM web_link_requests WHERE token_hash=? LIMIT 1", [token_hash]).fetchone()
+        if not row or int(row[1]) != telegram_id or row[2] != "pending":
+            return False
+        try:
+            expires = datetime.fromisoformat(str(row[3]).replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if expires <= datetime.now(timezone.utc):
+            return False
+        conn.execute("UPDATE web_link_requests SET status='confirmed', confirmed_at=? WHERE id=?", [datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), row[0]])
+        conn.commit()
+        return True
+
+
 async def webconfirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query or not query.from_user:
@@ -127,27 +127,7 @@ async def webconfirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     token = data.split(":", 1)[1].strip()
     db: Database = context.application.bot_data["db"]
-    # Keep confirmation state in the same SQLite database used by the PHP website.
-    from pathlib import Path
-    import sqlite3
-    from datetime import datetime, timezone
-
-    def confirm() -> bool:
-        with sqlite3.connect(db.db_path) as conn:
-            row = conn.execute("SELECT id,telegram_id,status,expires_at FROM web_link_requests WHERE token_hash=? LIMIT 1", [hashlib.sha256(token.encode()).hexdigest()]).fetchone()
-            if not row or int(row[1]) != query.from_user.id or row[2] != "pending":
-                return False
-            try:
-                expires = datetime.fromisoformat(str(row[3]).replace("Z", "+00:00"))
-            except ValueError:
-                return False
-            if expires <= datetime.now(timezone.utc).replace(tzinfo=timezone.utc):
-                return False
-            conn.execute("UPDATE web_link_requests SET status='confirmed', confirmed_at=? WHERE id=?", [datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), row[0]])
-            conn.commit()
-            return True
-
-    ok = await context.application.run_in_executor(None, confirm)
+    ok = await asyncio.to_thread(_confirm_link_sync, db.db_path, token, query.from_user.id)
     if ok:
         await query.answer("Akun Telegram berhasil diverifikasi.", show_alert=True)
         await query.edit_message_text("✅ Telegram berhasil dikonfirmasi untuk Website Kerja-Bot. Silakan kembali ke Website dan lanjutkan proses.")
