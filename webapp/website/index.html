@@ -1,43 +1,64 @@
 <!doctype html>
 <html lang="id">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#07111f"><title>Kerja-Bot — Portal Teknisi</title>
-<link rel="stylesheet" href="/website/style.css">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#05080d"><title>KERJA-BOT // FIELD COMMAND</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/website/style.css?v=20260905-titan1">
 </head>
 <body>
-<div class="bg"></div>
+<div class="noise"></div><div class="scanlines"></div><div class="bg-orb orb-a"></div><div class="bg-orb orb-b"></div>
 <main class="shell">
-<section id="authCard" class="card">
-  <div class="brand"><span>◆</span><div><b>KERJA-BOT</b><small>Portal Teknisi</small></div></div>
+<section id="authCard" class="auth-card">
+  <div class="auth-gridline"></div>
+  <div class="brand titan-brand"><span class="brand-mark">◆</span><div><b>KERJA-BOT</b><small>FIELD COMMAND / AUTH GATE</small></div></div>
   <div id="linkView">
-    <p class="eyebrow">HUBUNGKAN TELEGRAM</p>
-    <h1>Masuk ke ekosistem Kerja-Bot.</h1>
-    <p class="muted">Telegram menjadi identitas utama. Masukkan Telegram ID, lalu konfirmasi permintaan yang dikirim oleh bot ke Telegram Anda.</p>
-    <label>Telegram ID<input id="telegramId" inputmode="numeric" placeholder="Contoh: 1189386983"></label>
-    <button id="linkBtn" class="primary">HUBUNGKAN TELEGRAM</button>
-    <p id="linkStatus" class="status"></p>
-    <div class="divider"><span>atau</span></div>
-    <button id="showLogin" class="secondary">SUDAH PUNYA AKUN — MASUK</button>
+    <p class="eyebrow">SECURE TELEGRAM LINK</p><h1>IDENTITY<br><em>VERIFICATION</em></h1>
+    <p class="muted">Telegram adalah identitas utama. Hubungkan akun untuk mengaktifkan akses Portal Teknisi.</p>
+    <label>TELEGRAM ID<input id="telegramId" inputmode="numeric" placeholder="1189386983"></label>
+    <button id="linkBtn" class="primary">◆ HUBUNGKAN TELEGRAM</button><p id="linkStatus" class="status"></p>
+    <div class="divider"><span>AUTHENTICATED ACCOUNT</span></div><button id="showLogin" class="secondary">SUDAH PUNYA AKUN — MASUK</button>
   </div>
   <div id="loginView" class="hidden">
-    <p class="eyebrow">LOGIN WEBSITE</p>
-    <h1>Selamat datang kembali.</h1>
-    <p class="muted">Gunakan NIK dan password yang dibuat melalui Chatbot Kerja-Bot.</p>
-    <label>NIK<input id="nik" autocomplete="username" placeholder="Masukkan NIK"></label>
-    <label>Password<input id="password" type="password" autocomplete="current-password" placeholder="Masukkan password"></label>
-    <button id="loginBtn" class="primary">MASUK</button>
-    <p id="loginStatus" class="status"></p>
-    <button id="showLink" class="textbtn">← Kembali ke hubungkan Telegram</button>
+    <p class="eyebrow">PORTAL ACCESS</p><h1>WELCOME<br><em>BACK, OPERATOR</em></h1>
+    <p class="muted">Masuk menggunakan NIK dan password yang dibuat melalui Chatbot Kerja-Bot.</p>
+    <label>NIK<input id="nik" autocomplete="username" placeholder="MASUKKAN NIK"></label>
+    <label>PASSWORD<input id="password" type="password" autocomplete="current-password" placeholder="MASUKKAN PASSWORD"></label>
+    <button id="loginBtn" class="primary">▶ AUTHORIZE ACCESS</button><p id="loginStatus" class="status"></p>
+    <button id="showLink" class="textbtn">← Kembali ke Telegram Link</button>
   </div>
+  <div class="auth-footer"><span>KERJA-BOT SYSTEM</span><span>SECURE SESSION</span></div>
 </section>
+
 <section id="dashboard" class="dashboard hidden">
-  <header><div class="brand"><span>◆</span><div><b>KERJA-BOT</b><small>Portal Teknisi</small></div></div><button id="logoutBtn" class="secondary small">KELUAR</button></header>
-  <section class="hero"><div><p class="eyebrow">DASHBOARD TEKNISI</p><h1 id="welcome">Halo.</h1><p id="identity" class="muted"></p></div><div id="role" class="role">TECHNICIAN</div></section>
-  <div class="grid"><article><small>ORDER HARI INI</small><strong id="daily">0</strong></article><article><small>ORDER MINGGU INI</small><strong id="weekly">0</strong></article><article><small>TOTAL ORDER</small><strong id="total">0</strong></article></div>
-  <section class="panel"><div class="panelhead"><b>Orderanku</b><span id="orderCount">0</span></div><div id="orders" class="orders"><p class="muted">Memuat...</p></div></section>
+<header class="topbar">
+  <div class="brand titan-brand"><span class="brand-mark">◆</span><div><b>KERJA-BOT</b><small>FIELD COMMAND</small></div></div>
+  <div class="system-state"><i></i><span>SYSTEM ONLINE</span><small id="clock">--:--:-- WIB</small></div>
+  <button id="logoutBtn" class="secondary small">KELUAR</button>
+</header>
+<div class="command-strip"><span>OPERATIONS / DASHBOARD</span><b id="todayLabel">05 SEP 2026</b><span class="strip-line"></span><span>SECURE SESSION</span></div>
+<section class="hero"><div><p class="eyebrow">FIELD OPERATIONS</p><h1 id="welcome">Halo, Operator.</h1><p id="identity" class="muted"></p></div><div class="operator"><span class="operator-dot"></span><div><small>OPERATOR ROLE</small><b id="role">TECHNICIAN</b></div></div></section>
+<section class="kpi-grid">
+  <article class="kpi"><div class="kpi-top"><span>ORDERS / TODAY</span><b>01</b></div><strong id="daily">0</strong><small>ACTIVE DAY CYCLE</small></article>
+  <article class="kpi"><div class="kpi-top"><span>ORDERS / WEEK</span><b>02</b></div><strong id="weekly">0</strong><small>ROLLING 7 DAYS</small></article>
+  <article class="kpi"><div class="kpi-top"><span>TOTAL ORDERS</span><b>03</b></div><strong id="total">0</strong><small>REPORT DATASET</small></article>
+  <article class="kpi kpi-open"><div class="kpi-top"><span>OPEN QUEUE</span><b>04</b></div><strong id="openTotal">0</strong><small>WAITING FOR ACTION</small></article>
+</section>
+<section class="main-grid">
+  <article class="panel map-panel"><div class="panel-head"><div><span class="panel-kicker">TACTICAL VIEW</span><h2>OPERATIONS MAP</h2></div><span class="live-badge"><i></i> LIVE</span></div>
+    <div class="map-stage"><div class="map-grid"></div><div class="radar"></div><div class="map-cross cross-a"></div><div class="map-cross cross-b"></div><div class="map-node n1"></div><div class="map-node n2"></div><div class="map-node n3"></div><div class="map-center"><span>MYR</span><b>FIELD ZONE</b></div><div class="map-coords">SURABAYA / EAST JAVA<br>07°15′S 112°45′E</div></div>
+  </article>
+  <article class="panel status-panel"><div class="panel-head"><div><span class="panel-kicker">NETWORK STATUS</span><h2>SYSTEM HEALTH</h2></div></div>
+    <div class="health"><div><span>API GATEWAY</span><b>ONLINE</b></div><i></i></div><div class="health"><div><span>DATABASE</span><b>ONLINE</b></div><i></i></div><div class="health"><div><span>TELEGRAM LINK</span><b>SECURE</b></div><i></i></div><div class="health"><div><span>WORK ORDER FEED</span><b id="feedState">SYNCED</b></div><i></i></div>
+    <div class="mini-metric"><span>OPEN QUEUE</span><strong id="openMini">0</strong></div>
+  </article>
+</section>
+<section class="panel orders-panel"><div class="panel-head"><div><span class="panel-kicker">MISSION QUEUE</span><h2>ORDERANKU</h2></div><div class="queue-meta"><span id="orderCount">0 open</span><span class="queue-dot"></span></div></div>
+  <div id="orders" class="orders"><p class="muted">MEMUAT DATA OPERASI...</p></div>
+</section>
+<footer class="dashboard-footer"><span>◆ KERJA-BOT // FIELD COMMAND</span><span>OPERATOR <b id="footerName">—</b></span><span id="footerTime">—</span></footer>
 </section>
 </main>
-<script src="/website/app.js"></script>
-</body>
-</html>
+<script src="/website/app.js?v=20260905-titan1"></script>
+</body></html>
