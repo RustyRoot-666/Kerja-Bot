@@ -5,6 +5,38 @@ declare(strict_types=1);
 $path=parse_url($_SERVER['REQUEST_URI']??'',PHP_URL_PATH)?:'';
 require_once __DIR__.'/php_web_auth_router.php';
 
+if($path==='/api/technician-location') {
+    require_once __DIR__.'/php_backend.php';
+    require_once __DIR__.'/php_technician_location.php';
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    try {
+        $method=strtoupper($_SERVER['REQUEST_METHOD']??'GET');
+        if($method!=='POST'){http_response_code(405);echo json_encode(['ok'=>false,'error'=>'method_not_allowed']);exit;}
+        $payload=json_decode(file_get_contents('php://input')?:'{}',true);
+        if(!is_array($payload))$payload=[];
+        $init=trim((string)($payload['init_data']??''));
+        $lat=(float)($payload['latitude']??NAN);
+        $lng=(float)($payload['longitude']??NAN);
+        $acc=array_key_exists('accuracy',$payload)&&is_numeric($payload['accuracy'])?(float)$payload['accuracy']:null;
+        if($init===''||!is_finite($lat)||!is_finite($lng)){http_response_code(400);echo json_encode(['ok'=>false,'error'=>'location_payload_required']);exit;}
+        $result=location_save_from_init_data($init,$lat,$lng,$acc);
+        http_response_code(($result['ok']??false)?200:(($result['error']??'')==='invalid_telegram_webapp'?403:400));
+        echo json_encode($result,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);exit;
+    } catch(Throwable $e) {
+        error_log('[miniapp-php] technician location: '.$e->getMessage().' @ '.$e->getFile().':'.$e->getLine());
+        http_response_code(500);echo json_encode(['ok'=>false,'error'=>'internal_error','message'=>'Lokasi teknisi gagal diproses.']);exit;
+    }
+}
+
+if($path==='/api/web/technician-locations' && strtoupper($_SERVER['REQUEST_METHOD']??'GET')==='GET') {
+    require_once __DIR__.'/php_backend.php';
+    require_once __DIR__.'/php_auth.php';
+    require_once __DIR__.'/php_technician_location.php';
+    $tech=auth_require(['technician','admin','superadmin']);
+    web_auth_respond(location_list_for_viewer($tech));
+}
+
 if($path==='/api/technician-profile') {
     require_once __DIR__.'/php_backend.php';
     require_once __DIR__.'/php_technician_master.php';
