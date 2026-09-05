@@ -34,12 +34,14 @@ if($path==='/api/auth/password'&&$method==='POST'){
     $current=(string)($p['current_password']??'');
     $new=(string)($p['new_password']??'');
     $confirm=(string)($p['confirm_password']??'');
+    if(empty($tech['password_hash']))web_auth_respond(['ok'=>false,'error'=>'password_not_set','message'=>'Password awal harus dibuat oleh Bot Telegram.'],400);
     if(strlen($new)<8)web_auth_respond(['ok'=>false,'error'=>'password_too_short','message'=>'Password baru minimal 8 karakter.'],400);
+    if(strlen($new)>128)web_auth_respond(['ok'=>false,'error'=>'password_too_long','message'=>'Password baru maksimal 128 karakter.'],400);
     if($new!==$confirm)web_auth_respond(['ok'=>false,'error'=>'password_mismatch','message'=>'Konfirmasi password tidak sama.'],400);
-    if(!empty($tech['password_hash'])&&!auth_password_verify($current,(string)$tech['password_hash']))web_auth_respond(['ok'=>false,'error'=>'current_password_invalid','message'=>'Password saat ini salah.'],400);
-    if($current!==''&&auth_password_verify($new,(string)$tech['password_hash']))web_auth_respond(['ok'=>false,'error'=>'same_password','message'=>'Password baru harus berbeda dari password saat ini.'],400);
-    db()->prepare('UPDATE technicians SET password_hash=? WHERE id=?')->execute([auth_password_hash($new),(int)$tech['id']]);
-    web_auth_respond(['ok'=>true,'message'=>empty($tech['password_hash'])?'Password website berhasil dibuat.':'Password berhasil diubah.']);
+    if(!auth_password_verify($current,(string)$tech['password_hash']))web_auth_respond(['ok'=>false,'error'=>'current_password_invalid','message'=>'Password saat ini salah.'],400);
+    if(auth_password_verify($new,(string)$tech['password_hash']))web_auth_respond(['ok'=>false,'error'=>'same_password','message'=>'Password baru harus berbeda dari password saat ini.'],400);
+    db()->prepare('UPDATE technicians SET password_hash=? WHERE id=? AND is_active=1')->execute([auth_password_hash($new),(int)$tech['id']]);
+    web_auth_respond(['ok'=>true,'message'=>'Password berhasil diubah.']);
 }
 if($path==='/api/auth/logout'&&$method==='POST'){auth_logout();web_auth_respond(['ok'=>true]);}
 if($path==='/api/web/my-report'&&$method==='GET'){$tech=auth_require(['technician','admin','superadmin']);require_once __DIR__.'/php_orderanku_fix.php';$result=load_report_for_viewer_php((int)$tech['telegram_id'],'');web_auth_respond($result,($result['ok']??false)?200:404);}
