@@ -10,8 +10,21 @@ function web_auth_input():array{$d=json_decode(file_get_contents('php://input')?
 function web_auth_same_origin(): void {
     $origin=trim((string)($_SERVER['HTTP_ORIGIN']??''));
     if($origin==='')return;
-    $expected=((!empty($_SERVER['HTTPS'])&&$_SERVER['HTTPS']!=='off')?'https':'http').'://'.($_SERVER['HTTP_HOST']??'');
-    if($expected!==''&&rtrim($origin,'/')!==rtrim($expected,'/'))web_auth_respond(['ok'=>false,'error'=>'invalid_origin','message'=>'Permintaan ditolak.'],403);
+    $parsed=parse_url($origin);
+    if(!is_array($parsed)||empty($parsed['scheme'])||empty($parsed['host']))web_auth_respond(['ok'=>false,'error'=>'invalid_origin','message'=>'Permintaan ditolak.'],403);
+    $originScheme=strtolower((string)$parsed['scheme']);
+    $originHost=strtolower((string)$parsed['host']);
+    $originPort=isset($parsed['port'])?(int)$parsed['port']:null;
+    $forwardedProto=strtolower(trim(explode(',',(string)($_SERVER['HTTP_X_FORWARDED_PROTO']??''))[0]??''));
+    $serverScheme=$forwardedProto!==''?$forwardedProto:((!empty($_SERVER['HTTPS'])&&$_SERVER['HTTPS']!=='off')?'https':'http');
+    $serverHost=strtolower(trim(explode(',',(string)($_SERVER['HTTP_X_FORWARDED_HOST']??''))[0]??''));
+    if($serverHost==='')$serverHost=strtolower((string)($_SERVER['HTTP_HOST']??''));
+    $serverHost=preg_replace('/:\\d+$/','',$serverHost)?:$serverHost;
+    $allowedHosts=['app.botkerja.web.id'];
+    $currentHost=preg_replace('/:\\d+$/','',strtolower((string)($_SERVER['HTTP_HOST']??'')));
+    if($currentHost!=='')$allowedHosts[]=$currentHost;
+    $originPortAllowed=$originPort===null||($originScheme==='https'&&$originPort===443)||($originScheme==='http'&&$originPort===80);
+    if($originScheme!==$serverScheme||!in_array($originHost,$allowedHosts,true)||!$originPortAllowed)web_auth_respond(['ok'=>false,'error'=>'invalid_origin','message'=>'Permintaan ditolak.'],403);
 }
 
 $path=parse_url($_SERVER['REQUEST_URI']??'',PHP_URL_PATH)?:'';$method=strtoupper($_SERVER['REQUEST_METHOD']??'GET');
