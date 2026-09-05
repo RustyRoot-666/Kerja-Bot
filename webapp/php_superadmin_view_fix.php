@@ -2,6 +2,10 @@
 
 declare(strict_types=1);
 
+// This helper is also used directly by diagnostic/CLI scripts. Keep its
+// dependencies explicit so it can never rely on router include order.
+require_once __DIR__.'/php_backend.php';
+
 /**
  * Supervisor/Superadmin view fixes.
  * Keeps normal technicians scoped to their own orders while making
