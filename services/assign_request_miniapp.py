@@ -15,18 +15,12 @@ async def _today_miniapp_draft_inets(
     telegram_id: int,
     timezone_name: str,
 ) -> list[str]:
-    """Return INET started from Mini App today for this technician.
-
-    Selecting an order in the Mini App creates a server-side workflow draft,
-    so /assign can include the order even before REPORT/STO has been completed.
-    """
+    """Return INET started from Mini App today for this technician."""
     tz = ZoneInfo(timezone_name)
     now_local = datetime.now(tz)
     start_local = datetime.combine(now_local.date(), time.min, tzinfo=tz)
     end_local = start_local + timedelta(days=1)
 
-    # miniapp_workflow_drafts currently stores server-local naive ISO timestamps.
-    # Compare by the local calendar day represented by the stored date prefix.
     start_day = start_local.date().isoformat()
     end_day = end_local.date().isoformat()
 
@@ -60,17 +54,75 @@ async def _today_miniapp_draft_inets(
     return result
 
 
+async def _today_miniapp_completed_inets(
+    db: Database,
+    telegram_id: int,
+    timezone_name: str,
+) -> list[str]:
+    """Return INETs completed from Mini App today for this technician."""
+    tz = ZoneInfo(timezone_name)
+    now_local = datetime.now(tz)
+    start_local = datetime.combine(now_local.date(), time.min, tzinfo=tz)
+    end_local = start_local + timedelta(days=1)
+
+    start_day = start_local.date().isoformat()
+    end_day = end_local.date().isoformat()
+
+    async with db._lock:
+        with db.connection() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='miniapp_completed_workflows'"
+            ).fetchone()
+            if not exists:
+                return []
+            rows = conn.execute(
+                """
+                SELECT service_number, MAX(completed_at) AS completed_at
+                FROM miniapp_completed_workflows
+                WHERE telegram_id = ?
+                  AND service_number IS NOT NULL
+                  AND TRIM(service_number) NOT IN ('', '-')
+                  AND substr(completed_at, 1, 10) >= ?
+                  AND substr(completed_at, 1, 10) < ?
+                GROUP BY service_number
+                ORDER BY completed_at ASC
+                """,
+                (telegram_id, start_day, end_day),
+            ).fetchall()
+
+    result: list[str] = []
+    for row in rows:
+        service = str(row["service_number"] or "").strip()
+        if base.INET_RE.fullmatch(service):
+            result.append(service)
+    return result
+
+
 async def _today_technician_inets_with_miniapp(
     db: Database,
     telegram_id: int,
     timezone_name: str,
 ) -> list[str]:
-    history_inets = await _original_today_technician_inets(db, telegram_id, timezone_name)
-    miniapp_inets = await _today_miniapp_draft_inets(db, telegram_id, timezone_name)
+    """Merge history, Mini App drafts and Mini App completed workflows."""
+    history_inets = await _original_today_technician_inets(
+        db,
+        telegram_id,
+        timezone_name,
+    )
+    draft_inets = await _today_miniapp_draft_inets(
+        db,
+        telegram_id,
+        timezone_name,
+    )
+    completed_inets = await _today_miniapp_completed_inets(
+        db,
+        telegram_id,
+        timezone_name,
+    )
 
     seen: set[str] = set()
     merged: list[str] = []
-    for inet in [*history_inets, *miniapp_inets]:
+    for inet in [*history_inets, *draft_inets, *completed_inets]:
         if inet not in seen:
             seen.add(inet)
             merged.append(inet)
@@ -78,7 +130,7 @@ async def _today_technician_inets_with_miniapp(
 
 
 # The existing /assign handler calls this module-level helper at runtime.
-# Replacing it keeps all current group checks, duplicate protection, formatting,
-# fixed tags, and technician validation unchanged.
+# Replacing it preserves the existing formatting, group checks and validation
+# while making Mini App completed workflows visible in today's orders.
 base._today_technician_inets = _today_technician_inets_with_miniapp
 handle_assign_message = base.handle_assign_message
