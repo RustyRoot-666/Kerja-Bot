@@ -22,6 +22,9 @@ class Technician:
     name: str
     sto: str
     created_at: str
+    password_hash: str | None = None
+    role: str = "technician"
+    is_active: int = 1
 
 
 class Database:
@@ -52,7 +55,10 @@ class Database:
                         nik TEXT NOT NULL,
                         name TEXT NOT NULL,
                         sto TEXT NOT NULL DEFAULT '',
-                        created_at TEXT NOT NULL
+                        created_at TEXT NOT NULL,
+                        password_hash TEXT,
+                        role TEXT NOT NULL DEFAULT 'technician',
+                        is_active INTEGER NOT NULL DEFAULT 1
                     );
 
                     CREATE TABLE IF NOT EXISTS histories (
@@ -87,56 +93,64 @@ class Database:
                         FOREIGN KEY (technician_id) REFERENCES technicians(id) ON DELETE SET NULL
                     );
 
+                    CREATE TABLE IF NOT EXISTS web_link_requests (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        token_hash TEXT NOT NULL UNIQUE,
+                        telegram_id INTEGER NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','confirmed','expired','cancelled')),
+                        expires_at TEXT NOT NULL,
+                        confirmed_at TEXT,
+                        created_at TEXT NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS web_sessions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        token_hash TEXT NOT NULL UNIQUE,
+                        technician_id INTEGER NOT NULL,
+                        expires_at TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        last_seen_at TEXT NOT NULL,
+                        FOREIGN KEY (technician_id) REFERENCES technicians(id) ON DELETE CASCADE
+                    );
+
                     CREATE INDEX IF NOT EXISTS idx_histories_telegram ON histories(telegram_id);
                     CREATE INDEX IF NOT EXISTS idx_histories_ticket ON histories(ticket_id);
                     CREATE INDEX IF NOT EXISTS idx_histories_service ON histories(service_number);
                     CREATE INDEX IF NOT EXISTS idx_histories_sn ON histories(old_sn, new_sn);
+                    CREATE INDEX IF NOT EXISTS idx_web_link_requests_telegram ON web_link_requests(telegram_id, status);
+                    CREATE INDEX IF NOT EXISTS idx_web_sessions_technician ON web_sessions(technician_id);
                     """
                 )
 
-                # Migrasi aman untuk database lama yang belum memiliki kolom STO.
-                columns = {
-                    row["name"]
-                    for row in conn.execute("PRAGMA table_info(technicians)").fetchall()
+                columns = {row["name"] for row in conn.execute("PRAGMA table_info(technicians)").fetchall()}
+                migrations = {
+                    "sto": "ALTER TABLE technicians ADD COLUMN sto TEXT NOT NULL DEFAULT ''",
+                    "password_hash": "ALTER TABLE technicians ADD COLUMN password_hash TEXT",
+                    "role": "ALTER TABLE technicians ADD COLUMN role TEXT NOT NULL DEFAULT 'technician'",
+                    "is_active": "ALTER TABLE technicians ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1",
                 }
-                if "sto" not in columns:
-                    conn.execute(
-                        "ALTER TABLE technicians ADD COLUMN sto TEXT NOT NULL DEFAULT ''"
-                    )
+                for column, statement in migrations.items():
+                    if column not in columns:
+                        conn.execute(statement)
 
     async def get_technician(self, telegram_id: int) -> Technician | None:
         async with self._lock:
             with self.connection() as conn:
                 row = conn.execute(
-                    "SELECT * FROM technicians WHERE telegram_id = ?",
+                    "SELECT id, telegram_id, nik, name, sto, created_at, password_hash, role, is_active FROM technicians WHERE telegram_id = ?",
                     (telegram_id,),
                 ).fetchone()
         return Technician(**dict(row)) if row else None
 
-    async def create_technician(
-        self,
-        telegram_id: int,
-        nik: str,
-        name: str,
-        sto: str,
-    ) -> Technician:
+    async def create_technician(self, telegram_id: int, nik: str, name: str, sto: str) -> Technician:
         async with self._lock:
             with self.connection() as conn:
                 conn.execute(
-                    """
-                    INSERT INTO technicians (telegram_id, nik, name, sto, created_at)
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (
-                        telegram_id,
-                        nik.strip(),
-                        name.strip(),
-                        sto.strip().upper(),
-                        utc_now(),
-                    ),
+                    "INSERT INTO technicians (telegram_id, nik, name, sto, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (telegram_id, nik.strip(), name.strip(), sto.strip().upper(), utc_now()),
                 )
                 row = conn.execute(
-                    "SELECT * FROM technicians WHERE telegram_id = ?",
+                    "SELECT id, telegram_id, nik, name, sto, created_at, password_hash, role, is_active FROM technicians WHERE telegram_id = ?",
                     (telegram_id,),
                 ).fetchone()
         return Technician(**dict(row))
@@ -145,12 +159,9 @@ class Database:
         normalized_sto = sto.strip().upper()
         async with self._lock:
             with self.connection() as conn:
-                conn.execute(
-                    "UPDATE technicians SET sto = ? WHERE telegram_id = ?",
-                    (normalized_sto, telegram_id),
-                )
+                conn.execute("UPDATE technicians SET sto = ? WHERE telegram_id = ?", (normalized_sto, telegram_id))
                 row = conn.execute(
-                    "SELECT * FROM technicians WHERE telegram_id = ?",
+                    "SELECT id, telegram_id, nik, name, sto, created_at, password_hash, role, is_active FROM technicians WHERE telegram_id = ?",
                     (telegram_id,),
                 ).fetchone()
         return Technician(**dict(row)) if row else None
@@ -158,157 +169,77 @@ class Database:
     async def list_technicians(self) -> list[sqlite3.Row]:
         async with self._lock:
             with self.connection() as conn:
-                rows = conn.execute(
-                    "SELECT * FROM technicians ORDER BY created_at DESC"
-                ).fetchall()
-        return rows
+                return conn.execute("SELECT * FROM technicians ORDER BY created_at DESC").fetchall()
 
     async def delete_technician(self, telegram_id: int) -> bool:
         async with self._lock:
             with self.connection() as conn:
-                cursor = conn.execute(
-                    "DELETE FROM technicians WHERE telegram_id = ?",
-                    (telegram_id,),
-                )
+                cursor = conn.execute("DELETE FROM technicians WHERE telegram_id = ?", (telegram_id,))
+                return cursor.rowcount > 0
+
+    async def set_web_account(self, telegram_id: int, password_hash: str, role: str) -> Technician | None:
+        role = role.strip().lower()
+        if role not in {"technician", "admin", "superadmin"}:
+            raise ValueError("invalid_role")
+        async with self._lock:
+            with self.connection() as conn:
+                conn.execute("UPDATE technicians SET password_hash=?, role=?, is_active=1 WHERE telegram_id=?", (password_hash, role, telegram_id))
+                row = conn.execute("SELECT id, telegram_id, nik, name, sto, created_at, password_hash, role, is_active FROM technicians WHERE telegram_id=?", (telegram_id,)).fetchone()
+        return Technician(**dict(row)) if row else None
+
+    async def disable_web_account(self, telegram_id: int) -> bool:
+        async with self._lock:
+            with self.connection() as conn:
+                cursor = conn.execute("UPDATE technicians SET is_active=0 WHERE telegram_id=?", (telegram_id,))
                 return cursor.rowcount > 0
 
     async def save_history(self, technician: Technician, kind: str, data: dict[str, Any], content: str) -> int:
         async with self._lock:
             with self.connection() as conn:
                 cursor = conn.execute(
-                    """
-                    INSERT INTO histories (
-                        technician_id, telegram_id, kind, ticket_id, service_number,
-                        old_sn, new_sn, ont_type, sto, valins_id, content, created_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        technician.id,
-                        technician.telegram_id,
-                        kind,
-                        data.get("ticket_id"),
-                        data.get("service_number") or data.get("internet_number"),
-                        data.get("old_sn"),
-                        data.get("new_sn"),
-                        data.get("ont_type"),
-                        data.get("sto"),
-                        data.get("valins_id"),
-                        content,
-                        utc_now(),
-                    ),
+                    "INSERT INTO histories (technician_id, telegram_id, kind, ticket_id, service_number, old_sn, new_sn, ont_type, sto, valins_id, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (technician.id, technician.telegram_id, kind, data.get("ticket_id"), data.get("service_number") or data.get("internet_number"), data.get("old_sn"), data.get("new_sn"), data.get("ont_type"), data.get("sto"), data.get("valins_id"), content, utc_now()),
                 )
                 return int(cursor.lastrowid)
 
     async def list_history(self, telegram_id: int, limit: int = 10) -> list[sqlite3.Row]:
         async with self._lock:
             with self.connection() as conn:
-                rows = conn.execute(
-                    """
-                    SELECT * FROM histories
-                    WHERE telegram_id = ?
-                    ORDER BY created_at DESC
-                    LIMIT ?
-                    """,
-                    (telegram_id, limit),
-                ).fetchall()
-        return rows
+                return conn.execute("SELECT * FROM histories WHERE telegram_id = ? ORDER BY created_at DESC LIMIT ?", (telegram_id, limit)).fetchall()
 
     async def search_history(self, telegram_id: int, query: str) -> list[sqlite3.Row]:
         like = f"%{query}%"
         async with self._lock:
             with self.connection() as conn:
-                rows = conn.execute(
-                    """
-                    SELECT * FROM histories
-                    WHERE telegram_id = ?
-                      AND (
-                        ticket_id LIKE ? OR service_number LIKE ? OR old_sn LIKE ?
-                        OR new_sn LIKE ? OR sto LIKE ? OR content LIKE ?
-                      )
-                    ORDER BY created_at DESC
-                    LIMIT 25
-                    """,
-                    (telegram_id, like, like, like, like, like, like),
-                ).fetchall()
-        return rows
+                return conn.execute("SELECT * FROM histories WHERE telegram_id = ? AND (ticket_id LIKE ? OR service_number LIKE ? OR old_sn LIKE ? OR new_sn LIKE ? OR sto LIKE ? OR content LIKE ?) ORDER BY created_at DESC LIMIT 25", (telegram_id, like, like, like, like, like, like)).fetchall()
 
     async def delete_history(self, telegram_id: int, history_id: int) -> bool:
         async with self._lock:
             with self.connection() as conn:
-                cursor = conn.execute(
-                    "DELETE FROM histories WHERE id = ? AND telegram_id = ?",
-                    (history_id, telegram_id),
-                )
+                cursor = conn.execute("DELETE FROM histories WHERE id = ? AND telegram_id = ?", (history_id, telegram_id))
                 return cursor.rowcount > 0
 
     async def export_history_csv(self, telegram_id: int, output_path: Path) -> Path:
         async with self._lock:
             with self.connection() as conn:
-                rows = conn.execute(
-                    """
-                    SELECT id, kind, ticket_id, service_number, old_sn, new_sn,
-                           ont_type, sto, valins_id, content, created_at
-                    FROM histories
-                    WHERE telegram_id = ?
-                    ORDER BY created_at DESC
-                    """,
-                    (telegram_id,),
-                ).fetchall()
-
+                rows = conn.execute("SELECT id, kind, ticket_id, service_number, old_sn, new_sn, ont_type, sto, valins_id, content, created_at FROM histories WHERE telegram_id = ? ORDER BY created_at DESC", (telegram_id,)).fetchall()
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open("w", newline="", encoding="utf-8") as file:
             writer = csv.writer(file)
-            writer.writerow(rows[0].keys() if rows else [
-                "id", "kind", "ticket_id", "service_number", "old_sn", "new_sn",
-                "ont_type", "sto", "valins_id", "content", "created_at",
-            ])
+            writer.writerow(rows[0].keys() if rows else ["id", "kind", "ticket_id", "service_number", "old_sn", "new_sn", "ont_type", "sto", "valins_id", "content", "created_at"])
             for row in rows:
                 writer.writerow([row[key] for key in row.keys()])
         return output_path
 
-    async def save_ocr_log(
-        self,
-        telegram_id: int,
-        technician_id: int | None,
-        image_path: str,
-        raw_text: str,
-        serial_number: str | None,
-        model: str | None,
-        manufacturer: str | None,
-        confidence: float,
-        status: str,
-    ) -> None:
+    async def save_ocr_log(self, telegram_id: int, technician_id: int | None, image_path: str, raw_text: str, serial_number: str | None, model: str | None, manufacturer: str | None, confidence: float, status: str) -> None:
         async with self._lock:
             with self.connection() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO ocr_logs (
-                        technician_id, telegram_id, image_path, raw_text, serial_number,
-                        model, manufacturer, confidence, status, created_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        technician_id,
-                        telegram_id,
-                        image_path,
-                        raw_text,
-                        serial_number,
-                        model,
-                        manufacturer,
-                        float(confidence),
-                        status,
-                        utc_now(),
-                    ),
-                )
+                conn.execute("INSERT INTO ocr_logs (technician_id, telegram_id, image_path, raw_text, serial_number, model, manufacturer, confidence, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (technician_id, telegram_id, image_path, raw_text, serial_number, model, manufacturer, float(confidence), status, utc_now()))
 
     async def statistics(self) -> dict[str, int]:
         async with self._lock:
             with self.connection() as conn:
                 users = conn.execute("SELECT COUNT(*) AS total FROM technicians").fetchone()["total"]
                 histories = conn.execute("SELECT COUNT(*) AS total FROM histories").fetchone()["total"]
-                ocr_failures = conn.execute(
-                    "SELECT COUNT(*) AS total FROM ocr_logs WHERE status != 'success'"
-                ).fetchone()["total"]
+                ocr_failures = conn.execute("SELECT COUNT(*) AS total FROM ocr_logs WHERE status != 'success'").fetchone()["total"]
         return {"users": users, "histories": histories, "ocr_failures": ocr_failures}
