@@ -29,6 +29,25 @@ function web_auth_same_origin(): void {
     if($originScheme!==$serverScheme||!in_array($originHost,$allowedHosts,true)||!$originPortAllowed)web_auth_respond(['ok'=>false,'error'=>'invalid_origin','message'=>'Permintaan ditolak.'],403);
 }
 
+// Supervisor means an admin/superadmin account or the two configured supervisor NIKs.
+// Keep this local to the web router so /api/web/open-orders never depends on an
+// optional helper file defining the function.
+function report_is_supervisor(?array $tech): bool {
+    if (!$tech) return false;
+    $nik = trim((string)($tech['nik'] ?? ''));
+    if (in_array($nik, ['91260038','94250015'], true)) return true;
+    $role = strtolower(trim((string)($tech['role'] ?? '')));
+    if (in_array($role, ['admin','superadmin'], true)) return true;
+    try {
+        $st = db()->prepare('SELECT role FROM technicians WHERE id=? LIMIT 1');
+        $st->execute([(int)($tech['id'] ?? 0)]);
+        $dbRole = strtolower(trim((string)$st->fetchColumn()));
+        return in_array($dbRole, ['admin','superadmin'], true);
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
 $path=parse_url($_SERVER['REQUEST_URI']??'',PHP_URL_PATH)?:'';$method=strtoupper($_SERVER['REQUEST_METHOD']??'GET');
 if($path==='/website'||$path==='/website/'){
     header('Content-Type: text/html; charset=utf-8');header('Cache-Control: no-store');readfile(__DIR__.'/website/index.html');exit;
