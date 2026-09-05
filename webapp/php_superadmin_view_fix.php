@@ -3,8 +3,9 @@
 declare(strict_types=1);
 
 // This helper is also used directly by diagnostic/CLI scripts. Keep its
-// dependencies explicit so it can never rely on router include order.
+dependencies explicit so it can never rely on router include order.
 require_once __DIR__.'/php_backend.php';
+require_once __DIR__.'/php_compat.php';
 
 /**
  * Supervisor/Superadmin view fixes.
@@ -181,6 +182,7 @@ function superadmin_dashboard_from_history_php(string $area, string $period): ar
     $total=array_sum(array_column($leader,'total'));
     $active=count($leader);
     return [
+        'ok'=>true,
         'area'=>$area,'period'=>$period,'period_label'=>$label,
         'summary'=>['total_close'=>$total,'active_technicians'=>$active,'average_close'=>$active?round($total/$active,1):0],
         'trend'=>$trend,'leaderboard'=>$leader,
