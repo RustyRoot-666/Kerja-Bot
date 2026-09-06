@@ -8,9 +8,9 @@ require_once __DIR__.'/php_compat.php';
 /**
  * Dashboard compatibility implementation.
  *
- * Historical dashboard data belongs to report_group_orders.message_date /
- * period_start. orders.updated_at is only the synchronization timestamp and
- * must never be used as the close date.
+ * Historical CLOSE data belongs to report_group_orders.message_date /
+ * period_start. orders.updated_at is only used for the live status buckets
+ * (OPEN / UPDATE / MENOLAK), never as the historical CLOSE date.
  */
 function dashboard_orders_fallback(string $area, string $period): array {
     $area = strtoupper(trim($area ?: 'ALL'));
@@ -82,7 +82,6 @@ function dashboard_orders_fallback(string $area, string $period): array {
 
     $registry = technician_registry();
     $groups = [];
-    $serviceDates = [];
     foreach ($rows as $r) {
         $service = norm_key($r['service_number'] ?? '');
         if ($service === '') continue;
@@ -108,7 +107,6 @@ function dashboard_orders_fallback(string $area, string $period): array {
             $groups[$key]['sto']=strtoupper(trim((string)($r['sto'] ?? '')));
             $groups[$key]['area_label']=strtoupper(trim((string)($r['area_label'] ?? $r['sto'] ?? '')));
         }
-        $serviceDates[$service][$day] = true;
     }
 
     $leaderboard=[];
@@ -130,7 +128,6 @@ function dashboard_orders_fallback(string $area, string $period): array {
 
     $trend=[];
     if ($period === 'weekly') {
-        // Exactly seven dates: Friday -> Thursday.
         $trendDates=[];
         for($d=$weekStart;$d <= $weekEnd;$d=$d->modify('+1 day')) $trendDates[]=$d;
     } else {
@@ -158,6 +155,74 @@ function dashboard_orders_fallback(string $area, string $period): array {
     $total=array_sum(array_column($leaderboard,'total'));
     $active=count($leaderboard);
 
+    /*
+     * KPI status buckets.
+     * CLOSE remains canonical report-history data above. The other buckets
+     * describe the current order state, using the same STO filter and the
+     * order update date for the selected dashboard period. This fixes the
+     * previous implicit-zero response where the API only returned CLOSE.
+     */
+    $statusCounts = [
+        'open'=>0,
+        'close'=>$total,
+        'update'=>0,
+        'menolak'=>0,
+    ];
+    if (table_exists('orders')) {
+        try {
+            $statusWhere = [];
+            $statusParams = [];
+            if ($area === 'MYR' || $area === 'JGR') {
+                $statusWhere[] = "UPPER(TRIM(COALESCE(sto,'')))=?";
+                $statusParams[] = $area;
+            }
+            if ($period === 'daily') {
+                $statusWhere[] = "substr(updated_at,1,10)=?";
+                $statusParams[] = $today->format('Y-m-d');
+            } elseif ($period === 'weekly') {
+                $statusWhere[] = "substr(updated_at,1,10)>=?";
+                $statusWhere[] = "substr(updated_at,1,10)<=?";
+                $statusParams[] = $weekStart->format('Y-m-d');
+                $statusParams[] = $weekEnd->format('Y-m-d');
+            }
+            $statusSql = 'SELECT result, service_number, ticket_id FROM orders WHERE '.($statusWhere ? implode(' AND ',$statusWhere) : '1=1');
+            $stStatus = db()->prepare($statusSql);
+            $stStatus->execute($statusParams);
+            $seenStatus = [];
+            foreach ($stStatus->fetchAll() as $sr) {
+                $service = norm_key($sr['service_number'] ?? '');
+                $ticket = norm_key($sr['ticket_id'] ?? '');
+                $key = $service !== '' ? 'INET:'.$service : 'TICKET:'.$ticket;
+                if ($key === 'INET:' || $key === 'TICKET:') continue;
+                $status = norm($sr['result'] ?? '');
+                if (!isset($seenStatus[$key])) $seenStatus[$key] = $status;
+                else $seenStatus[$key] = $status;
+            }
+            foreach ($seenStatus as $status) {
+                if (in_array($status, CLOSED_STATUSES, true)) {
+                    // Do not replace canonical historical CLOSE; this only
+                    // ensures the status bucket is populated when applicable.
+                    $statusCounts['close']++;
+                } elseif (in_array($status, UPDATE_STATUSES, true) || str_contains($status,'UPDATE') || str_contains($status,'PROGRESS')) {
+                    $statusCounts['update']++;
+                } elseif (str_contains($status,'TOLAK') || str_contains($status,'MENOLAK') || str_contains($status,'REJECT')) {
+                    $statusCounts['menolak']++;
+                } else {
+                    $statusCounts['open']++;
+                }
+            }
+        } catch (Throwable $e) {
+            error_log('[miniapp-php] dashboard status KPI failed: '.$e->getMessage());
+        }
+    }
+
+    // The current-order status counts can include the same CLOSE records that
+    // already exist in report history. Keep the canonical report CLOSE value
+    // for the selected period and only use live data for the non-close buckets.
+    $statusCounts['close'] = $total;
+    $statusTotal = $statusCounts['open'] + $statusCounts['close'] + $statusCounts['update'] + $statusCounts['menolak'];
+    $progress = $statusTotal > 0 ? round(($statusCounts['close'] / $statusTotal) * 100) : 0;
+
     $rca=load_rca_summary_php($area);
     $rca['period']=$period;
     $rca['period_label']=$label;
@@ -168,6 +233,12 @@ function dashboard_orders_fallback(string $area, string $period): array {
         'period_label'=>$label,
         'summary'=>[
             'total_close'=>$total,
+            'close'=>$statusCounts['close'],
+            'open'=>$statusCounts['open'],
+            'update'=>$statusCounts['update'],
+            'menolak'=>$statusCounts['menolak'],
+            'total'=>$statusTotal,
+            'progress'=>$progress,
             'active_technicians'=>$active,
             'average_close'=>$active?round($total/$active,1):0,
         ],
