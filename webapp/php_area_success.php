@@ -4,16 +4,39 @@ declare(strict_types=1);
 
 /*
  * AREA SUCCESS MAP
- *
  * Level 1 = KECAMATAN only.
- * A map point represents one Surabaya kecamatan, never a street/area.
- * Customer area + full address are kept as drill-down data after the
- * kecamatan point is clicked.
+ * One map point represents one Surabaya kecamatan.
+ * Customer area + full address remain drill-down data.
  */
 function area_success_normalize(string $address): string {
     $s = normalize_address($address);
     $s = preg_replace('/\b(?:SBY|SURABAYA|JAWA TIMUR|INDONESIA)\b.*$/', '', $s) ?: $s;
     return trim(preg_replace('/\s+/', ' ', $s) ?: '');
+}
+
+function area_success_locality(string $address): string {
+    $s = area_success_normalize($address);
+    if ($s === '') return 'LAINNYA';
+    $known = [
+        'APARTEMEN BALE HINGGIL'=>'APARTEMEN BALE HINGGIL',
+        'APARTEMEN EDUCITY'=>'APARTEMEN EDUCITY',
+        'APARTEMEN ONE GALAXY'=>'APARTEMEN ONE GALAXY',
+        'APARTEMEN PUNCAK KERTAJAYA'=>'APARTEMEN PUNCAK KERTAJAYA',
+        'APARTEMEN DIAN REGENCY'=>'APARTEMEN DIAN REGENCY',
+        'BASKARA SAWAH'=>'BASKARA SAWAH','BASKARA SELATAN'=>'BASKARA SELATAN',
+        'BASKARA TENGAH'=>'BASKARA TENGAH','BASKARA UTARA'=>'BASKARA UTARA','BASKARA SARI'=>'BASKARA SARI','BASKARA'=>'BASKARA'
+    ];
+    uksort($known, static fn($a,$b)=>strlen($b)<=>strlen($a));
+    foreach ($known as $needle=>$name) {
+        if (preg_match('/(?:^|\s)'.preg_quote($needle,'/').'(?=\s|$)/i', $s)) return $name;
+    }
+    // Preserve the existing customer-area convention: first administrative locality
+    // token is enough for drill-down; it does not affect map geocoding.
+    foreach (area_success_admin_map() as $kel=>$kec) {
+        if (preg_match('/(?:^|\s)'.preg_quote($kel,'/').'(?=\s|$)/i', $s)) return $kel;
+    }
+    $parts = preg_split('/\s+/', $s);
+    return !empty($parts[0]) ? $parts[0] : 'LAINNYA';
 }
 
 function area_success_color(float $rate): string {
@@ -50,7 +73,7 @@ function area_success_admin_map(): array {
         'ALUN ALUN CONTONG'=>'BUBUTAN','BUBUTAN'=>'BUBUTAN','GUNDIH'=>'BUBUTAN','JEPARA'=>'BUBUTAN','TEMBOK DUKUH'=>'BUBUTAN',
         'EMBONG KALIASIN'=>'GENTENG','GENTENG'=>'GENTENG','KAPASARI'=>'GENTENG','KETABANG'=>'GENTENG','PENELEH'=>'GENTENG',
         'KAPASAN'=>'SIMOKERTO','SIDODADI'=>'SIMOKERTO','SIMOKERTO'=>'SIMOKERTO','SIMOLAWANG'=>'SIMOKERTO','TAMBAKREJO'=>'SIMOKERTO',
-        'DR SOETOMO'=>'TEGALSARI','DR SOETOMO'=>'TEGALSARI','KEDUNGDORO'=>'TEGALSARI','KEPUTRAN'=>'TEGALSARI','TEGALSARI'=>'TEGALSARI',
+        'DR SOETOMO'=>'TEGALSARI','KEDUNGDORO'=>'TEGALSARI','KEPUTRAN'=>'TEGALSARI','TEGALSARI'=>'TEGALSARI',
         'BULAK'=>'BULAK','KEDUNG COWEK'=>'BULAK','KENJERAN'=>'BULAK','SUKOLILO BARU'=>'BULAK',
         'BULAK BANTENG'=>'KENJERAN','SIDOTOPO WETAN'=>'KENJERAN','TAMBAK WEDI'=>'KENJERAN','TANAH KALI KEDINDING'=>'KENJERAN',
         'DUPAK'=>'KREMBANGAN','KEMAYORAN'=>'KREMBANGAN','KREMBANGAN SELATAN'=>'KREMBANGAN','MOROKREMBANGAN'=>'KREMBANGAN','PERAK BARAT'=>'KREMBANGAN',
@@ -79,7 +102,7 @@ function area_success_area_context(string $area): array {
 function area_success_context(string $address, string $area=''): array {
     $s=area_success_normalize($address);
     $known=area_success_area_context($area);
-    if ($known['kecamatan']!=='') return $known;
+    if ($known['kecamatan']!=='') return ['kelurahan'=>$known['kelurahan'],'kecamatan'=>$known['kecamatan']];
     foreach(area_success_admin_map() as $kel=>$kec){
         if(preg_match('/(?:^|\s)'.preg_quote($kel,'/').'(?=\s|$)/i',$s)) return ['kelurahan'=>$kel,'kecamatan'=>$kec];
     }
