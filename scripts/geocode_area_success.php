@@ -14,8 +14,7 @@ function area_success_kecamatan(string $address): string {
     $s = area_success_normalize($address);
     if ($s === '') return '';
 
-    // Exact locality -> actual kecamatan mappings used as geocoding context.
-    // These are deliberately NOT used as the Area Success grouping key.
+    // Kecamatan is geocoding context only. It never changes the Area Success key.
     $localityMap = [
         'MOJO' => 'GUBENG',
         'AIRLANGGA' => 'GUBENG',
@@ -26,6 +25,7 @@ function area_success_kecamatan(string $address): string {
         'MENUR' => 'SUKOLILO',
         'SEMOLOWARU' => 'SUKOLILO',
         'KERTAJAYA' => 'GUBENG',
+        'KEJAWAN PUTIH TAMBAK' => 'SUKOLILO',
         'TENGGILIS MEJOYO' => 'TENGGILIS MEJOYO',
         'GUNUNG ANYAR' => 'GUNUNG ANYAR',
         'RUNGKUT' => 'RUNGKUT',
@@ -55,13 +55,9 @@ function area_success_kecamatan(string $address): string {
         'SAWAHAN' => 'SAWAHAN',
         'SEMAMPIR' => 'SEMAMPIR',
         'SIMOKERTO' => 'SIMOKERTO',
-        'TAMBAKSARI' => 'TAMBAKSARI',
-        'TEGALSARI' => 'TEGALSARI',
-        'WONOKROMO' => 'WONOKROMO'
+        'TEGALSARI' => 'TEGALSARI'
     ];
 
-    // Match longer names first. The address is only inspected for context;
-    // the returned kecamatan never changes the Area Success grouping.
     uksort($localityMap, static fn($a, $b) => strlen($b) <=> strlen($a));
     foreach ($localityMap as $locality => $kecamatan) {
         if (preg_match('/(?:^|\s)' . preg_quote($locality, '/') . '(?:\s|$)/i', $s)) {
