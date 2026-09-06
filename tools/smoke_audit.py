@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 def module_path(name: str) -> Path | None:
@@ -85,8 +88,6 @@ def main() -> None:
                             f"{name}.{symbol} (not defined in {target.relative_to(ROOT)})"
                         )
 
-    # Ensure Python's import machinery can resolve the project entry point
-    # without executing it or requiring environment secrets.
     if importlib.util.find_spec("database") is None:
         errors.append("cannot resolve top-level database module")
 
