@@ -38,6 +38,22 @@ function area_success_location_context(string $address): array {
     return ['kelurahan'=>'', 'kecamatan'=>''];
 }
 
+// Some customer areas are buildings/complexes whose canonical area name is
+// intentionally shorter than the raw customer address. Their locality must
+// therefore be attached to the canonical area itself, not only discovered
+// from the raw address text.
+function area_success_area_context(string $area): array {
+    $key = strtoupper(trim($area));
+    $known = [
+        'APARTEMEN BALE HINGGIL' => ['kelurahan'=>'MEDOKAN SEMAMPIR', 'kecamatan'=>'SUKOLILO'],
+        'APARTEMEN EDUCITY' => ['kelurahan'=>'KEJAWAN PUTIH TAMBAK', 'kecamatan'=>'SUKOLILO'],
+        'APARTEMEN ONE GALAXY' => ['kelurahan'=>'MULYOREJO', 'kecamatan'=>'MULYOREJO'],
+        'APARTEMEN PUNCAK KERTAJAYA' => ['kelurahan'=>'KERTAJAYA', 'kecamatan'=>'GUBENG'],
+        'APARTEMEN DIAN REGENCY' => ['kelurahan'=>'KEPUTIH', 'kecamatan'=>'SUKOLILO'],
+    ];
+    return $known[$key] ?? ['kelurahan'=>'', 'kecamatan'=>''];
+}
+
 $rows = fetch_sheet(false);
 $areas = [];
 foreach ($rows as $row) {
@@ -46,6 +62,9 @@ foreach ($rows as $row) {
     $area = area_success_locality($address);
     if ($area === '' || $area === 'LAINNYA') continue;
     $ctx = area_success_location_context($address);
+    $knownCtx = area_success_area_context($area);
+    if ($knownCtx['kelurahan'] !== '') $ctx = $knownCtx;
+
     $areas[$area] ??= ['kelurahan'=>$ctx['kelurahan'], 'kecamatan'=>$ctx['kecamatan'], 'address'=>$address];
     if ($ctx['kelurahan'] !== '') {
         $areas[$area]['kelurahan'] = $ctx['kelurahan'];
@@ -72,19 +91,51 @@ foreach (['kelurahan','kecamatan'] as $column) {
     try { $pdo->exec("ALTER TABLE area_success_geocodes ADD COLUMN {$column} TEXT"); } catch (Throwable $e) {}
 }
 
-function geocode_area_request(string $area, string $kelurahan = '', string $kecamatan = ''): ?array {
-    $parts = [$area];
-    if ($kelurahan !== '' && strcasecmp($kelurahan, $area) !== 0) $parts[] = $kelurahan;
-    if ($kecamatan !== '' && strcasecmp($kecamatan, $area) !== 0 && strcasecmp($kecamatan, $kelurahan) !== 0) $parts[] = $kecamatan;
-    $parts[] = 'Surabaya'; $parts[] = 'Jawa Timur'; $parts[] = 'Indonesia';
-    $query = implode(', ', $parts);
-    $url = 'https://nominatim.openstreetmap.org/search?' . http_build_query(['q'=>$query,'format'=>'jsonv2','limit'=>1,'countrycodes'=>'id']);
-    $ctx = stream_context_create(['http'=>['timeout'=>15,'header'=>"User-Agent: Kerja-Bot/1.0 (area-success-map)\r\nAccept: application/json\r\n"]]);
+function geocode_http(string $query): ?array {
+    $url = 'https://nominatim.openstreetmap.org/search?' . http_build_query([
+        'q'=>$query,
+        'format'=>'jsonv2',
+        'limit'=>1,
+        'countrycodes'=>'id'
+    ]);
+    $ctx = stream_context_create(['http'=>[
+        'timeout'=>15,
+        'header'=>"User-Agent: Kerja-Bot/1.0 (area-success-map)\r\nAccept: application/json\r\n"
+    ]]);
     $raw = @file_get_contents($url, false, $ctx);
     if ($raw === false) return null;
     $items = json_decode($raw, true);
     if (!is_array($items) || empty($items[0]['lat']) || empty($items[0]['lon'])) return null;
-    return ['latitude'=>(float)$items[0]['lat'],'longitude'=>(float)$items[0]['lon'],'display_name'=>(string)($items[0]['display_name'] ?? $query)];
+    return [
+        'latitude'=>(float)$items[0]['lat'],
+        'longitude'=>(float)$items[0]['lon'],
+        'display_name'=>(string)($items[0]['display_name'] ?? $query)
+    ];
+}
+
+function geocode_area_request(string $area, string $kelurahan = '', string $kecamatan = ''): ?array {
+    $queries = [];
+    $base = [$area];
+    if ($kelurahan !== '' && strcasecmp($kelurahan, $area) !== 0) $base[] = $kelurahan;
+    if ($kecamatan !== '' && strcasecmp($kecamatan, $area) !== 0 && strcasecmp($kecamatan, $kelurahan) !== 0) $base[] = $kecamatan;
+    $base[] = 'Surabaya'; $base[] = 'Jawa Timur'; $base[] = 'Indonesia';
+    $queries[] = implode(', ', $base);
+
+    // Nominatim is often better with the apartment/building name without the
+    // administrative prefix, and with locality as a separate query variant.
+    $short = preg_replace('/^APARTEMEN\s+/i', '', $area) ?: $area;
+    $shortParts = [$short];
+    if ($kelurahan !== '') $shortParts[] = $kelurahan;
+    if ($kecamatan !== '') $shortParts[] = $kecamatan;
+    $shortParts[] = 'Surabaya'; $shortParts[] = 'Jawa Timur'; $shortParts[] = 'Indonesia';
+    $queries[] = implode(', ', $shortParts);
+
+    foreach (array_values(array_unique($queries)) as $query) {
+        $geo = geocode_http($query);
+        if ($geo) return $geo;
+        usleep(500000);
+    }
+    return null;
 }
 
 $total=count($areas); $checked=0; $done=0; $cached=0; $failed=0;
