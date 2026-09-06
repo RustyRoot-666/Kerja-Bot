@@ -19,14 +19,14 @@ function detailHtml(d){
   const areaRows=(Array.isArray(d.areas)?d.areas:[]).map(a=>{
     const customers=Array.isArray(a.customers)?a.customers:[];
     const customerHtml=customers.slice(0,30).map(c=>`<div class="map-customer"><b>${esc(c.customer_name||'-')}</b><small>${esc(c.service_number||'-')} • ${esc(c.status||'-')}</small><span>${esc(c.address||'-')}</span></div>`).join('');
-    const more=customers.length>30?`<small>+ ${customers.length-30} pelanggan lainnya</small>`:'';
-    return `<div class="map-area-detail"><b>${esc(a.area||'LAINNYA')}</b><strong>${Number(a.rate||0).toLocaleString('id-ID')}%</strong><span>${fmt(a.close)} CLOSE • ${fmt(a.open)} OPEN • ${fmt(a.total)} TOTAL</span>${customerHtml}${more}</div>`;
+    const more=customers.length>30?`<div class="map-more">+ ${customers.length-30} pelanggan lainnya</div>`:'';
+    return `<section class="map-area-detail"><div class="map-area-head"><b>${esc(a.area||'LAINNYA')}</b><strong>${Number(a.rate||0).toLocaleString('id-ID')}%</strong></div><div class="map-area-stats"><span>${fmt(a.close)} CLOSE</span><span>${fmt(a.open)} OPEN</span><span>${fmt(a.total)} TOTAL</span></div><div class="map-customer-list">${customerHtml||'<small>Tidak ada pelanggan.</small>'}</div>${more}</section>`;
   }).join('');
-  return `<div class="map-popup map-kecamatan"><b>KECAMATAN ${esc(d.kecamatan||'-')}</b><div class="map-popup-rate">${rate.toLocaleString('id-ID')}%</div><span>${fmt(d.close)} CLOSE • ${fmt(d.open)} OPEN • ${fmt(d.total)} TOTAL</span><small>${successLabel(rate)}</small><div class="map-detail-list">${areaRows||'<small>Tidak ada detail pelanggan.</small>'}</div></div>`;
+  return `<div class="map-popup map-kecamatan"><b class="map-popup-title">KECAMATAN ${esc(d.kecamatan||'-')}</b><div class="map-popup-rate">${rate.toLocaleString('id-ID')}%</div><div class="map-popup-stats"><span>${fmt(d.close)} CLOSE</span><span>${fmt(d.open)} OPEN</span><span>${fmt(d.total)} TOTAL</span></div><small class="map-popup-status">${successLabel(rate)}</small><div class="map-detail-list">${areaRows||'<small>Tidak ada detail pelanggan.</small>'}</div></div>`;
 }
 
 async function openKecamatanDetail(layer,kecamatan){
-  layer.bindPopup(`<div class="map-popup"><b>KECAMATAN ${esc(kecamatan)}</b><br><small>MEMUAT DETAIL PELANGGAN...</small></div>`).openPopup();
+  layer.bindPopup(`<div class="map-popup"><b>KECAMATAN ${esc(kecamatan)}</b><br><small>MEMUAT DETAIL PELANGGAN...</small></div>`,{maxWidth:390,minWidth:280}).openPopup();
   try{
     if(!isMyrKecamatan(kecamatan))throw new Error('Kecamatan di luar STO MYR');
     const d=await json('/api/web/area-success?kecamatan='+encodeURIComponent(kecamatan));
@@ -78,3 +78,29 @@ async function renderAreaSuccessMap(data){
 }
 
 async function loadAreaSuccessMap(){const summary=document.querySelector('#areaMapSummary');if(summary)summary.textContent='MEMUAT POLYGON KECAMATAN STO MYR...';try{const d=await json('/api/web/area-success');if(!d?.ok)throw new Error(d?.message||d?.error||'Area API gagal');await renderAreaSuccessMap(d);}catch(e){console.warn('[AREA SUCCESS]',e);if(summary)summary.textContent='MAP DATA GAGAL DIMUAT — CEK SESSION / API';}}
+
+/* Popup readability patch: keep the existing visual identity, but separate
+   stats and customer records so text can never run together. */
+(function installAreaPopupStyles(){
+  if(document.getElementById('area-popup-readable-style'))return;
+  const s=document.createElement('style');s.id='area-popup-readable-style';s.textContent=`
+    .map-kecamatan{min-width:280px;max-width:360px;font-size:11px;line-height:1.45}
+    .map-popup-title{display:block;margin-bottom:4px;letter-spacing:.04em}
+    .map-popup-rate{font-size:22px;font-weight:800;line-height:1.05;margin:2px 0 4px}
+    .map-popup-stats,.map-area-stats{display:flex;flex-wrap:wrap;gap:4px 10px;color:#a8c4d1;font-size:9px;font-weight:700}
+    .map-popup-status{display:block;margin:5px 0 8px;color:#55e1a1;font-weight:800}
+    .map-detail-list{max-height:330px;overflow-y:auto;padding-right:4px}
+    .map-area-detail{padding:8px 0;border-top:1px solid #1b3948}
+    .map-area-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:3px}
+    .map-area-head b{color:#66dcff;font-size:11px}
+    .map-area-head strong{font-size:14px;color:#e8f7ff}
+    .map-customer-list{margin-top:6px}
+    .map-customer{padding:6px 0;border-top:1px solid rgba(33,69,85,.65)}
+    .map-customer b,.map-customer small,.map-customer span{display:block}
+    .map-customer b{font-size:10px;color:#e6f5fa}
+    .map-customer small{font-size:8px;color:#62dfff;margin-top:2px}
+    .map-customer span{font-size:8px;line-height:1.35;color:#7895a4;margin-top:2px;white-space:normal}
+    .map-more{padding-top:6px;color:#55e1a1;font-size:8px;font-weight:800}
+    .leaflet-popup-content{margin:10px 12px}
+  `;document.head.appendChild(s);
+})();
