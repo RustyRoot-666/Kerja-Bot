@@ -6,6 +6,8 @@ require_once __DIR__.'/php_auth.php';
 require_once __DIR__.'/php_superadmin_view_fix.php';
 require_once __DIR__.'/php_supervisor_report.php';
 require_once __DIR__.'/php_area_success.php';
+require_once __DIR__.'/php_orderanku_fix.php';
+require_once __DIR__.'/php_unified_workflow.php';
 auth_ensure_schema();
 
 function web_auth_respond(mixed $payload,int $status=200):never{http_response_code($status);header('Content-Type: application/json; charset=utf-8');header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');echo json_encode($payload,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);exit;}
@@ -22,9 +24,9 @@ function web_auth_same_origin(): void {
     $serverScheme=$forwardedProto!==''?$forwardedProto:((!empty($_SERVER['HTTPS'])&&$_SERVER['HTTPS']!=='off')?'https':'http');
     $serverHost=strtolower(trim(explode(',',(string)($_SERVER['HTTP_X_FORWARDED_HOST']??''))[0]??''));
     if($serverHost==='')$serverHost=strtolower((string)($_SERVER['HTTP_HOST']??''));
-    $serverHost=preg_replace('/:\\d+$/','',$serverHost)?:$serverHost;
+    $serverHost=preg_replace('/:\d+$/','',$serverHost)?:$serverHost;
     $allowedHosts=['app.botkerja.web.id'];
-    $currentHost=preg_replace('/:\\d+$/','',strtolower((string)($_SERVER['HTTP_HOST']??'')));
+    $currentHost=preg_replace('/:\d+$/','',strtolower((string)($_SERVER['HTTP_HOST']??'')));
     if($currentHost!=='')$allowedHosts[]=$currentHost;
     $originPortAllowed=$originPort===null||($originScheme==='https'&&$originPort===443)||($originScheme==='http'&&$originPort===80);
     if($originScheme!==$serverScheme||!in_array($originHost,$allowedHosts,true)||!$originPortAllowed)web_auth_respond(['ok'=>false,'error'=>'invalid_origin','message'=>'Permintaan ditolak.'],403);
@@ -60,8 +62,27 @@ if($path==='/api/auth/password'&&$method==='POST'){
     web_auth_respond(['ok'=>true,'message'=>'Password berhasil diubah.']);
 }
 if($path==='/api/auth/logout'&&$method==='POST'){auth_logout();web_auth_respond(['ok'=>true]);}
-if($path==='/api/web/my-report'&&$method==='GET'){$tech=auth_require(['technician','admin','superadmin']);require_once __DIR__.'/php_orderanku_fix.php';$result=load_report_for_viewer_php((int)$tech['telegram_id'],'');web_auth_respond($result,($result['ok']??false)?200:404);}
-if($path==='/api/web/open-orders'&&$method==='GET'){$tech=auth_require(['technician','admin','superadmin']);require_once __DIR__.'/php_orderanku_fix.php';require_once __DIR__.'/php_unified_workflow.php';if(report_is_supervisor($tech)){$result=superadmin_open_orders_php(false);}else{$result=load_orders_for_viewer_php((int)$tech['telegram_id'],'',false);}if($result['ok']??false)$result=unified_enrich_open_orders_result($result,(int)$tech['telegram_id']);web_auth_respond($result,($result['ok']??false)?200:404);}
+
+// Legacy Mini App endpoints are kept because Orderanku's Telegram WebApp uses
+// telegram_id directly. The /api/web/* routes above are for authenticated Website.
+if($path==='/api/my-open-orders'&&$method==='GET'){
+    $raw=trim((string)($_GET['telegram_id']??''));
+    if(!ctype_digit($raw))web_auth_respond(['ok'=>false,'error'=>'telegram_id_required'],400);
+    $result=load_orders_for_viewer_php((int)$raw,(string)($_GET['target_nik']??''),((string)($_GET['force']??'0'))==='1');
+    if($result['ok']??false)$result=unified_enrich_open_orders_result($result,(int)$raw);
+    $status=($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:404);
+    web_auth_respond($result,$status);
+}
+if($path==='/api/my-report'&&$method==='GET'){
+    $raw=trim((string)($_GET['telegram_id']??''));
+    if(!ctype_digit($raw))web_auth_respond(['ok'=>false,'error'=>'telegram_id_required'],400);
+    $result=load_report_for_viewer_php((int)$raw,(string)($_GET['target_nik']??''));
+    $status=($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:404);
+    web_auth_respond($result,$status);
+}
+
+if($path==='/api/web/my-report'&&$method==='GET'){$tech=auth_require(['technician','admin','superadmin']);$result=load_report_for_viewer_php((int)$tech['telegram_id'],'');web_auth_respond($result,($result['ok']??false)?200:404);}
+if($path==='/api/web/open-orders'&&$method==='GET'){$tech=auth_require(['technician','admin','superadmin']);if(report_is_supervisor($tech)){$result=superadmin_open_orders_php(false);}else{$result=load_orders_for_viewer_php((int)$tech['telegram_id'],'',false);}if($result['ok']??false)$result=unified_enrich_open_orders_result($result,(int)$tech['telegram_id']);web_auth_respond($result,($result['ok']??false)?200:404);}
 if($path==='/api/web/dashboard'&&$method==='GET'){$tech=auth_require(['admin','superadmin']);web_auth_respond(load_superadmin_dashboard_php((string)($_GET['area']??'ALL'),(string)($_GET['period']??'daily')));}
 if($path==='/api/web/area-success'&&$method==='GET'){$tech=auth_require(['admin','superadmin']);web_auth_respond(area_success_snapshot());}
 return;
