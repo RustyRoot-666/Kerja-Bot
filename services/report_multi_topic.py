@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -33,6 +34,7 @@ AREA_BY_COMMAND = {
     "/setreportmanyar": ("MANYAR", "MYR"),
     "/setreportjagir": ("JAGIR", "JGR"),
 }
+DEFAULT_STO_RECAP_GROUP_TITLE = "REPORT MANYAR"
 
 
 def _command_from_text(text: str) -> str:
@@ -42,6 +44,24 @@ def _command_from_text(text: str) -> str:
 
 def _utc_now() -> str:
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+
+
+def _report_group_titles() -> set[str]:
+    """Return every configured group title that is allowed to contain REPORT topics.
+
+    Older deployments used REPORT_GROUP_TITLE while the area-progress/report
+    features use STO_RECAP_GROUP_TITLE. Supporting both keeps legacy /setreport
+    bindings working without changing unrelated group handlers.
+    """
+    titles = {
+        _normalized_title(_target_group_title()),
+        _normalized_title(os.getenv("STO_RECAP_GROUP_TITLE", DEFAULT_STO_RECAP_GROUP_TITLE)),
+    }
+    return {title for title in titles if title}
+
+
+def _is_report_group(title: str | None) -> bool:
+    return _normalized_title(title) in _report_group_titles()
 
 
 def _ensure_topic_table(conn: sqlite3.Connection) -> None:
@@ -123,6 +143,7 @@ def _seed_legacy_target(database_path: Path) -> None:
                 (group_id, thread_id, _utc_now()),
             )
         _repair_legacy_topic_identities(conn)
+        conn.commit()
 
 
 def _topic_identity(
@@ -199,6 +220,7 @@ def _add_topic(
                 """,
                 (area_label, sto_code, chat_id, thread_id),
             )
+            conn.commit()
             total = int(conn.execute("SELECT COUNT(*) FROM report_topics").fetchone()[0])
             return "UPDATED", total
 
@@ -214,6 +236,7 @@ def _add_topic(
             """,
             (chat_id, thread_id, _utc_now(), area_label, sto_code),
         )
+        conn.commit()
         total += 1
         return "ADDED", total
 
@@ -250,7 +273,7 @@ async def handle_multi_report_topic(update: Update, context: ContextTypes.DEFAUL
     message = update.effective_message
     if not chat or not message or chat.type not in {"group", "supergroup"}:
         return
-    if _normalized_title(chat.title) != _target_group_title():
+    if not _is_report_group(chat.title):
         return
 
     text = (message.text or message.caption or "").strip()
