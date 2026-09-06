@@ -6,9 +6,7 @@ require_once __DIR__ . '/../webapp/php_backend.php';
 require_once __DIR__ . '/../webapp/php_area_success.php';
 
 $limit = 0;
-foreach ($argv as $arg) {
-    if (str_starts_with($arg, '--limit=')) $limit = max(0, (int)substr($arg, 8));
-}
+foreach ($argv as $arg) if (str_starts_with($arg, '--limit=')) $limit = max(0, (int)substr($arg, 8));
 
 function area_success_location_context(string $address): array {
     $s = area_success_normalize($address);
@@ -41,41 +39,41 @@ function area_success_area_context(string $area): array {
 
 $rows=fetch_sheet(false); $areas=[];
 foreach ($rows as $row) {
-    $address=trim((string)($row['address']??'')); if ($address==='') continue;
-    $area=area_success_locality($address); if ($area===''||$area==='LAINNYA') continue;
-    $ctx=area_success_location_context($address); $known=area_success_area_context($area); if ($known['kelurahan']!=='') $ctx=$known;
+    $address=trim((string)($row['address']??'')); if($address==='') continue;
+    $area=area_success_locality($address); if($area===''||$area==='LAINNYA') continue;
+    $ctx=area_success_location_context($address); $known=area_success_area_context($area); if($known['kecamatan']!=='') $ctx=$known;
     $areas[$area] ??= ['kelurahan'=>$ctx['kelurahan'],'kecamatan'=>$ctx['kecamatan'],'addresses'=>[]];
-    if ($ctx['kelurahan']!=='') { $areas[$area]['kelurahan']=$ctx['kelurahan']; $areas[$area]['kecamatan']=$ctx['kecamatan']; }
-    if (!in_array($address,$areas[$area]['addresses'],true)) $areas[$area]['addresses'][]=$address;
+    if($ctx['kelurahan']!==''){ $areas[$area]['kelurahan']=$ctx['kelurahan']; $areas[$area]['kecamatan']=$ctx['kecamatan']; }
+    if(!in_array($address,$areas[$area]['addresses'],true)) $areas[$area]['addresses'][]=$address;
 }
 ksort($areas);
 
 $pdo=db();
 $pdo->exec("CREATE TABLE IF NOT EXISTS area_success_geocodes (area_key TEXT PRIMARY KEY,area_name TEXT NOT NULL,kelurahan TEXT,kecamatan TEXT,latitude REAL,longitude REAL,display_name TEXT,status TEXT NOT NULL DEFAULT 'failed',attempts INTEGER NOT NULL DEFAULT 0,updated_at TEXT)");
-foreach (['kelurahan','kecamatan'] as $column) { try {$pdo->exec("ALTER TABLE area_success_geocodes ADD COLUMN {$column} TEXT");} catch(Throwable $e){} }
+foreach(['kelurahan','kecamatan'] as $column){try{$pdo->exec("ALTER TABLE area_success_geocodes ADD COLUMN {$column} TEXT");}catch(Throwable $e){}}
 
 function geocode_http(string $query): ?array {
     $url='https://nominatim.openstreetmap.org/search?'.http_build_query(['q'=>$query,'format'=>'jsonv2','limit'=>1,'countrycodes'=>'id']);
     $ctx=stream_context_create(['http'=>['timeout'=>15,'header'=>"User-Agent: Kerja-Bot/1.0 (area-success-map)\r\nAccept: application/json\r\n"]]);
-    $raw=@file_get_contents($url,false,$ctx); if($raw===false) return null;
-    $items=json_decode($raw,true); if(!is_array($items)||empty($items[0]['lat'])||empty($items[0]['lon'])) return null;
+    $raw=@file_get_contents($url,false,$ctx); if($raw===false)return null;
+    $items=json_decode($raw,true); if(!is_array($items)||empty($items[0]['lat'])||empty($items[0]['lon']))return null;
     return ['latitude'=>(float)$items[0]['lat'],'longitude'=>(float)$items[0]['lon'],'display_name'=>(string)($items[0]['display_name']??$query)];
 }
 
 function geocode_area_candidates(string $area,string $kelurahan,string $kecamatan,array $addresses): ?array {
     $queries=[];
+    // Primary strategy: area + KECAMATAN. Kelurahan is intentionally not required.
+    $queries[]=implode(', ',array_filter([$area,$kecamatan,'Surabaya','Jawa Timur','Indonesia']));
+    // Second: area + Surabaya, useful for POI/building names.
+    $queries[]=implode(', ',array_filter([$area,'Surabaya','Jawa Timur','Indonesia']));
+    // Final fallback: real customer addresses, enriched only with kecamatan.
     foreach(array_slice($addresses,0,3) as $address){
-        $parts=[trim($address)];
-        if($kelurahan!==''&&stripos($address,$kelurahan)===false)$parts[]=$kelurahan;
-        if($kecamatan!==''&&stripos($address,$kecamatan)===false)$parts[]=$kecamatan;
-        $parts[]='Surabaya';$parts[]='Jawa Timur';$parts[]='Indonesia';$queries[]=implode(', ',array_unique($parts));
+        $queries[]=implode(', ',array_filter([trim($address),$kecamatan,'Surabaya','Jawa Timur','Indonesia']));
     }
-    $base=[$area]; if($kelurahan!==''&&strcasecmp($kelurahan,$area)!==0)$base[]=$kelurahan; if($kecamatan!==''&&strcasecmp($kecamatan,$area)!==0&&strcasecmp($kecamatan,$kelurahan)!==0)$base[]=$kecamatan;
-    $base[]='Surabaya';$base[]='Jawa Timur';$base[]='Indonesia';$queries[]=implode(', ',$base);
-    $short=preg_replace('/^APARTEMEN\s+/i','',$area)?:$area; $queries[]=implode(', ',array_filter([$short,$kelurahan,$kecamatan,'Surabaya','Jawa Timur','Indonesia']));
     $points=[];$names=[];
     foreach(array_values(array_unique($queries)) as $query){
-        $geo=geocode_http($query); if($geo){$points[]=[$geo['latitude'],$geo['longitude']];$names[]=$geo['display_name'];if(count($points)>=3)break;}
+        $geo=geocode_http($query);
+        if($geo){$points[]=[$geo['latitude'],$geo['longitude']];$names[]=$geo['display_name'];if(count($points)>=3)break;}
         usleep(1100000);
     }
     if(!$points)return null;
@@ -83,7 +81,7 @@ function geocode_area_candidates(string $area,string $kelurahan,string $kecamata
 }
 
 $total=count($areas);$checked=0;$done=0;$cached=0;$failed=0;
-echo "AREA SUCCESS GEOCODER\nUnique customer areas: {$total}\nGeocode strategy: REAL CUSTOMER ADDRESSES -> AREA CONTEXT -> AREA FALLBACK\nKelurahan/kecamatan are context only; success remains per customer area.\n";
+echo "AREA SUCCESS GEOCODER\nUnique customer areas: {$total}\nGeocode strategy: AREA + KECAMATAN -> AREA + SURABAYA -> REAL CUSTOMER ADDRESS\nKelurahan is metadata only; success remains per customer area.\n";
 foreach($areas as $area=>$info){
     if($limit>0&&$checked>=$limit)break; $checked++; $key=strtolower($area);
     $kel=(string)($info['kelurahan']??'');$kec=(string)($info['kecamatan']??'');$addresses=(array)($info['addresses']??[]);
