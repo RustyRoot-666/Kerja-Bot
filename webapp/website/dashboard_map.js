@@ -13,14 +13,15 @@ function successLabel(rate){const n=Number(rate||0);if(n<25)return 'RENDAH';if(n
 function renderLeaderboard(rows){const el=document.querySelector('#leaderboard');if(!el)return;const data=Array.isArray(rows)?rows:[];if(!data.length){el.innerHTML='<p class="muted">BELUM ADA DATA LEADERBOARD.</p>';return;}el.innerHTML=data.slice(0,10).map((x,i)=>{const rank=i+1;return `<div class="leader-row"><span class="leader-rank">${String(rank).padStart(2,'0')}</span><div class="leader-person"><b>${esc(x.name||'-')}</b><small>${esc(x.nik||'-')} • ${esc(x.sto||'ALL')}</small></div><strong>${fmt(x.total||0)}</strong></div>`;}).join('');}
 function initAreaMap(){const el=document.querySelector('#areaSuccessMap');if(!el||typeof L==='undefined')return null;if(areaMap){areaMap.invalidateSize();return areaMap;}areaMap=L.map(el,{zoomControl:true,scrollWheelZoom:true}).setView([-7.2575,112.7521],12);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'}).addTo(areaMap);areaLayer=L.layerGroup().addTo(areaMap);areaPolygonLayer=L.layerGroup().addTo(areaMap);return areaMap;}
 
+function areaDetailHtml(a){
+  const customers=Array.isArray(a?.customers)?a.customers:[];
+  const customerHtml=customers.slice(0,100).map(c=>`<div class="map-customer"><b>${esc(c.customer_name||'-')}</b><small>${esc(c.service_number||'-')} • ${esc(c.status||'-')}</small><span>${esc(c.address||'-')}</span></div>`).join('');
+  const more=customers.length>100?`<div class="map-more">+ ${customers.length-100} pelanggan lainnya</div>`:'';
+  return `<section class="map-area-detail"><div class="map-area-head"><b>${esc(a?.area||'LAINNYA')}</b><strong>${Number(a?.rate||0).toLocaleString('id-ID')}%</strong></div><div class="map-area-stats"><span>${fmt(a?.close||0)} CLOSE</span><span>${fmt(a?.open||0)} OPEN</span><span>${fmt(a?.total||0)} TOTAL</span></div><div class="map-customer-list">${customerHtml||'<small>Tidak ada pelanggan.</small>'}</div>${more}</section>`;
+}
 function detailHtml(d){
   const rate=Number(d.rate||0);
-  const areaRows=(Array.isArray(d.areas)?d.areas:[]).map(a=>{
-    const customers=Array.isArray(a.customers)?a.customers:[];
-    const customerHtml=customers.slice(0,30).map(c=>`<div class="map-customer"><b>${esc(c.customer_name||'-')}</b><small>${esc(c.service_number||'-')} • ${esc(c.status||'-')}</small><span>${esc(c.address||'-')}</span></div>`).join('');
-    const more=customers.length>30?`<div class="map-more">+ ${customers.length-30} pelanggan lainnya</div>`:'';
-    return `<section class="map-area-detail"><div class="map-area-head"><b>${esc(a.area||'LAINNYA')}</b><strong>${Number(a.rate||0).toLocaleString('id-ID')}%</strong></div><div class="map-area-stats"><span>${fmt(a.close)} CLOSE</span><span>${fmt(a.open)} OPEN</span><span>${fmt(a.total)} TOTAL</span></div><div class="map-customer-list">${customerHtml||'<small>Tidak ada pelanggan.</small>'}</div>${more}</section>`;
-  }).join('');
+  const areaRows=(Array.isArray(d.areas)?d.areas:[]).map(areaDetailHtml).join('');
   return `<div class="map-popup map-kecamatan"><b class="map-popup-title">KECAMATAN ${esc(d.kecamatan||'-')}</b><div class="map-popup-rate">${rate.toLocaleString('id-ID')}%</div><div class="map-popup-stats"><span>${fmt(d.close)} CLOSE</span><span>${fmt(d.open)} OPEN</span><span>${fmt(d.total)} TOTAL</span></div><small class="map-popup-status">${successLabel(rate)}</small><div class="map-detail-list">${areaRows||'<small>Tidak ada detail pelanggan.</small>'}</div></div>`;
 }
 
@@ -107,7 +108,9 @@ async function loadAreaSuccessMap(){const summary=document.querySelector('#areaM
 /* FULL MAP workspace: map on the left, selected kecamatan/customer detail on the right. */
 let fullMap=null,fullPolygonLayer=null,fullMarkerLayer=null;
 const fullMapGeoCache={features:null};
-function fullMapDetailEmpty(){return '<div class="full-map-placeholder">KLIK SALAH SATU AREA DI PETA<br><small>DETAIL PELANGGAN AKAN MUNCUL DI SINI</small></div>';}
+let selectedFullKecamatanData=null;
+let selectedFullAreaName='';
+function fullMapDetailEmpty(){return '<div class="full-map-placeholder">KLIK SALAH SATU KECAMATAN DI PETA<br><small>DETAIL AREA DAN PELANGGAN AKAN MUNCUL DI SINI</small></div>';}
 function ensureFullMapWorkspace(){
   let ws=document.getElementById('fullMapWorkspace');
   if(ws)return ws;
@@ -124,11 +127,40 @@ async function getFullMapFeatures(){
   fullMapGeoCache.features=(Array.isArray(geo?.features)?geo.features:[]).filter(f=>isMyrKecamatan(f?.properties?.kecamatan||f?.properties?.WADMKC||f?.properties?.NAMOBJ));
   return fullMapGeoCache.features;
 }
-function setFullMapDetailLoading(name){const t=document.getElementById('fullMapDetailTitle'),b=document.getElementById('fullMapDetailBody'),s=document.getElementById('fullMapStatus');if(t)t.textContent='KECAMATAN '+name;if(b)b.innerHTML='<div class="full-map-placeholder">MEMUAT DETAIL PELANGGAN...</div>';if(s)s.textContent='MEMUAT DATA '+name+'...';}
-function setFullMapDetail(d){const t=document.getElementById('fullMapDetailTitle'),b=document.getElementById('fullMapDetailBody'),s=document.getElementById('fullMapStatus');if(t)t.textContent='KECAMATAN '+String(d?.kecamatan||'-');if(b)b.innerHTML=detailHtml(d);if(s)s.textContent=`${fmt(d?.close||0)} CLOSE • ${fmt(d?.open||0)} OPEN • ${fmt(d?.total||0)} TOTAL • ${successLabel(d?.rate||0)}`;}
+function setFullMapDetailLoading(name){const t=document.getElementById('fullMapDetailTitle'),b=document.getElementById('fullMapDetailBody'),s=document.getElementById('fullMapStatus');if(t)t.textContent='KECAMATAN '+name;if(b)b.innerHTML='<div class="full-map-placeholder">MEMUAT DETAIL KECAMATAN...</div>';if(s)s.textContent='MEMUAT DATA '+name+'...';}
+function areaDropdownHtml(d,selected){
+  const areas=Array.isArray(d?.areas)?d.areas:[];
+  if(!areas.length)return '';
+  const options=areas.map(a=>{const name=String(a?.area||'LAINNYA');const selectedAttr=name===selected?' selected':'';return `<option value="${esc(name)}"${selectedAttr}>${esc(name)} • ${Number(a?.rate||0).toLocaleString('id-ID')}% • ${fmt(a?.total||0)} TOTAL</option>`;}).join('');
+  return `<label class="full-map-area-select-wrap"><span>PILIH AREA / KELURAHAN</span><select id="fullMapAreaSelect" class="full-map-area-select">${options}</select></label>`;
+}
+function setFullMapDetail(d,areaName){
+  selectedFullKecamatanData=d;selectedFullAreaName=areaName||String(d?.areas?.[0]?.area||'');
+  const t=document.getElementById('fullMapDetailTitle'),b=document.getElementById('fullMapDetailBody'),s=document.getElementById('fullMapStatus');
+  if(t)t.textContent='KECAMATAN '+String(d?.kecamatan||'-');
+  const areas=Array.isArray(d?.areas)?d.areas:[];
+  const selected=areas.find(a=>String(a?.area||'')===selectedFullAreaName)||areas[0];
+  if(selected)selectedFullAreaName=String(selected.area||'');
+  if(b)b.innerHTML=areaDropdownHtml(d,selectedFullAreaName)+(selected?areaDetailHtml(selected):'<div class="full-map-placeholder">TIDAK ADA DETAIL AREA.</div>');
+  if(s)s.textContent=selected?`${fmt(selected.close||0)} CLOSE • ${fmt(selected.open||0)} OPEN • ${fmt(selected.total||0)} TOTAL • ${successLabel(selected.rate||0)}`:`${fmt(d?.close||0)} CLOSE • ${fmt(d?.open||0)} OPEN • ${fmt(d?.total||0)} TOTAL`;
+  const select=document.getElementById('fullMapAreaSelect');
+  if(select)select.addEventListener('change',()=>selectFullMapAreaDetail(select.value));
+}
+function selectFullMapAreaDetail(areaName){
+  if(!selectedFullKecamatanData)return;
+  const areas=Array.isArray(selectedFullKecamatanData.areas)?selectedFullKecamatanData.areas:[];
+  const selected=areas.find(a=>String(a?.area||'')===String(areaName||''));
+  if(!selected)return;
+  selectedFullAreaName=String(selected.area||'');
+  const b=document.getElementById('fullMapDetailBody'),s=document.getElementById('fullMapStatus');
+  if(b)b.innerHTML=areaDropdownHtml(selectedFullKecamatanData,selectedFullAreaName)+areaDetailHtml(selected);
+  if(s)s.textContent=`${fmt(selected.close||0)} CLOSE • ${fmt(selected.open||0)} OPEN • ${fmt(selected.total||0)} TOTAL • ${successLabel(selected.rate||0)}`;
+  const select=document.getElementById('fullMapAreaSelect');
+  if(select)select.addEventListener('change',()=>selectFullMapAreaDetail(select.value));
+}
 async function selectFullMapArea(name){
   if(!isMyrKecamatan(name))return;setFullMapDetailLoading(name);
-  try{const d=await json('/api/web/area-success?kecamatan='+encodeURIComponent(name));if(!d?.ok)throw new Error(d?.message||'Detail gagal');setFullMapDetail(d);}catch(e){const b=document.getElementById('fullMapDetailBody'),s=document.getElementById('fullMapStatus');if(b)b.innerHTML='<div class="full-map-placeholder">DETAIL GAGAL DIMUAT<br><small>CEK SESSION / API</small></div>';if(s)s.textContent='GAGAL MEMUAT DETAIL';}
+  try{const d=await json('/api/web/area-success?kecamatan='+encodeURIComponent(name));if(!d?.ok)throw new Error(d?.message||'Detail gagal');setFullMapDetail(d,String(d?.areas?.[0]?.area||''));}catch(e){const b=document.getElementById('fullMapDetailBody'),s=document.getElementById('fullMapStatus');if(b)b.innerHTML='<div class="full-map-placeholder">DETAIL GAGAL DIMUAT<br><small>CEK SESSION / API</small></div>';if(s)s.textContent='GAGAL MEMUAT DETAIL';}
 }
 async function renderFullMap(){
   const d=await json('/api/web/area-success');if(!d?.ok)throw new Error(d?.message||d?.error||'Area API gagal');
