@@ -129,7 +129,7 @@ if($path==='/api/dashboard' && strtoupper($_SERVER['REQUEST_METHOD']??'GET')==='
         $payload=load_dashboard_php((string)($_GET['area']??'ALL'),(string)($_GET['period']??'daily'));
         echo json_encode(dashboard_identity_fill_missing_nik($payload),JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);exit;
     } catch(Throwable $e) {
-        error_log('[miniapp-php] dashboard identity read: '.$e->getMessage().' @ '.$e->getLine().':'.$e->getLine());
+        error_log('[miniapp-php] dashboard identity read: '.$e->getMessage().' @ '.$e->getFile().':'.$e->getLine());
         http_response_code(500);echo json_encode(['ok'=>false,'error'=>'internal_error','message'=>'Dashboard gagal dimuat.']);exit;
     }
 }
