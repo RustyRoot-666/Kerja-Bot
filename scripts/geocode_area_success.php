@@ -14,30 +14,60 @@ function area_success_kecamatan(string $address): string {
     $s = area_success_normalize($address);
     if ($s === '') return '';
 
-    // Surabaya customer addresses commonly contain the kecamatan as the
-    // locality token after the street/area. Keep it as geocoding context only;
-    // it must never become the map's success grouping key.
-    $known = [
-        'ASEMROWO','BENOWO','BUBUTAN','BULAK','DUKUH PAKIS','GAYUNGAN',
-        'GENTENG','GUBENG','GUNUNG ANYAR','JAMBANGAN','KARANG PILANG',
-        'KENJERAN','KREMBANGAN','LAKARSANTRI','MULYOREJO','PABEAN CANTIAN',
-        'PAKAL','RUNGKUT','SAMBIKEREP','SAWAHAN','SEMAMPIR','SIMOKERTO',
-        'SIMOKERTO','SIMOKERTO','SIMOMULYA','SUKOLILO','SUKOMANUNGGAL',
-        'TAMBAKSARI','TANDES','TEGALSARI','TENGGILIS MEJOYO','WIYUNG',
-        'WONOCOLO','WONOKROMO','MOJO','KEPUTIH','NGINDEN','PUMPUNGAN',
-        'MANYAR','MENUR','SEMOLOWARU','KERTAJAYA','AIRLANGGA'
+    // Exact locality -> actual kecamatan mappings used as geocoding context.
+    // These are deliberately NOT used as the Area Success grouping key.
+    $localityMap = [
+        'MOJO' => 'GUBENG',
+        'AIRLANGGA' => 'GUBENG',
+        'GUBENG' => 'GUBENG',
+        'KEPUTIH' => 'SUKOLILO',
+        'NGINDEN' => 'SUKOLILO',
+        'PUMPUNGAN' => 'SUKOLILO',
+        'MENUR' => 'SUKOLILO',
+        'SEMOLOWARU' => 'SUKOLILO',
+        'KERTAJAYA' => 'GUBENG',
+        'TENGGILIS MEJOYO' => 'TENGGILIS MEJOYO',
+        'GUNUNG ANYAR' => 'GUNUNG ANYAR',
+        'RUNGKUT' => 'RUNGKUT',
+        'MULYOREJO' => 'MULYOREJO',
+        'TAMBAKSARI' => 'TAMBAKSARI',
+        'WONOCOLO' => 'WONOCOLO',
+        'WONOKROMO' => 'WONOKROMO',
+        'WIYUNG' => 'WIYUNG',
+        'DUKUH PAKIS' => 'DUKUH PAKIS',
+        'LAKARSANTRI' => 'LAKARSANTRI',
+        'SAMBIKEREP' => 'SAMBIKEREP',
+        'SUKOLILO' => 'SUKOLILO',
+        'SUKOMANUNGGAL' => 'SUKOMANUNGGAL',
+        'TANDES' => 'TANDES',
+        'ASEMROWO' => 'ASEMROWO',
+        'BENOWO' => 'BENOWO',
+        'BUBUTAN' => 'BUBUTAN',
+        'BULAK' => 'BULAK',
+        'GAYUNGAN' => 'GAYUNGAN',
+        'GENTENG' => 'GENTENG',
+        'JAMBANGAN' => 'JAMBANGAN',
+        'KARANG PILANG' => 'KARANG PILANG',
+        'KENJERAN' => 'KENJERAN',
+        'KREMBANGAN' => 'KREMBANGAN',
+        'PABEAN CANTIAN' => 'PABEAN CANTIAN',
+        'PAKAL' => 'PAKAL',
+        'SAWAHAN' => 'SAWAHAN',
+        'SEMAMPIR' => 'SEMAMPIR',
+        'SIMOKERTO' => 'SIMOKERTO',
+        'TAMBAKSARI' => 'TAMBAKSARI',
+        'TEGALSARI' => 'TEGALSARI',
+        'WONOKROMO' => 'WONOKROMO'
     ];
 
-    // Prefer the longest names first so multi-word kecamatan are matched as
-    // one unit. The extra locality aliases cover the abbreviations commonly
-    // present in the operational sheet.
-    usort($known, static fn($a, $b) => strlen($b) <=> strlen($a));
-    foreach ($known as $name) {
-        if (preg_match('/(?:^|\s)' . preg_quote($name, '/') . '(?:\s|$)/i', $s)) {
-            return $name;
+    // Match longer names first. The address is only inspected for context;
+    // the returned kecamatan never changes the Area Success grouping.
+    uksort($localityMap, static fn($a, $b) => strlen($b) <=> strlen($a));
+    foreach ($localityMap as $locality => $kecamatan) {
+        if (preg_match('/(?:^|\s)' . preg_quote($locality, '/') . '(?:\s|$)/i', $s)) {
+            return $kecamatan;
         }
     }
-
     return '';
 }
 
@@ -50,8 +80,6 @@ foreach ($rows as $row) {
     if ($area === '' || $area === 'LAINNYA') continue;
     $kecamatan = area_success_kecamatan($address);
     $areas[$area] ??= ['kecamatan'=>$kecamatan, 'address'=>$address];
-    // If the first address did not expose a kecamatan, retain a later address
-    // from the same customer area that does.
     if ($areas[$area]['kecamatan'] === '' && $kecamatan !== '') {
         $areas[$area]['kecamatan'] = $kecamatan;
         $areas[$area]['address'] = $address;
@@ -107,7 +135,7 @@ $total = count($areas); $checked=0; $done=0; $cached=0; $failed=0;
 echo "AREA SUCCESS GEOCODER\n";
 echo "Unique customer areas: {$total}\n";
 echo "Geocode query: CUSTOMER AREA + KECAMATAN + SURABAYA\n";
-echo "Kecamatan is geocoding context only; success remains per customer area.\n";
+echo "Kecamatan is context only; success remains per customer area.\n";
 
 foreach (array_keys($areas) as $area) {
     if ($limit > 0 && $checked >= $limit) break;
