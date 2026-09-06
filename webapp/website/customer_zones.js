@@ -11,8 +11,8 @@ async function openZoneMap(){
   if(opening)return opening;
   opening=(async()=>{
     styles();await loadLeaflet();
-    const stage=document.querySelector('.map-stage');if(!stage)return;
-    if(stage.dataset.zoneReady==='1'){const canvas=document.getElementById('zoneMapCanvas');if(canvas&&canvas._leaflet_id){return}stage.dataset.zoneReady='0'}
+    const stage=document.querySelector('.map-stage');if(!stage)throw new Error('Map stage tidak tersedia.');
+    if(stage.dataset.zoneReady==='1'){const canvas=document.getElementById('zoneMapCanvas');if(canvas&&canvas._leaflet_id)return;stage.dataset.zoneReady='0'}
     stage.innerHTML='<div id="zoneMapStage"><div id="zoneMapCanvas"></div><div class="zone-panel"><h3>CUSTOMER ZONES</h3><div class="zone-stat"><span>GEOCODED</span><b id="zg">0</b></div><div class="zone-stat"><span>ZONES</span><b id="zz">0</b></div><div class="zone-stat"><span>CUSTOMERS</span><b id="zc">0</b></div><div id="zoneList"></div><button class="zone-sync" id="zoneSync">SYNC ALAMAT</button></div></div>';
     const map=L.map('zoneMapCanvas',{zoomControl:true}).setView([-7.27,112.75],12);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);const customerLayer=L.layerGroup().addTo(map),zoneLayer=L.layerGroup().addTo(map);
     stage.dataset.zoneReady='1';
@@ -31,11 +31,10 @@ async function openZoneMap(){
       document.querySelectorAll('.zone-item').forEach(el=>el.onclick=()=>map.setView([+el.dataset.lat,+el.dataset.lng],16));
       if(customers.length){const b=L.latLngBounds(customers.map(c=>[c.latitude,c.longitude]));map.fitBounds(b,{padding:[30,30],maxZoom:15})}
     }
-    const sync=document.getElementById('zoneSync');if(sync)sync.onclick=async()=>{sync.disabled=true;sync.textContent='GEOCODING...';try{await refresh(true)}finally{sync.disabled=false;sync.textContent='SYNC ALAMAT'}};
+    const sync=document.getElementById('zoneSync');if(sync)sync.onclick=async()=>{sync.disabled=true;sync.textContent='GEOCODING...';try{await refresh(true)}catch(e){console.warn('zone sync',e)}finally{sync.disabled=false;sync.textContent='SYNC ALAMAT'}};
     await refresh(false);setInterval(()=>refresh(false).catch(console.warn),60000);window.KerjaBotCustomerZones={refresh};
   })();
   try{return await opening}finally{opening=null}
 }
 window.KerjaBotOpenZoneMap=openZoneMap;
-const boot=()=>{const stage=document.querySelector('.map-stage');if(stage&&!stage.dataset.zoneBooted){stage.dataset.zoneBooted='1';openZoneMap().catch(console.error)}};if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else setTimeout(boot,300);
 })();
