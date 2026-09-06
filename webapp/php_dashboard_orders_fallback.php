@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__.'/php_backend.php';
+require_once __DIR__.'/php_compat.php';
 
 /**
  * Dashboard fallback for installations where the report tables are empty or
@@ -38,8 +39,7 @@ function dashboard_orders_fallback(string $area, string $period): array {
     }
 
     $where[] = "UPPER(TRIM(result)) IN ('CLOSE','CLOSED','DONE','SELESAI','COMPLETED')";
-    $sql = 'SELECT assigned_technician,service_number,address,sto,updated_at FROM orders WHERE '.implode(' AND ',$where);
-    $st = db()->prepare($sql);
+    $st = db()->prepare('SELECT assigned_technician,service_number,sto,updated_at FROM orders WHERE '.implode(' AND ',$where));
     $st->execute($params);
     $rows = $st->fetchAll();
 
@@ -54,11 +54,10 @@ function dashboard_orders_fallback(string $area, string $period): array {
         if (!isset($groups[$key])) {
             $groups[$key] = [
                 'name'=>$name,
-                'nik'=>'',
-                'sto'=>strtoupper(trim((string)($r['sto'] ?? ''))),
                 'services'=>[],
                 'latest'=>'',
-                'area_label'=>strtoupper(trim((string)($r['sto'] ?? ''))),
+                'sto'=>'',
+                'area_label'=>'',
             ];
         }
         $groups[$key]['services'][$service] = true;
@@ -72,7 +71,7 @@ function dashboard_orders_fallback(string $area, string $period): array {
 
     $registry = technician_registry();
     $leaderboard = [];
-    foreach ($groups as $key=>$g) {
+    foreach ($groups as $g) {
         $reg = $registry[norm_name($g['name'])] ?? [];
         $leaderboard[] = [
             'key'=>'NAME:'.norm_name($g['name']),
@@ -88,17 +87,10 @@ function dashboard_orders_fallback(string $area, string $period): array {
     $trend=[];
     for ($i=6;$i>=0;$i--) {
         $d=$today->modify("-$i days");
-        $tw=$where;
-        $tp=$params;
-        $tw=array_values(array_filter($tw, fn($x)=>!str_starts_with($x,'substr(updated_at,1,10)=')));
-        $tp=[];
-        if ($period === 'daily') {
-            // Trend is always the last 7 calendar days, independent of the selected period.
-        }
         $trendWhere=["substr(updated_at,1,10)=?","UPPER(TRIM(result)) IN ('CLOSE','CLOSED','DONE','SELESAI','COMPLETED')"];
         $trendParams=[$d->format('Y-m-d')];
-        if ($area==='MYR') {$trendWhere[]="UPPER(TRIM(sto))='MYR'";}
-        elseif ($area==='JGR') {$trendWhere[]="UPPER(TRIM(sto))='JGR'";}
+        if ($area==='MYR') $trendWhere[]="UPPER(TRIM(sto))='MYR'";
+        elseif ($area==='JGR') $trendWhere[]="UPPER(TRIM(sto))='JGR'";
         $ts=db()->prepare('SELECT service_number FROM orders WHERE '.implode(' AND ',$trendWhere));
         $ts->execute($trendParams);
         $services=[];
@@ -119,7 +111,7 @@ function dashboard_orders_fallback(string $area, string $period): array {
         ],
         'trend'=>$trend,
         'leaderboard'=>$leaderboard,
-        'rca_summary'=>function_exists('load_rca_summary_php') ? load_rca_summary_php($area) : ['total'=>0,'items'=>[]],
+        'rca_summary'=>load_rca_summary_php($area),
         'backend'=>'php-orders-fallback',
     ];
 }
