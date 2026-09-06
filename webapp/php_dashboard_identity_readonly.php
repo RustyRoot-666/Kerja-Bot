@@ -11,25 +11,41 @@ function dashboard_identity_clean_name(mixed $value): string {
 }
 
 function dashboard_identity_technicians(): array {
-    if (!table_exists('technicians')) return [];
-    try {
-        $rows = db()->query("SELECT telegram_id, nik, name, sto FROM technicians WHERE TRIM(COALESCE(nik,''))<>''")->fetchAll();
-    } catch (Throwable) {
-        return [];
-    }
     $out=[];
-    foreach($rows as $row){
-        $nik=preg_replace('/\D/','',(string)($row['nik']??''))?:'';
-        $name=dashboard_identity_clean_name($row['name']??'');
-        if($nik===''||$name==='')continue;
-        $out[]=['nik'=>$nik,'name'=>$name,'sto'=>strtoupper(trim((string)($row['sto']??''))),'telegram_id'=>(int)($row['telegram_id']??0)];
+
+    // technician_master is the canonical historical identity source.
+    if (table_exists('technician_master')) {
+        try {
+            $rows=db()->query("SELECT nik, canonical_name AS name, sto, telegram_id FROM technician_master WHERE TRIM(COALESCE(nik,''))<>''")->fetchAll();
+            foreach($rows as $row){
+                $nik=preg_replace('/\D/','',(string)($row['nik']??''))?:'';
+                $name=dashboard_identity_clean_name($row['name']??'');
+                if($nik===''||$name==='')continue;
+                $out[]=['nik'=>$nik,'name'=>$name,'sto'=>strtoupper(trim((string)($row['sto']??''))),'telegram_id'=>(int)($row['telegram_id']??0)];
+            }
+        } catch(Throwable) {}
+    }
+
+    // Runtime technician accounts remain a compatibility fallback.
+    if (table_exists('technicians')) {
+        try {
+            $rows=db()->query("SELECT telegram_id, nik, name, sto FROM technicians WHERE TRIM(COALESCE(nik,''))<>''")->fetchAll();
+            foreach($rows as $row){
+                $nik=preg_replace('/\D/','',(string)($row['nik']??''))?:'';
+                $name=dashboard_identity_clean_name($row['name']??'');
+                if($nik===''||$name==='')continue;
+                $exists=false;
+                foreach($out as $item) if($item['nik']===$nik){$exists=true;break;}
+                if(!$exists)$out[]=['nik'=>$nik,'name'=>$name,'sto'=>strtoupper(trim((string)($row['sto']??''))),'telegram_id'=>(int)($row['telegram_id']??0)];
+            }
+        } catch(Throwable) {}
     }
     return $out;
 }
 
 function dashboard_identity_match(string $name, array $technicians): ?array {
     $key=dashboard_identity_clean_name($name);
-    if($key===''||$key==='-')return null;
+    if($key===''||$key==='-'||$key==='TANPA TEKNISI')return null;
     $matches=[];
     foreach($technicians as $t){
         $canonical=(string)$t['name'];
@@ -49,6 +65,9 @@ function dashboard_identity_fill_missing_nik(array $payload): array {
 
     $normalized=[];
     foreach($payload['leaderboard'] as $row){
+        $rawName=dashboard_identity_clean_name($row['name']??'');
+        if($rawName===''||$rawName==='TANPA TEKNISI'||$rawName==='-')continue;
+
         $nik=preg_replace('/\D/','',(string)($row['nik']??''))?:'';
         $match=$nik!==''?($byNik[$nik]??null):dashboard_identity_match((string)($row['name']??''),$techs);
         if($match){
@@ -59,7 +78,7 @@ function dashboard_identity_fill_missing_nik(array $payload): array {
             $row['key']='NIK:'.$nik;
         }
 
-        $mergeKey=$nik!==''?'NIK:'.$nik:(string)($row['key']??('NAME:'.dashboard_identity_clean_name($row['name']??'')));
+        $mergeKey=$nik!==''?'NIK:'.$nik:(string)($row['key']??('NAME:'.$rawName));
         if(!isset($normalized[$mergeKey])){
             $row['key']=$mergeKey;
             $normalized[$mergeKey]=$row;
@@ -71,7 +90,7 @@ function dashboard_identity_fill_missing_nik(array $payload): array {
     }
 
     $payload['leaderboard']=array_values($normalized);
-    usort($payload['leaderboard'],fn($a,$b)=>(int)($b['total']??0)<=>(int)($a['total']??0));
+    usort($payload['leaderboard'],fn($a,$b)=>(int)($b['total']??0)<=>(int)($a['total']??0) ?: strcmp(dashboard_identity_clean_name($a['name']??''),dashboard_identity_clean_name($b['name']??'')));
 
     if(isset($payload['summary'])&&is_array($payload['summary'])){
         $total=array_sum(array_map(fn($r)=>(int)($r['total']??0),$payload['leaderboard']));
