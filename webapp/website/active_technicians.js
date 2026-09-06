@@ -29,7 +29,7 @@ function render(d){
         m.bindPopup(`<div class="tech-popup"><strong>${esc(t.name)}</strong><small>NIK ${esc(t.nik)} • STO ${esc(t.sto)}</small><small>🟢 ${esc(t.status)} • GPS AKTIF • update ${esc(t.gps_age_seconds??t.age_seconds)} detik lalu</small></div>`);
         markers.set(id,m);
       }
-    }else if(markers.has(id){
+    }else if(markers.has(id)){
       map.removeLayer(markers.get(id));markers.delete(id);
     }
   });
