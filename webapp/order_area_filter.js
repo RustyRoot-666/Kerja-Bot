@@ -62,7 +62,10 @@
       b.className='tool-action';
       b.dataset.operationalArea=group.area;
       b.innerHTML=`<div><b>📍 ${escapeHtml(group.area)}</b><small style="display:block;margin-top:4px;color:#758ba2">🟢 Open: ${group.open}${group.close?` | 🔴 Close: ${group.close}`:''}${group.update?` | 🟡 Update: ${group.update}`:''}</small></div><span>${group.open} ›</span>`;
-      b.addEventListener('click',()=>showBroadOrders(group));
+      b.addEventListener('click',()=>{
+        if(typeof renderMyOpenArea==='function') renderMyOpenArea(group);
+        else showBroadOrders(group);
+      });
       list.appendChild(b);
     });
     list.dataset.broadAreaDetail='0';
@@ -73,7 +76,6 @@
     const list=document.querySelector('#myOrdersList');
     const count=document.querySelector('#myOrderCount');
     if(!list) return;
-    list.dataset.broadAreaDetail='1';
     list.replaceChildren();
     if(count) count.textContent=`${group.orders.length} OPEN`;
     const back=document.createElement('button');
