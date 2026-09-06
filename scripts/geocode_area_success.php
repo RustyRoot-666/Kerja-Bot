@@ -16,6 +16,7 @@ function area_success_location_context(string $address): array {
     $kelurahanMap = [
         'KEJAWAN PUTIH TAMBAK' => 'SUKOLILO',
         'MEDOKAN SEMAMPIR' => 'SUKOLILO',
+        'KALISARI' => 'MULYOREJO',
         'NGINDEN JANGKUNGAN' => 'SUKOLILO',
         'MENUR PUMPUNGAN' => 'SUKOLILO',
         'KEPUTIH' => 'SUKOLILO', 'NGINDEN' => 'SUKOLILO', 'PUMPUNGAN' => 'SUKOLILO', 'SEMOLOWARU' => 'SUKOLILO',
@@ -38,10 +39,6 @@ function area_success_location_context(string $address): array {
     return ['kelurahan'=>'', 'kecamatan'=>''];
 }
 
-// Some customer areas are buildings/complexes whose canonical area name is
-// intentionally shorter than the raw customer address. Their locality must
-// therefore be attached to the canonical area itself, not only discovered
-// from the raw address text.
 function area_success_area_context(string $area): array {
     $key = strtoupper(trim($area));
     $known = [
@@ -50,6 +47,12 @@ function area_success_area_context(string $area): array {
         'APARTEMEN ONE GALAXY' => ['kelurahan'=>'MULYOREJO', 'kecamatan'=>'MULYOREJO'],
         'APARTEMEN PUNCAK KERTAJAYA' => ['kelurahan'=>'KERTAJAYA', 'kecamatan'=>'GUBENG'],
         'APARTEMEN DIAN REGENCY' => ['kelurahan'=>'KEPUTIH', 'kecamatan'=>'SUKOLILO'],
+        'BASKARA' => ['kelurahan'=>'KALISARI', 'kecamatan'=>'MULYOREJO'],
+        'BASKARA SARI' => ['kelurahan'=>'KALISARI', 'kecamatan'=>'MULYOREJO'],
+        'BASKARA SAWAH' => ['kelurahan'=>'KALISARI', 'kecamatan'=>'MULYOREJO'],
+        'BASKARA SELATAN' => ['kelurahan'=>'KALISARI', 'kecamatan'=>'MULYOREJO'],
+        'BASKARA TENGAH' => ['kelurahan'=>'KALISARI', 'kecamatan'=>'MULYOREJO'],
+        'BASKARA UTARA' => ['kelurahan'=>'KALISARI', 'kecamatan'=>'MULYOREJO'],
     ];
     return $known[$key] ?? ['kelurahan'=>'', 'kecamatan'=>''];
 }
@@ -93,10 +96,7 @@ foreach (['kelurahan','kecamatan'] as $column) {
 
 function geocode_http(string $query): ?array {
     $url = 'https://nominatim.openstreetmap.org/search?' . http_build_query([
-        'q'=>$query,
-        'format'=>'jsonv2',
-        'limit'=>1,
-        'countrycodes'=>'id'
+        'q'=>$query, 'format'=>'jsonv2', 'limit'=>1, 'countrycodes'=>'id'
     ]);
     $ctx = stream_context_create(['http'=>[
         'timeout'=>15,
@@ -106,11 +106,7 @@ function geocode_http(string $query): ?array {
     if ($raw === false) return null;
     $items = json_decode($raw, true);
     if (!is_array($items) || empty($items[0]['lat']) || empty($items[0]['lon'])) return null;
-    return [
-        'latitude'=>(float)$items[0]['lat'],
-        'longitude'=>(float)$items[0]['lon'],
-        'display_name'=>(string)($items[0]['display_name'] ?? $query)
-    ];
+    return ['latitude'=>(float)$items[0]['lat'],'longitude'=>(float)$items[0]['lon'],'display_name'=>(string)($items[0]['display_name'] ?? $query)];
 }
 
 function geocode_area_request(string $area, string $kelurahan = '', string $kecamatan = ''): ?array {
@@ -121,8 +117,6 @@ function geocode_area_request(string $area, string $kelurahan = '', string $keca
     $base[] = 'Surabaya'; $base[] = 'Jawa Timur'; $base[] = 'Indonesia';
     $queries[] = implode(', ', $base);
 
-    // Nominatim is often better with the apartment/building name without the
-    // administrative prefix, and with locality as a separate query variant.
     $short = preg_replace('/^APARTEMEN\s+/i', '', $area) ?: $area;
     $shortParts = [$short];
     if ($kelurahan !== '') $shortParts[] = $kelurahan;
