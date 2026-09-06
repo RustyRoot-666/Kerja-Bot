@@ -1,198 +1,95 @@
-// Orderanku: broad operational area grouping.
-// IMPORTANT: do not break orders down by street.
+// Orderanku: direct area listing.
+// Show the actual operational areas returned by the backend.
+// Do not collapse areas into NGINDEN / SEMOLO / JAGIR / LAINNYA.
 (function(){
   'use strict';
-  if(window.__KerjaBotBroadAreaFilter) return;
-  window.__KerjaBotBroadAreaFilter=true;
+  if(window.__KerjaBotDirectAreaFilter) return;
+  window.__KerjaBotDirectAreaFilter=true;
 
   const clean=v=>String(v||'').toUpperCase()
     .replace(/[^A-Z0-9\s-]+/g,' ')
     .replace(/\s+/g,' ').trim();
 
-  function operationalArea(order){
-    const raw=clean(order?.address||'');
-    const existing=clean(order?.area||'');
-    if(existing==='NGINDEN'||existing==='SEMOLO'||existing==='JAGIR') return existing;
-    if(/\bJAGIR\b|\bJGR\b/.test(raw)) return 'JAGIR';
-    if(/\bNGINDEN\b|NGINDEN JANGKUNGAN|NGINDEN SEMOLO|NGINDEN INTAN|NGINDEN BARU/.test(raw)) return 'NGINDEN';
-    if(/\bSEMOLO\b|SEMOLOWARU|KEPUTIH|BUMI MARINA|MEDOKAN SEMAMPIR|KLAMPIS NGASEM|MENUR PUMPUNGAN|GEBANG PUTIH/.test(raw)) return 'SEMOLO';
-    return 'LAINNYA';
+  function areaName(source){
+    return clean(source?.area || 'LAINNYA') || 'LAINNYA';
   }
 
   function groupPayload(payload){
     const map=new Map();
     (payload?.areas||[]).forEach(source=>{
-      (source.orders||[]).forEach(order=>{
-        const area=operationalArea(order);
-        if(!map.has(area)) map.set(area,{area,open:0,close:0,update:0,orders:[]});
-        const group=map.get(area);
-        group.open++;
-        group.orders.push({...order,area});
-      });
-      if(!(source.orders||[]).length){
-        const area=clean(source.area);
-        if(['NGINDEN','SEMOLO','JAGIR'].includes(area)){
-          if(!map.has(area)) map.set(area,{area,open:0,close:0,update:0,orders:[]});
-          const group=map.get(area);
-          group.close+=Number(source.close||0);
-          group.update+=Number(source.update||0);
-        }
-      }
+      const area=areaName(source);
+      if(!map.has(area)) map.set(area,{area,open:0,close:0,update:0,orders:[]});
+      const group=map.get(area);
+      group.open+=Number(source.open||0);
+      group.close+=Number(source.close||0);
+      group.update+=Number(source.update||0);
+      (source.orders||[]).forEach(order=>group.orders.push({...order,area}));
     });
-    const priority=['NGINDEN','SEMOLO','JAGIR','LAINNYA'];
-    return Array.from(map.values()).sort((a,b)=>priority.indexOf(a.area)-priority.indexOf(b.area));
+
+    // Keep the same order as the API where possible.
+    return [...map.values()];
   }
 
   function escapeHtml(v){
     return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
-  function bindSmartInteractions(list){
-    list.querySelectorAll('.detail-toggle').forEach(button=>{
-      if(button.dataset.areaDetailBound==='1') return;
-      button.dataset.areaDetailBound='1';
-      button.addEventListener('click',()=>{
-        const card=button.closest('.smart-order-card');
-        card?.querySelector('.smart-order-detail')?.classList.toggle('hidden');
-      });
-    });
-    list.querySelectorAll('[data-map-url]').forEach(button=>{
-      if(button.dataset.areaMapBound==='1') return;
-      button.dataset.areaMapBound='1';
-      button.addEventListener('click',()=>{
-        const url=button.dataset.mapUrl;
-        if(!url) return;
-        if(window.Telegram?.WebApp?.openLink) window.Telegram.WebApp.openLink(url);
-        else window.open(url,'_blank','noopener,noreferrer');
-      });
-    });
-  }
-
-  function renderBroad(payload){
+  function renderDirect(payload){
     const list=document.querySelector('#myOrdersList');
     const count=document.querySelector('#myOrderCount');
     if(!list) return false;
-    const grouped=groupPayload(payload);
+
+    const groups=groupPayload(payload);
     list.replaceChildren();
-    if(count) count.textContent=`${Number(payload?.total_open||0)} data`;
-    if(!grouped.length){
+    if(count) count.textContent=`${Number(payload?.total_open||0)} OPEN`;
+
+    if(!groups.length){
       list.innerHTML='<div class="empty"><p>✅ Tidak ada order OPEN dari Google Sheets.</p></div>';
       return true;
     }
-    grouped.forEach(group=>{
+
+    groups.forEach(group=>{
       const b=document.createElement('button');
       b.type='button';
       b.className='tool-action';
-      b.dataset.operationalArea=group.area;
-      b.innerHTML=`<div><b>📍 ${escapeHtml(group.area)}</b><small style="display:block;margin-top:4px;color:#758ba2">🟢 Open: ${group.open}${group.close?` | 🔴 Close: ${group.close}`:''}${group.update?` | 🟡 Update: ${group.update}`:''}</small></div><span>${group.open} ›</span>`;
+      b.dataset.directArea=group.area;
+      const detail=[];
+      detail.push(`🟢 Open: ${group.open}`);
+      if(group.close) detail.push(`🔴 Close: ${group.close}`);
+      if(group.update) detail.push(`🟡 Update: ${group.update}`);
+      b.innerHTML=`<div><b>📍 ${escapeHtml(group.area)}</b><small style="display:block;margin-top:4px;color:#758ba2">${detail.join(' | ')}</small></div><span>${group.open} ›</span>`;
       b.addEventListener('click',()=>{
         if(typeof renderMyOpenArea==='function') renderMyOpenArea(group);
-        else showBroadOrders(group);
+        else showDirectOrders(group);
       });
       list.appendChild(b);
     });
-    list.dataset.broadAreaDetail='0';
+
+    list.dataset.directAreaDetail='0';
     return true;
   }
 
-  function showBroadOrders(group){
+  function showDirectOrders(group){
     const list=document.querySelector('#myOrdersList');
     const count=document.querySelector('#myOrderCount');
     if(!list) return;
     list.replaceChildren();
     if(count) count.textContent=`${group.orders.length} OPEN`;
+
     const back=document.createElement('button');
     back.type='button';
     back.className='tool-action';
-    back.innerHTML='<b>‹ Kembali ke daftar area</b><span>📍</span>';
-    back.addEventListener('click',()=>renderBroad(window.__KerjaBotMyOpenPayload || (typeof state!=='undefined'?state.myOpenOrders:null)));
+    back.innerHTML=`<b>‹ Kembali ke daftar area</b><span>📍 ${escapeHtml(group.area)}</span>`;
+    back.addEventListener('click',()=>renderDirect(window.__KerjaBotMyOpenPayload || (typeof state!=='undefined'?state.myOpenOrders:null)));
     list.appendChild(back);
+
     group.orders.forEach((o,i)=>{
       const c=document.createElement('div');
       c.className='mini-order';
       c.innerHTML=`<strong>${i+1}. ${escapeHtml(o.customer_name||'-')}</strong><small style="line-height:1.65">🎫 ${escapeHtml(o.ticket_id||'MANUAL')}<br>🌐 ${escapeHtml(o.service_number||'-')}<br>📞 ${escapeHtml(o.customer_phone||'-')}<br>⚡ ${escapeHtml(o.package||'-')}<br>📡 ONU RX: ${escapeHtml(o.onu_rx||'-')}<br>📝 RCA: ${escapeHtml(o.rca||'-')}<br>🏠 ${escapeHtml(o.address||'-')}</small>`;
       list.appendChild(c);
     });
-    list.dataset.broadAreaDetail='1';
-  }
-
-  function captureSmartCards(list){
-    const cards=[...list.querySelectorAll(':scope > .smart-order-card')];
-    if(!cards.length) return [];
-    return cards.map(card=>{
-      const address=card.querySelector('.smart-order-address')?.textContent||'';
-      return {area:operationalArea({address}),html:card.outerHTML};
-    });
-  }
-
-  function renderSmartAreas(){
-    const list=document.querySelector('#myOrdersList');
-    const count=document.querySelector('#myOrderCount');
-    if(!list) return false;
-    const rows=window.__KerjaBotSmartOrderCards||[];
-    if(!rows.length) return false;
-
-    const groups=new Map();
-    rows.forEach(row=>{
-      if(!groups.has(row.area)) groups.set(row.area,{area:row.area,open:0,orders:[]});
-      const group=groups.get(row.area);
-      group.open++;
-      group.orders.push(row);
-    });
-
-    const priority=['NGINDEN','SEMOLO','JAGIR','LAINNYA'];
-    const ordered=[...groups.values()].sort((a,b)=>priority.indexOf(a.area)-priority.indexOf(b.area));
-    list.replaceChildren();
-    if(count) count.textContent=`${rows.length} data`;
-
-    ordered.forEach(group=>{
-      const b=document.createElement('button');
-      b.type='button';
-      b.className='tool-action';
-      b.dataset.operationalArea=group.area;
-      b.innerHTML=`<div><b>📍 ${escapeHtml(group.area)}</b><small style="display:block;margin-top:4px;color:#758ba2">🟢 Open: ${group.open}</small></div><span>${group.open} ›</span>`;
-      b.addEventListener('click',()=>showSmartArea(group));
-      list.appendChild(b);
-    });
-    list.dataset.broadAreaDetail='0';
-    return true;
-  }
-
-  function showSmartArea(group){
-    const list=document.querySelector('#myOrdersList');
-    const count=document.querySelector('#myOrderCount');
-    if(!list) return;
-    list.replaceChildren();
-    if(count) count.textContent=`${group.open} OPEN`;
-
-    const back=document.createElement('button');
-    back.type='button';
-    back.className='tool-action';
-    back.innerHTML=`<b>‹ Kembali ke daftar area</b><span>📍 ${escapeHtml(group.area)}</span>`;
-    back.addEventListener('click',renderSmartAreas);
-    list.appendChild(back);
-
-    group.orders.forEach((row,i)=>{
-      const wrap=document.createElement('div');
-      wrap.innerHTML=row.html;
-      const card=wrap.firstElementChild;
-      if(!card) return;
-      const index=card.querySelector('.smart-order-index');
-      if(index) index.textContent=String(i+1);
-      list.appendChild(card);
-    });
-
-    list.dataset.broadAreaDetail='1';
-    bindSmartInteractions(list);
-  }
-
-  function captureAndRenderSmart(){
-    const list=document.querySelector('#myOrdersList');
-    if(!list) return false;
-    const cards=captureSmartCards(list);
-    if(!cards.length) return false;
-    window.__KerjaBotSmartOrderCards=cards;
-    return renderSmartAreas();
+    list.dataset.directAreaDetail='1';
   }
 
   function payload(){
@@ -201,38 +98,36 @@
 
   function hookLoader(){
     if(typeof window.loadMyOpenOrders!=='function') return false;
-    if(window.loadMyOpenOrders.__broadAreaHooked) return true;
+    if(window.loadMyOpenOrders.__directAreaHooked) return true;
     const original=window.loadMyOpenOrders;
     const wrapped=async function(force){
       const result=await original(force);
       const d=(typeof state!=='undefined' ? state.myOpenOrders : null)||result;
       if(d){
         window.__KerjaBotMyOpenPayload=d;
-        setTimeout(()=>renderBroad(d),0);
+        setTimeout(()=>renderDirect(d),0);
       }
       return result;
     };
-    wrapped.__broadAreaHooked=true;
+    wrapped.__directAreaHooked=true;
     window.loadMyOpenOrders=wrapped;
     return true;
   }
 
   function observeList(){
     const list=document.querySelector('#myOrdersList');
-    if(!list || list.__broadAreaObserver) return;
-    list.__broadAreaObserver=true;
+    if(!list || list.__directAreaObserver) return;
+    list.__directAreaObserver=true;
     new MutationObserver(()=>{
-      if(list.dataset.broadAreaRendering==='1') return;
-      if(list.querySelector('.smart-order-card')){
-        list.dataset.broadAreaDetail='0';
-        list.dataset.broadAreaRendering='1';
-        captureAndRenderSmart();
-        list.dataset.broadAreaRendering='0';
-        return;
-      }
-      if(!list.dataset.broadAreaDetail && list.querySelector('.mini-order')){
+      if(list.dataset.directAreaRendering==='1') return;
+      // If another renderer paints the area buttons, restore the backend area list.
+      if(list.querySelector('.order-area-btn') && !list.dataset.directAreaDetail){
         const d=payload();
-        if(d) renderBroad(d);
+        if(d){
+          list.dataset.directAreaRendering='1';
+          renderDirect(d);
+          list.dataset.directAreaRendering='0';
+        }
       }
     }).observe(list,{childList:true,subtree:true});
   }
@@ -248,10 +143,9 @@
     hookLoader();
     setTimeout(()=>{
       const d=payload();
-      if(d) renderBroad(d);
-      else captureAndRenderSmart();
+      if(d) renderDirect(d);
     },500);
   });
 
-  window.KerjaBotOrderArea={operationalArea,groupPayload,renderBroad,showBroadOrders,renderSmartAreas,showSmartArea};
+  window.KerjaBotOrderArea={groupPayload,renderDirect,showDirectOrders};
 })();
