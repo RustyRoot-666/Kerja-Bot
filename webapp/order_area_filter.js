@@ -1,147 +1,141 @@
-// Orderanku: group OPEN orders by customer address category.
-// Example: NGINDEN 1 20 + NGINDEN BARU 2 30 => NGINDEN.
+// Orderanku: broad operational area grouping.
+// IMPORTANT: do not break orders down by street.
 (function(){
   'use strict';
-  if(window.__KerjaBotAddressAreaFilter) return;
-  window.__KerjaBotAddressAreaFilter=true;
+  if(window.__KerjaBotBroadAreaFilter) return;
+  window.__KerjaBotBroadAreaFilter=true;
 
   const clean=v=>String(v||'').toUpperCase()
-    .replace(/\bNO\.?\s*\d+[A-Z]?\b/g,' ')
     .replace(/[^A-Z0-9\s-]+/g,' ')
     .replace(/\s+/g,' ').trim();
 
-  function addressCategory(address){
-    const raw=clean(address);
-    if(!raw) return 'ALAMAT LAINNYA';
-
-    // NGINDEN family is intentionally one category.
-    if(/^NGINDEN(?:\s|$)/.test(raw)) return 'NGINDEN';
-
-    // Keep common compound street names intact.
-    const known=[
-      'BUMI MARINA MAS TIMUR','BUMI MARINA MAS','KEDUNG TARUKAN BARU',
-      'KEDUNG TARUKAN','KARANG MENJANGAN','JOJORAN','SEMOLOWARU',
-      'MENUR PUMPUNGAN','MEDOKAN SEMAMPIR','KLAMPIS NGASEM','GEBANG PUTIH',
-      'KEPUTIH','RUNGKUT','GUNUNG ANYAR','MERR','KALIDAMI','NGAGEL',
-      'DARMAWANGSA','MANYAR','JAGIR'
-    ];
-    const hit=known.find(name=>raw===name || raw.startsWith(name+' '));
-    if(hit) return hit;
-
-    // Generic rule: category is the address/street name before the first number.
-    const m=raw.match(/^(.+?)\s+\d+(?:[A-Z])?(?:\s|$)/);
-    if(m?.[1]) return m[1].trim();
-
-    const parts=raw.split(/\s+/);
-    while(parts.length && /^\d+[A-Z]?(?:-[A-Z0-9]+)?$/.test(parts[parts.length-1])) parts.pop();
-    return parts.join(' ')||'ALAMAT LAINNYA';
+  function operationalArea(order){
+    const raw=clean(order?.address||'');
+    const existing=clean(order?.area||'');
+    if(existing==='NGINDEN'||existing==='SEMOLO'||existing==='JAGIR') return existing;
+    if(/\bJAGIR\b|\bJGR\b/.test(raw)) return 'JAGIR';
+    if(/\bNGINDEN\b|NGINDEN JANGKUNGAN|NGINDEN SEMOLO|NGINDEN INTAN|NGINDEN BARU/.test(raw)) return 'NGINDEN';
+    if(/\bSEMOLO\b|SEMOLOWARU|KEPUTIH|BUMI MARINA|MEDOKAN SEMAMPIR|KLAMPIS NGASEM|MENUR PUMPUNGAN|GEBANG PUTIH/.test(raw)) return 'SEMOLO';
+    return 'LAINNYA';
   }
 
   function groupPayload(payload){
-    const groups=new Map();
+    const map=new Map();
     (payload?.areas||[]).forEach(source=>{
       (source.orders||[]).forEach(order=>{
-        const area=addressCategory(order.address);
-        if(!groups.has(area)) groups.set(area,{area,open:0,close:0,update:0,orders:[]});
-        const g=groups.get(area);
-        g.open++;
-        g.orders.push({...order,area});
+        const area=operationalArea(order);
+        if(!map.has(area)) map.set(area,{area,open:0,close:0,update:0,orders:[]});
+        const group=map.get(area);
+        group.open++;
+        group.orders.push({...order,area});
       });
+      if(!(source.orders||[]).length){
+        const area=clean(source.area);
+        if(['NGINDEN','SEMOLO','JAGIR'].includes(area)){
+          if(!map.has(area)) map.set(area,{area,open:0,close:0,update:0,orders:[]});
+          const group=map.get(area);
+          group.close+=Number(source.close||0);
+          group.update+=Number(source.update||0);
+        }
+      }
     });
-    return Array.from(groups.values()).sort((a,b)=>a.area.localeCompare(b.area,'id'));
+    const priority=['NGINDEN','SEMOLO','JAGIR','LAINNYA'];
+    return Array.from(map.values()).sort((a,b)=>priority.indexOf(a.area)-priority.indexOf(b.area));
   }
 
   function escapeHtml(v){
     return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
-  function renderGrouped(payload){
+  function renderBroad(payload){
     const list=document.querySelector('#myOrdersList');
     const count=document.querySelector('#myOrderCount');
     if(!list) return false;
     const grouped=groupPayload(payload);
     list.replaceChildren();
-    if(count) count.textContent=`${payload?.total_open||grouped.reduce((n,g)=>n+g.open,0)} OPEN`;
+    if(count) count.textContent=`${Number(payload?.total_open||0)} data`;
     if(!grouped.length){list.innerHTML='<div class="empty"><p>✅ Tidak ada order OPEN dari Google Sheets.</p></div>';return true;}
 
     grouped.forEach(group=>{
       const b=document.createElement('button');
       b.type='button';
       b.className='tool-action';
-      b.dataset.addressArea=group.area;
-      b.innerHTML=`<div><b>📍 ${escapeHtml(group.area)}</b><small style="display:block;margin-top:4px;color:#758ba2">🟢 Open: ${group.open}</small></div><span>${group.open} ›</span>`;
-      b.addEventListener('click',()=>showCategory(group));
+      b.dataset.operationalArea=group.area;
+      b.innerHTML=`<div><b>📍 ${escapeHtml(group.area)}</b><small style="display:block;margin-top:4px;color:#758ba2">🟢 Open: ${group.open}${group.close?` | 🔴 Close: ${group.close}`:''}${group.update?` | 🟡 Update: ${group.update}`:''}</small></div><span>${group.open} ›</span>`;
+      b.addEventListener('click',()=>showBroadOrders(group));
       list.appendChild(b);
     });
-    list.dataset.addressCategoryDetail='0';
+    list.dataset.broadAreaDetail='0';
     return true;
   }
 
-  function showCategory(group){
+  function showBroadOrders(group){
     const list=document.querySelector('#myOrdersList');
     const count=document.querySelector('#myOrderCount');
     if(!list) return;
-    list.dataset.addressCategoryDetail='1';
+    list.dataset.broadAreaDetail='1';
     list.replaceChildren();
     if(count) count.textContent=`${group.orders.length} OPEN`;
-
     const back=document.createElement('button');
-    back.type='button'; back.className='tool-action';
-    back.innerHTML='<b>‹ Kembali ke daftar alamat</b><span>📍</span>';
-    back.addEventListener('click',()=>renderGrouped(window.__KerjaBotMyOpenPayload));
+    back.type='button';
+    back.className='tool-action';
+    back.innerHTML='<b>‹ Kembali ke daftar area</b><span>📍</span>';
+    back.addEventListener('click',()=>renderBroad(window.__KerjaBotMyOpenPayload || (typeof state!=='undefined'?state.myOpenOrders:null)));
     list.appendChild(back);
-
     group.orders.forEach((o,i)=>{
-      const c=document.createElement('div'); c.className='mini-order';
+      const c=document.createElement('div');
+      c.className='mini-order';
       c.innerHTML=`<strong>${i+1}. ${escapeHtml(o.customer_name||'-')}</strong><small style="line-height:1.65">🎫 ${escapeHtml(o.ticket_id||'MANUAL')}<br>🌐 ${escapeHtml(o.service_number||'-')}<br>📞 ${escapeHtml(o.customer_phone||'-')}<br>⚡ ${escapeHtml(o.package||'-')}<br>📡 ONU RX: ${escapeHtml(o.onu_rx||'-')}<br>📝 RCA: ${escapeHtml(o.rca||'-')}<br>🏠 ${escapeHtml(o.address||'-')}</small>`;
       list.appendChild(c);
     });
   }
 
-  function currentPayload(){
+  function payload(){
     return window.__KerjaBotMyOpenPayload || (typeof state!=='undefined' ? state.myOpenOrders : null);
   }
 
-  // Hook the real loader. This fixes the previous problem where overriding the
-  // renderer could be bypassed by app.js's lexical function binding.
   function hookLoader(){
     if(typeof window.loadMyOpenOrders!=='function') return false;
-    if(window.loadMyOpenOrders.__addressCategoryHooked) return true;
+    if(window.loadMyOpenOrders.__broadAreaHooked) return true;
     const original=window.loadMyOpenOrders;
     const wrapped=async function(force){
       const result=await original(force);
-      const payload=(typeof state!=='undefined' ? state.myOpenOrders : null)||result;
-      if(payload){window.__KerjaBotMyOpenPayload=payload;setTimeout(()=>renderGrouped(payload),0);}
+      const d=(typeof state!=='undefined' ? state.myOpenOrders : null)||result;
+      if(d){window.__KerjaBotMyOpenPayload=d;setTimeout(()=>renderBroad(d),0);}
       return result;
     };
-    wrapped.__addressCategoryHooked=true;
+    wrapped.__broadAreaHooked=true;
     window.loadMyOpenOrders=wrapped;
     return true;
   }
 
-  let tries=0;
-  const timer=setInterval(()=>{if(hookLoader()||++tries>80)clearInterval(timer);},250);
-
-  // Catch the initial direct order-card render even if the loader was called
-  // before this script finished installing its wrapper.
   function observeList(){
     const list=document.querySelector('#myOrdersList');
-    if(!list || list.__addressObserver) return;
-    list.__addressObserver=true;
+    if(!list || list.__broadAreaObserver) return;
+    list.__broadAreaObserver=true;
     new MutationObserver(()=>{
-      const payload=currentPayload();
-      if(!payload || list.dataset.addressCategoryDetail==='1') return;
-      if(list.dataset.addressCategoryRendering==='1') return;
+      const d=payload();
+      if(!d || list.dataset.broadAreaDetail==='1') return;
+      if(list.dataset.broadAreaRendering==='1') return;
       if(list.querySelector('.mini-order')){
-        list.dataset.addressCategoryRendering='1';
-        renderGrouped(payload);
-        list.dataset.addressCategoryRendering='0';
+        list.dataset.broadAreaRendering='1';
+        renderBroad(d);
+        list.dataset.broadAreaRendering='0';
       }
     }).observe(list,{childList:true,subtree:true});
   }
 
-  document.addEventListener('DOMContentLoaded',()=>{observeList();hookLoader();setTimeout(()=>{const p=currentPayload();if(p){window.__KerjaBotMyOpenPayload=p;renderGrouped(p);}},500);});
-  setTimeout(observeList,1000);
+  let tries=0;
+  const timer=setInterval(()=>{
+    observeList();
+    if(hookLoader() || ++tries>80) clearInterval(timer);
+  },250);
 
-  window.KerjaBotOrderAddress={addressCategory,groupPayload,renderGrouped,showCategory};
+  document.addEventListener('DOMContentLoaded',()=>{
+    observeList();
+    hookLoader();
+    setTimeout(()=>{const d=payload();if(d){window.__KerjaBotMyOpenPayload=d;renderBroad(d);}},500);
+  });
+
+  window.KerjaBotOrderArea={operationalArea,groupPayload,renderBroad,showBroadOrders};
 })();
