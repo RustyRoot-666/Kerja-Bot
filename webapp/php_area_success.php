@@ -39,9 +39,11 @@ function area_success_distance_m(float $lat1,float $lng1,float $lat2,float $lng2
     return 2*$r*asin(min(1.0,sqrt($a)));
 }
 
-function area_success_geocode_cached(string $address): ?array {
+function area_success_geocode_cached(string $street): ?array {
+    require_once __DIR__.'/php_customer_zones.php';
     customer_zone_ensure_schema();
-    $key=customer_zone_key($address);
+    $key=customer_zone_key($street);
+    if ($key === '') return null;
     $st=db()->prepare('SELECT latitude,longitude,display_name,status FROM customer_geocodes WHERE address_key=? LIMIT 1');
     $st->execute([$key]);
     $row=$st->fetch();
@@ -57,39 +59,25 @@ function area_success_snapshot(): array {
     foreach($rows as $row){
         $address=trim((string)($row['address']??'')); if($address==='') continue;
         $key=area_success_range_key($address);
-        $areas[$key]??=['range'=>$key,'open'=>0,'close'=>0,'total'=>0,'rate'=>0,'color'=>'#ef4444','addresses'=>[],'points'=>[]];
+        $areas[$key]??=['range'=>$key,'open'=>0,'close'=>0,'total'=>0,'rate'=>0,'color'=>'#ef4444','streets'=>[],'points'=>[]];
         $bucket=sheet_bucket($row);
         if($bucket==='close') $areas[$key]['close']++; elseif($bucket==='open') $areas[$key]['open']++;
-        $areas[$key]['total']++; $areas[$key]['addresses'][$address]=true;
+        $areas[$key]['total']++;
+
+        // Coordinates belong to the customer's normalized street, not to a
+        // guessed area center. This lets one range use all real customer
+        // street geocodes that fall inside it.
+        $street=customer_zone_normalize_street($address);
+        if($street!=='') $areas[$key]['streets'][customer_zone_key($street)]=$street;
     }
 
-    // Use all cached real customer coordinates so the range follows the actual
-    // customer distribution. For sparse ranges, geocode up to 3 real addresses.
-    $missing=[];
-    foreach($areas as $key=>&$area){
-        $area['addresses']=array_keys($area['addresses']);
-        foreach($area['addresses'] as $address){
-            $geo=area_success_geocode_cached($address);
+    foreach($areas as &$area){
+        foreach($area['streets'] as $street){
+            $geo=area_success_geocode_cached($street);
             if($geo) $area['points'][]=[$geo['latitude'],$geo['longitude']];
-            else $missing[$key][]=$address;
         }
     }
     unset($area);
-
-    $geoBudget=12;
-    foreach($missing as $key=>$addresses){
-        if($geoBudget<=0) break;
-        foreach(array_slice($addresses,0,3) as $address){
-            if($geoBudget<=0) break;
-            $geo=customer_zone_geocode($address); $now=date('Y-m-d H:i:s'); $ckey=customer_zone_key($address);
-            if($geo){
-                db()->prepare("INSERT INTO customer_geocodes(address_key,address,latitude,longitude,display_name,status,attempts,updated_at) VALUES(?,?,?,?,?,'ok',1,?) ON CONFLICT(address_key) DO UPDATE SET latitude=excluded.latitude,longitude=excluded.longitude,display_name=excluded.display_name,status='ok',attempts=customer_geocodes.attempts+1,updated_at=excluded.updated_at")
-                    ->execute([$ckey,$address,$geo['latitude'],$geo['longitude'],$geo['display_name'],$now]);
-                $areas[$key]['points'][]=[$geo['latitude'],$geo['longitude']];
-            }
-            $geoBudget--; usleep(1100000);
-        }
-    }
 
     foreach($areas as &$area){
         $area['rate']=$area['total']>0?round(($area['close']/$area['total'])*100,1):0;
@@ -106,7 +94,7 @@ function area_success_snapshot(): array {
             $area['latitude']=null; $area['longitude']=null; $area['radius_m']=null;
             $area['geocoded']=false; $area['coordinate_count']=0;
         }
-        unset($area['addresses'],$area['points']);
+        unset($area['streets'],$area['points']);
     }
     unset($area);
     uasort($areas,static fn($a,$b)=>($b['rate']<=>$a['rate'])?:strcmp($a['range'],$b['range']));
