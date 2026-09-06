@@ -85,4 +85,4 @@ renderWorkflowForm = function renderWorkflowFormWithAreaContext(action, order) {
 };
 
 // Load the broad operational Orderanku area filter after all app functions are defined.
-(function(){ const s=document.createElement('script'); s.src='/website/order_area_filter.js?v=20260906-broad5'; s.async=false; document.head.appendChild(s); })();
+(function(){ const s=document.createElement('script'); s.src='/website/order_area_filter.js?v=20260906-broad6'; s.async=false; document.head.appendChild(s); })();
