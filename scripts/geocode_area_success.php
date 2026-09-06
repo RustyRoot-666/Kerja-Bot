@@ -2,10 +2,28 @@
 
 declare(strict_types=1);
 
-// Load the backend first because the area/customer helpers depend on db().
 require_once __DIR__ . '/../webapp/php_backend.php';
 require_once __DIR__ . '/../webapp/php_area_success.php';
 require_once __DIR__ . '/../webapp/php_customer_zones.php';
+
+function area_success_geocode_query(string $address): string {
+    $text = strtoupper(trim($address));
+    $text = preg_replace('/\s+/u', ' ', $text) ?: '';
+    if ($text === '') return '';
+
+    // Apartments/complexes: remove unit/house identifiers so the geocoder
+    // resolves the building/complex itself. Example:
+    // APARTEMEN BALE HINGGIL B1527 -> APARTEMEN BALE HINGGIL
+    if (preg_match('/^APARTEMEN(?:T)?\s+(.+)$/u', $text, $m)) {
+        $name = trim($m[1]);
+        $name = preg_replace('/\s+(?:UNIT|NO|NOMOR)\s*[-A-Z0-9\/]+.*$/u', '', $name) ?: $name;
+        $name = preg_replace('/\s+[A-Z]?\d+(?:[-\/]\d+)?$/u', '', $name) ?: $name;
+        $name = preg_replace('/\s+[A-Z]\d+(?:[-\/]\d+)?$/u', '', $name) ?: $name;
+        return 'APARTEMEN ' . trim($name) . ', Surabaya, Jawa Timur, Indonesia';
+    }
+
+    return $text . ', Surabaya, Jawa Timur, Indonesia';
+}
 
 $limit = 0;
 foreach ($argv as $arg) {
@@ -23,11 +41,8 @@ foreach ($rows as $row) {
     $key = customer_zone_key($street);
     if ($key === '') continue;
 
-    // Keep a real customer address as the geocoding query. This is more
-    // reliable for apartments/complexes than trying to geocode the stripped
-    // street key alone. The cache key remains the normalized customer street.
     if (!isset($streets[$key])) {
-        $streets[$key] = ['street' => $street, 'query' => $address];
+        $streets[$key] = ['street' => $street, 'query' => area_success_geocode_query($address)];
     }
 }
 ksort($streets);
@@ -39,8 +54,6 @@ $total = count($streets);
 echo "AREA SUCCESS GEOCODER\n";
 echo "Unique customer streets: {$total}\n";
 echo "Cached results are reused; uncached requests are single-threaded at ~1 req/sec.\n";
-
-echo "Geocoding uses a real customer address, while coordinates are cached by normalized street.\n";
 
 foreach ($streets as $key => $item) {
     if ($limit > 0 && $checked >= $limit) break;
@@ -57,12 +70,10 @@ foreach ($streets as $key => $item) {
         continue;
     }
 
-    // First try the full customer address. If that fails, fall back to the
-    // normalized street/range name.
     $geo = customer_zone_geocode($query);
     if (!$geo && $street !== $query) {
         usleep(1100000);
-        $geo = customer_zone_geocode($street);
+        $geo = customer_zone_geocode($street . ', Surabaya, Jawa Timur, Indonesia');
     }
 
     $now = date('Y-m-d H:i:s');
