@@ -8,22 +8,6 @@ function area_success_normalize(string $address): string {
     return trim(preg_replace('/\s+/', ' ', $s) ?: '');
 }
 
-function area_success_range_key(string $address): string {
-    $s = area_success_normalize($address);
-    if ($s === '') return 'LAINNYA';
-    $tokens = preg_split('/\s+/', $s) ?: [];
-    $roman = '/^(?:I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX)$/';
-    $cut = count($tokens);
-    foreach ($tokens as $i => $token) {
-        if ($i >= 2 && (preg_match($roman, $token) || preg_match('/^\d+[A-Z]?$/', $token))) {
-            $cut = $i;
-            break;
-        }
-    }
-    $prefix = trim(implode(' ', array_slice($tokens, 0, $cut)));
-    return $prefix !== '' ? $prefix : classify_area($address);
-}
-
 function area_success_color(float $rate): string {
     if ($rate < 0.25) return '#ef4444';
     if ($rate < 0.50) return '#f97316';
@@ -31,72 +15,94 @@ function area_success_color(float $rate): string {
     return '#22c55e';
 }
 
-function area_success_distance_m(float $lat1,float $lng1,float $lat2,float $lng2): float {
-    $r=6371000.0;
-    $p1=deg2rad($lat1); $p2=deg2rad($lat2);
-    $dp=deg2rad($lat2-$lat1); $dl=deg2rad($lng2-$lng1);
-    $a=sin($dp/2)**2+cos($p1)*cos($p2)*sin($dl/2)**2;
-    return 2*$r*asin(min(1.0,sqrt($a)));
+function area_success_locality(string $address): string {
+    $s = area_success_normalize($address);
+    if ($s === '') return 'LAINNYA';
+    $tokens = preg_split('/\s+/', $s) ?: [];
+    $roman = '/^(?:I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX)$/';
+    while ($tokens && (preg_match('/^\d+[A-Z]?$/', end($tokens)) || preg_match($roman, end($tokens)))) array_pop($tokens);
+    if (!$tokens) return 'LAINNYA';
+
+    // Prefer known multi-word customer localities before the final locality token.
+    $aliases = [
+        'TENGGILIS MEJOYO','TENGGILIS','GUNUNG ANYAR','WIYUNG','LAKARSANTRI',
+        'SUKOLILO','MULYOREJO','RUNGKUT','GUBENG','KARANG PILANG','KARANGPILANG',
+        'DUKUH PAKIS','SAWAHAN','WONOKROMO','WONOCOLO','JAMBANGAN','GAYUNGAN',
+        'SAMBikEREP','BENOWO','PAKAL','ASEMROWO','TAMBAKSARI','SIMOKERTO',
+        'SEMAMPIR','KENJERAN','BULAK','KREMBANGAN','PABEAN CANTIAN','KREMBANGAN',
+        'TEGALSARI','GENTENG','BUBUTAN','SUKOMANUNGGAL','TANDES','KARANGPILANG'
+    ];
+    $upper = strtoupper(implode(' ', $tokens));
+    foreach ($aliases as $alias) {
+        $alias = strtoupper($alias);
+        if (preg_match('/(?:^| )'.preg_quote($alias,'/').'$/', $upper)) return $alias;
+    }
+    return strtoupper((string)end($tokens));
 }
 
-function area_success_geocode_cached(string $street): ?array {
-    require_once __DIR__.'/php_customer_zones.php';
-    customer_zone_ensure_schema();
-    $key=customer_zone_key($street);
-    if ($key === '') return null;
-    $st=db()->prepare('SELECT latitude,longitude,display_name,status FROM customer_geocodes WHERE address_key=? LIMIT 1');
-    $st->execute([$key]);
-    $row=$st->fetch();
-    if($row && $row['status']==='ok' && $row['latitude']!==null && $row['longitude']!==null){
-        return ['latitude'=>(float)$row['latitude'],'longitude'=>(float)$row['longitude'],'display_name'=>(string)($row['display_name']??'')];
+function area_success_geocode_area(string $area): ?array {
+    static $cache = [];
+    $area = strtoupper(trim($area));
+    if ($area === '' || $area === 'LAINNYA') return null;
+    if (array_key_exists($area, $cache)) return $cache[$area];
+    $query = $area . ', Surabaya, Jawa Timur, Indonesia';
+    $url = 'https://nominatim.openstreetmap.org/search?' . http_build_query([
+        'q'=>$query,'format'=>'jsonv2','limit'=>1,'countrycodes'=>'id'
+    ]);
+    $ctx = stream_context_create(['http'=>[
+        'timeout'=>10,
+        'header'=>"User-Agent: Kerja-Bot/1.0 (area-success-map)\r\nAccept: application/json\r\n"
+    ]]);
+    $raw = @file_get_contents($url, false, $ctx);
+    if ($raw !== false) {
+        $items = json_decode($raw, true);
+        if (is_array($items) && !empty($items[0]['lat']) && !empty($items[0]['lon'])) {
+            return $cache[$area] = [
+                'latitude'=>(float)$items[0]['lat'],
+                'longitude'=>(float)$items[0]['lon'],
+                'display_name'=>(string)($items[0]['display_name'] ?? $area)
+            ];
+        }
     }
-    return null;
+    return $cache[$area] = null;
 }
 
 function area_success_snapshot(): array {
-    require_once __DIR__.'/php_customer_zones.php';
-    $rows=fetch_sheet(false); $areas=[];
-    foreach($rows as $row){
-        $address=trim((string)($row['address']??'')); if($address==='') continue;
-        $key=area_success_range_key($address);
-        $areas[$key]??=['range'=>$key,'open'=>0,'close'=>0,'total'=>0,'rate'=>0,'color'=>'#ef4444','streets'=>[],'points'=>[]];
-        $bucket=sheet_bucket($row);
-        if($bucket==='close') $areas[$key]['close']++; elseif($bucket==='open') $areas[$key]['open']++;
-        $areas[$key]['total']++;
-
-        // Coordinates belong to the customer's normalized street, not to a
-        // guessed area center. This lets one range use all real customer
-        // street geocodes that fall inside it.
-        $street=customer_zone_normalize_street($address);
-        if($street!=='') $areas[$key]['streets'][customer_zone_key($street)]=$street;
+    $rows = fetch_sheet(false);
+    $areas = [];
+    foreach ($rows as $row) {
+        $address = trim((string)($row['address'] ?? ''));
+        if ($address === '') continue;
+        $area = area_success_locality($address);
+        $areas[$area] ??= [
+            'range'=>$area,'area'=>$area,'open'=>0,'close'=>0,'total'=>0,
+            'rate'=>0,'color'=>'#ef4444'
+        ];
+        $areas[$area]['total']++;
+        if (sheet_bucket($row) === 'close') $areas[$area]['close']++;
     }
 
-    foreach($areas as &$area){
-        foreach($area['streets'] as $street){
-            $geo=area_success_geocode_cached($street);
-            if($geo) $area['points'][]=[$geo['latitude'],$geo['longitude']];
-        }
+    foreach ($areas as &$item) {
+        $item['open'] = max(0, $item['total'] - $item['close']);
+        $item['rate'] = $item['total'] > 0 ? round(($item['close'] / $item['total']) * 100, 1) : 0;
+        $item['color'] = area_success_color($item['rate'] / 100);
+        $geo = area_success_geocode_area($item['area']);
+        $item['latitude'] = $geo['latitude'] ?? null;
+        $item['longitude'] = $geo['longitude'] ?? null;
+        $item['display_name'] = $geo['display_name'] ?? $item['area'];
+        $item['geocoded'] = $geo !== null;
+        $item['coordinate_count'] = $geo !== null ? 1 : 0;
+        $item['radius_m'] = 500;
     }
-    unset($area);
+    unset($item);
 
-    foreach($areas as &$area){
-        $area['rate']=$area['total']>0?round(($area['close']/$area['total'])*100,1):0;
-        $area['color']=area_success_color($area['rate']/100); $points=$area['points'];
-        if($points){
-            $lat=array_sum(array_column($points,0))/count($points);
-            $lng=array_sum(array_column($points,1))/count($points);
-            $maxDistance=0.0;
-            foreach($points as $p) $maxDistance=max($maxDistance,area_success_distance_m($lat,$lng,$p[0],$p[1]));
-            $area['latitude']=round($lat,7); $area['longitude']=round($lng,7);
-            $area['radius_m']=round(min(1000.0,max(140.0,$maxDistance+70.0)));
-            $area['geocoded']=true; $area['coordinate_count']=count($points);
-        }else{
-            $area['latitude']=null; $area['longitude']=null; $area['radius_m']=null;
-            $area['geocoded']=false; $area['coordinate_count']=0;
-        }
-        unset($area['streets'],$area['points']);
-    }
-    unset($area);
-    uasort($areas,static fn($a,$b)=>($b['rate']<=>$a['rate'])?:strcmp($a['range'],$b['range']));
-    return ['ok'=>true,'source'=>'GOOGLE SHEET CURRENT ORDERS','success_definition'=>'CLOSE / TOTAL ORDER','areas'=>array_values($areas),'area_count'=>count($areas),'geocoded_count'=>count(array_filter($areas,static fn($a)=>(bool)$a['geocoded']))];
+    uasort($areas, static fn($a,$b) => ($b['rate'] <=> $a['rate']) ?: strcmp($a['area'],$b['area']));
+    return [
+        'ok'=>true,
+        'source'=>'GOOGLE SHEET CURRENT ORDERS',
+        'success_definition'=>'CLOSE / TOTAL ORDER PER CUSTOMER AREA',
+        'areas'=>array_values($areas),
+        'area_count'=>count($areas),
+        'geocoded_count'=>count(array_filter($areas, static fn($a)=>(bool)$a['geocoded']))
+    ];
 }
