@@ -47,6 +47,27 @@
     return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
+  function bindSmartInteractions(list){
+    list.querySelectorAll('.detail-toggle').forEach(button=>{
+      if(button.dataset.areaDetailBound==='1') return;
+      button.dataset.areaDetailBound='1';
+      button.addEventListener('click',()=>{
+        const card=button.closest('.smart-order-card');
+        card?.querySelector('.smart-order-detail')?.classList.toggle('hidden');
+      });
+    });
+    list.querySelectorAll('[data-map-url]').forEach(button=>{
+      if(button.dataset.areaMapBound==='1') return;
+      button.dataset.areaMapBound='1';
+      button.addEventListener('click',()=>{
+        const url=button.dataset.mapUrl;
+        if(!url) return;
+        if(window.Telegram?.WebApp?.openLink) window.Telegram.WebApp.openLink(url);
+        else window.open(url,'_blank','noopener,noreferrer');
+      });
+    });
+  }
+
   function renderBroad(payload){
     const list=document.querySelector('#myOrdersList');
     const count=document.querySelector('#myOrderCount');
@@ -54,8 +75,10 @@
     const grouped=groupPayload(payload);
     list.replaceChildren();
     if(count) count.textContent=`${Number(payload?.total_open||0)} data`;
-    if(!grouped.length){list.innerHTML='<div class="empty"><p>✅ Tidak ada order OPEN dari Google Sheets.</p></div>';return true;}
-
+    if(!grouped.length){
+      list.innerHTML='<div class="empty"><p>✅ Tidak ada order OPEN dari Google Sheets.</p></div>';
+      return true;
+    }
     grouped.forEach(group=>{
       const b=document.createElement('button');
       b.type='button';
@@ -90,6 +113,86 @@
       c.innerHTML=`<strong>${i+1}. ${escapeHtml(o.customer_name||'-')}</strong><small style="line-height:1.65">🎫 ${escapeHtml(o.ticket_id||'MANUAL')}<br>🌐 ${escapeHtml(o.service_number||'-')}<br>📞 ${escapeHtml(o.customer_phone||'-')}<br>⚡ ${escapeHtml(o.package||'-')}<br>📡 ONU RX: ${escapeHtml(o.onu_rx||'-')}<br>📝 RCA: ${escapeHtml(o.rca||'-')}<br>🏠 ${escapeHtml(o.address||'-')}</small>`;
       list.appendChild(c);
     });
+    list.dataset.broadAreaDetail='1';
+  }
+
+  function captureSmartCards(list){
+    const cards=[...list.querySelectorAll(':scope > .smart-order-card')];
+    if(!cards.length) return [];
+    return cards.map(card=>{
+      const address=card.querySelector('.smart-order-address')?.textContent||'';
+      return {area:operationalArea({address}),html:card.outerHTML};
+    });
+  }
+
+  function renderSmartAreas(){
+    const list=document.querySelector('#myOrdersList');
+    const count=document.querySelector('#myOrderCount');
+    if(!list) return false;
+    const rows=window.__KerjaBotSmartOrderCards||[];
+    if(!rows.length) return false;
+
+    const groups=new Map();
+    rows.forEach(row=>{
+      if(!groups.has(row.area)) groups.set(row.area,{area:row.area,open:0,orders:[]});
+      const group=groups.get(row.area);
+      group.open++;
+      group.orders.push(row);
+    });
+
+    const priority=['NGINDEN','SEMOLO','JAGIR','LAINNYA'];
+    const ordered=[...groups.values()].sort((a,b)=>priority.indexOf(a.area)-priority.indexOf(b.area));
+    list.replaceChildren();
+    if(count) count.textContent=`${rows.length} data`;
+
+    ordered.forEach(group=>{
+      const b=document.createElement('button');
+      b.type='button';
+      b.className='tool-action';
+      b.dataset.operationalArea=group.area;
+      b.innerHTML=`<div><b>📍 ${escapeHtml(group.area)}</b><small style="display:block;margin-top:4px;color:#758ba2">🟢 Open: ${group.open}</small></div><span>${group.open} ›</span>`;
+      b.addEventListener('click',()=>showSmartArea(group));
+      list.appendChild(b);
+    });
+    list.dataset.broadAreaDetail='0';
+    return true;
+  }
+
+  function showSmartArea(group){
+    const list=document.querySelector('#myOrdersList');
+    const count=document.querySelector('#myOrderCount');
+    if(!list) return;
+    list.replaceChildren();
+    if(count) count.textContent=`${group.open} OPEN`;
+
+    const back=document.createElement('button');
+    back.type='button';
+    back.className='tool-action';
+    back.innerHTML=`<b>‹ Kembali ke daftar area</b><span>📍 ${escapeHtml(group.area)}</span>`;
+    back.addEventListener('click',renderSmartAreas);
+    list.appendChild(back);
+
+    group.orders.forEach((row,i)=>{
+      const wrap=document.createElement('div');
+      wrap.innerHTML=row.html;
+      const card=wrap.firstElementChild;
+      if(!card) return;
+      const index=card.querySelector('.smart-order-index');
+      if(index) index.textContent=String(i+1);
+      list.appendChild(card);
+    });
+
+    list.dataset.broadAreaDetail='1';
+    bindSmartInteractions(list);
+  }
+
+  function captureAndRenderSmart(){
+    const list=document.querySelector('#myOrdersList');
+    if(!list) return false;
+    const cards=captureSmartCards(list);
+    if(!cards.length) return false;
+    window.__KerjaBotSmartOrderCards=cards;
+    return renderSmartAreas();
   }
 
   function payload(){
@@ -103,7 +206,10 @@
     const wrapped=async function(force){
       const result=await original(force);
       const d=(typeof state!=='undefined' ? state.myOpenOrders : null)||result;
-      if(d){window.__KerjaBotMyOpenPayload=d;setTimeout(()=>renderBroad(d),0);}
+      if(d){
+        window.__KerjaBotMyOpenPayload=d;
+        setTimeout(()=>renderBroad(d),0);
+      }
       return result;
     };
     wrapped.__broadAreaHooked=true;
@@ -116,13 +222,17 @@
     if(!list || list.__broadAreaObserver) return;
     list.__broadAreaObserver=true;
     new MutationObserver(()=>{
-      const d=payload();
-      if(!d || list.dataset.broadAreaDetail==='1') return;
       if(list.dataset.broadAreaRendering==='1') return;
-      if(list.querySelector('.mini-order')){
+      if(list.querySelector('.smart-order-card')){
+        list.dataset.broadAreaDetail='0';
         list.dataset.broadAreaRendering='1';
-        renderBroad(d);
+        captureAndRenderSmart();
         list.dataset.broadAreaRendering='0';
+        return;
+      }
+      if(!list.dataset.broadAreaDetail && list.querySelector('.mini-order')){
+        const d=payload();
+        if(d) renderBroad(d);
       }
     }).observe(list,{childList:true,subtree:true});
   }
@@ -136,8 +246,12 @@
   document.addEventListener('DOMContentLoaded',()=>{
     observeList();
     hookLoader();
-    setTimeout(()=>{const d=payload();if(d){window.__KerjaBotMyOpenPayload=d;renderBroad(d);}},500);
+    setTimeout(()=>{
+      const d=payload();
+      if(d) renderBroad(d);
+      else captureAndRenderSmart();
+    },500);
   });
 
-  window.KerjaBotOrderArea={operationalArea,groupPayload,renderBroad,showBroadOrders};
+  window.KerjaBotOrderArea={operationalArea,groupPayload,renderBroad,showBroadOrders,renderSmartAreas,showSmartArea};
 })();
