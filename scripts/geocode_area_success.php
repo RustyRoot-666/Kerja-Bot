@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+// Load the backend first because the area/customer helpers depend on db().
+require_once __DIR__ . '/../webapp/php_backend.php';
 require_once __DIR__ . '/../webapp/php_area_success.php';
 require_once __DIR__ . '/../webapp/php_customer_zones.php';
 
