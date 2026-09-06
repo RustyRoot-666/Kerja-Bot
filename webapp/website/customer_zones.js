@@ -1,40 +1,46 @@
 (()=>{
 const esc=v=>String(v??'').replace(/[&<>'\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c]));
-const cacheKey=a=>'kerja-bot-geo:'+a.trim().toLowerCase().replace(/\s+/g,' ');
+const ROMAN=['','I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII','XIV','XV','XVI','XVII','XVIII','XIX','XX'];
+const toRoman=n=>{n=Number(n);if(!Number.isInteger(n)||n<1||n>20)return String(n);return ROMAN[n]};
+function normalizeStreet(address){
+  let t=String(address??'').toUpperCase().replace(/[^A-Z0-9/ -]+/g,' ').replace(/\s+/g,' ').trim();
+  if(!t)return '';
+  t=t.replace(/\bJLN\.?\b/g,'JL').replace(/\bJALAN\b/g,'JL').replace(/\bGANG\b/g,'GG');
+  const parts=t.split(' ');
+  const nums=[];
+  for(let i=0;i<parts.length;i++)if(/^\d+$/.test(parts[i]))nums.push(i);
+  if(nums.length>=2){
+    const house=nums[nums.length-1];
+    for(const idx of nums.slice(0,-1))parts[idx]=toRoman(parts[idx]);
+    t=parts.slice(0,house).join(' ')+' NO '+parts[house];
+  }else if(nums.length===1){
+    const idx=nums[0];
+    if(idx>0)t=parts.slice(0,idx).join(' ')+' NO '+parts[idx];
+  }
+  return t.replace(/\s+/g,' ').trim();
+}
+const cacheKey=a=>'kerja-bot-geo:'+normalizeStreet(a).toLowerCase().replace(/\s+/g,' ');
 let opening=null;
 function loadLeaflet(){return new Promise((resolve,reject)=>{if(window.L)return resolve();const css=document.createElement('link');css.rel='stylesheet';css.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';document.head.appendChild(css);const s=document.createElement('script');s.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';s.onload=resolve;s.onerror=reject;document.head.appendChild(s)})}
 function styles(){if(document.getElementById('zoneMapStyles'))return;const s=document.createElement('style');s.id='zoneMapStyles';s.textContent=`#zoneMapStage{position:relative;height:100%;min-height:420px;background:#071018}#zoneMapCanvas{position:absolute;inset:0}.zone-panel{position:absolute;z-index:900;right:14px;top:14px;width:280px;max-height:calc(100% - 28px);overflow:auto;background:rgba(5,10,15,.92);border:1px solid rgba(92,224,255,.25);backdrop-filter:blur(10px);padding:14px}.zone-panel h3{margin:0 0 8px;font:700 20px 'Barlow Condensed',sans-serif;letter-spacing:.08em}.zone-stat{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.08);font-size:12px}.zone-item{padding:10px 0;border-bottom:1px solid rgba(255,255,255,.08);cursor:pointer}.zone-item b{display:block;font-size:13px}.zone-item small{opacity:.65}.zone-label{background:rgba(5,10,15,.9);color:#5ce0ff;border:1px solid rgba(92,224,255,.45);font:700 12px 'Barlow Condensed';padding:3px 6px}.zone-sync{margin-top:10px;width:100%;padding:8px;border:1px solid rgba(92,224,255,.3);background:transparent;color:#5ce0ff;cursor:pointer}.leaflet-popup-content{font-family:Inter,sans-serif;font-size:12px}.leaflet-control-attribution{font-size:9px}@media(max-width:700px){.zone-panel{left:10px;right:10px;top:10px;width:auto;max-height:180px}.zone-item{display:inline-block;width:48%;vertical-align:top}}`;document.head.appendChild(s)}
 function getOrders(){return fetch('/api/web/open-orders',{credentials:'same-origin'}).then(r=>{if(!r.ok)throw Error('Order API '+r.status);return r.json()}).then(o=>{const items=[];(o.areas||[]).forEach(a=>(a.orders||[]).forEach(x=>items.push(x)));return items})}
-async function geocode(address){const k=cacheKey(address);try{const old=JSON.parse(localStorage.getItem(k)||'null');if(old&&Number.isFinite(old.lat)&&Number.isFinite(old.lng))return old}catch{}const url='https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=id&q='+encodeURIComponent(address+', Surabaya, Jawa Timur, Indonesia');try{const r=await fetch(url,{headers:{Accept:'application/json'}});const d=await r.json();if(d&&d[0]){const out={lat:+d[0].lat,lng:+d[0].lon,name:d[0].display_name||''};if(Number.isFinite(out.lat)&&Number.isFinite(out.lng)){localStorage.setItem(k,JSON.stringify(out));return out}}}catch(e){console.warn('geocode',address,e)}return null}
-function zoneKey(lat,lng){return `${Math.floor(lat/.001)*.001},${Math.floor(lng/.001)*.001}`}
+async function geocode(address){const normalized=normalizeStreet(address),k=cacheKey(address);try{const old=JSON.parse(localStorage.getItem(k)||'null');if(old&&Number.isFinite(+old.lat)&&Number.isFinite(+old.lng))return old}catch{}const url='https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=id&q='+encodeURIComponent(normalized+', Surabaya, Jawa Timur, Indonesia');try{const r=await fetch(url,{headers:{Accept:'application/json'}});if(!r.ok)throw Error('Nominatim '+r.status);const d=await r.json();if(d&&d[0]){const out={lat:+d[0].lat,lng:+d[0].lon,name:d[0].display_name||'',normalized};if(Number.isFinite(out.lat)&&Number.isFinite(out.lng)){localStorage.setItem(k,JSON.stringify(out));return out}}}catch(e){console.warn('geocode',normalized,e)}return null}
 async function openZoneMap(){
-  if(opening)return opening;
-  opening=(async()=>{
-    styles();await loadLeaflet();
-    const stage=document.querySelector('.map-stage');if(!stage)throw new Error('Map stage tidak tersedia.');
-    if(stage.dataset.zoneReady==='1'){const canvas=document.getElementById('zoneMapCanvas');if(canvas&&canvas._leaflet_id)return;stage.dataset.zoneReady='0'}
-    stage.innerHTML='<div id="zoneMapStage"><div id="zoneMapCanvas"></div><div class="zone-panel"><h3>CUSTOMER ZONES</h3><div class="zone-stat"><span>GEOCODED</span><b id="zg">0</b></div><div class="zone-stat"><span>ZONES</span><b id="zz">0</b></div><div class="zone-stat"><span>CUSTOMERS</span><b id="zc">0</b></div><div id="zoneList"></div><button class="zone-sync" id="zoneSync">SYNC ALAMAT</button></div></div>';
-    const map=L.map('zoneMapCanvas',{zoomControl:true}).setView([-7.27,112.75],12);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);const customerLayer=L.layerGroup().addTo(map),zoneLayer=L.layerGroup().addTo(map);
-    stage.dataset.zoneReady='1';
-    async function refresh(sync=false){
-      const orders=await getOrders();const groups={};let geocoded=0;const unique=[...new Map(orders.map(o=>[String(o.address||'').trim(),o])).values()].filter(o=>o.address);
-      if(sync){for(const o of unique){if(geocoded>=5)break;const k=cacheKey(o.address);if(localStorage.getItem(k))continue;await geocode(o.address);geocoded++;await new Promise(r=>setTimeout(r,1100))}}
-      customerLayer.clearLayers();zoneLayer.clearLayers();const customers=[];
-      for(const o of orders){const address=String(o.address||'').trim();let g=null;try{g=JSON.parse(localStorage.getItem(cacheKey(address))||'null')}catch{}if(!g||!Number.isFinite(+g.lat)||!Number.isFinite(+g.lng))continue;const lat=+g.lat,lng=+g.lng;const zk=zoneKey(lat,lng);if(!groups[zk])groups[zk]={id:'Z'+String(Object.keys(groups).length+1).padStart(2,'0'),lat:0,lng:0,total:0,open:0};const z=groups[zk];z.lat+=lat;z.lng+=lng;z.total++;z.open++;customers.push({...o,latitude:lat,longitude:lng,zone_id:z.id)}
-      }
-      Object.values(groups).forEach(z=>{z.latitude=z.lat/z.total;z.longitude=z.lng/z.total;L.marker([z.latitude,z.longitude],{icon:L.divIcon({className:'zone-label',html:'ZONE '+esc(z.id),iconSize:null})}).bindPopup('<b>ZONE '+esc(z.id)+'</b><br>Customer: '+z.total+'<br>Open: '+z.open).addTo(zoneLayer)});
-      customers.forEach(c=>L.circleMarker([c.latitude,c.longitude],{radius:5,weight:2,fillOpacity:.8}).bindPopup('<b>'+esc(c.customer_name||'-')+'</b><br>'+esc(c.service_number||'-')+'<br>'+esc(c.address||'-')+'<br><b>'+esc(c.zone_id)+'</b>').addTo(customerLayer));
-      const zg=document.getElementById('zg'),zz=document.getElementById('zz'),zc=document.getElementById('zc'),list=document.getElementById('zoneList');
-      if(!zg||!zz||!zc||!list||!document.getElementById('zoneMapCanvas'))return;
-      zg.textContent=orders.length?customers.length:0;zz.textContent=Object.keys(groups).length;zc.textContent=customers.length;
-      list.innerHTML=Object.values(groups).map(z=>'<div class="zone-item" data-lat="'+z.latitude+'" data-lng="'+z.longitude+'"><b>ZONE '+esc(z.id)+'</b><small>'+z.total+' customer • '+z.open+' open</small></div>').join('')||'<p class="muted">Belum ada koordinat. Tekan SYNC ALAMAT.</p>';
-      document.querySelectorAll('.zone-item').forEach(el=>el.onclick=()=>map.setView([+el.dataset.lat,+el.dataset.lng],16));
-      if(customers.length){const b=L.latLngBounds(customers.map(c=>[c.latitude,c.longitude]));map.fitBounds(b,{padding:[30,30],maxZoom:15})}
-    }
-    const sync=document.getElementById('zoneSync');if(sync)sync.onclick=async()=>{sync.disabled=true;sync.textContent='GEOCODING...';try{await refresh(true)}catch(e){console.warn('zone sync',e)}finally{sync.disabled=false;sync.textContent='SYNC ALAMAT'}};
-    await refresh(false);setInterval(()=>refresh(false).catch(console.warn),60000);window.KerjaBotCustomerZones={refresh};
-  })();
-  try{return await opening}finally{opening=null}
-}
+ if(opening)return opening;
+ opening=(async()=>{styles();await loadLeaflet();const stage=document.querySelector('.map-stage');if(!stage)throw new Error('Map stage tidak tersedia.');
+  if(stage.dataset.zoneReady==='1'){const canvas=document.getElementById('zoneMapCanvas');if(canvas&&canvas._leaflet_id)return;stage.dataset.zoneReady='0'}
+  stage.innerHTML='<div id="zoneMapStage"><div id="zoneMapCanvas"></div><div class="zone-panel"><h3>CUSTOMER ZONES</h3><div class="zone-stat"><span>GEOCODED</span><b id="zg">0</b></div><div class="zone-stat"><span>ZONES</span><b id="zz">0</b></div><div class="zone-stat"><span>CUSTOMERS</span><b id="zc">0</b></div><div id="zoneList"></div><button class="zone-sync" id="zoneSync">SYNC ALAMAT</button></div></div>';
+  const map=L.map('zoneMapCanvas',{zoomControl:true}).setView([-7.27,112.75],12);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);const customerLayer=L.layerGroup().addTo(map),zoneLayer=L.layerGroup().addTo(map);stage.dataset.zoneReady='1';
+  async function refresh(sync=false){
+   const orders=await getOrders(),groups={};let attempted=0,geocoded=0;const streets=[...new Set(orders.map(o=>normalizeStreet(o.address)).filter(Boolean))];
+   if(sync){for(const street of streets){if(attempted>=20)break;const k=cacheKey(street);let cached=null;try{cached=JSON.parse(localStorage.getItem(k)||'null')}catch{}if(cached&&Number.isFinite(+cached.lat)&&Number.isFinite(+cached.lng))continue;attempted++;if(await geocode(street))geocoded++;await new Promise(r=>setTimeout(r,1200))}}
+   customerLayer.clearLayers();zoneLayer.clearLayers();const customers=[];
+   for(const o of orders){const address=String(o?.address||'').trim(),street=normalizeStreet(address);if(!street)continue;let g=null;try{g=JSON.parse(localStorage.getItem(cacheKey(street))||'null')}catch{}if(!g||!Number.isFinite(+g.lat)||!Number.isFinite(+g.lng))continue;const lat=+g.lat,lng=+g.lng,key=street.toLowerCase().replace(/\s+/g,' ').trim();if(!groups[key])groups[key]={id:'Z'+String(Object.keys(groups).length+1).padStart(2,'0'),street,lat,lng,total:0,open:0,close:0,update:0,menolak:0,orders:[]};const z=groups[key];z.total++;z.orders.push(o);const status=String(o?.result||o?.status||'OPEN').trim().toUpperCase();if(status==='OPEN')z.open++;else if(['CLOSE','CLOSED','DONE','SELESAI','COMPLETED'].includes(status))z.close++;else if(['UPDATE','UPDATED','PROGRESS','ON PROGRESS','PENDING'].includes(status)||status.includes('UPDATE'))z.update++;else if(['MENOLAK','REJECT','DITOLAK'].includes(status))z.menolak++;customers.push({...o,latitude:lat,longitude:lng,zone_id:z.id,street})}
+   Object.values(groups).forEach(z=>{const items=z.orders.map((o,i)=>'<div style="padding:9px 0;border-top:1px solid #ddd"><b>'+(i+1)+'. '+esc(o?.customer_name||o?.name||'-')+'</b><br><b>INET:</b> '+esc(o?.service_number||'-')+'<br><b>TIKET:</b> '+esc(o?.ticket_id||'-')+'<br><b>HP:</b> '+esc(o?.customer_phone||o?.phone||'-')+'<br><b>ONT:</b> '+esc(o?.ont_type||'-')+'<br><b>STO:</b> '+esc(o?.sto||'-')+'<br><b>VALINS:</b> '+esc(o?.valins_id||'-')+'<br><b>RESULT:</b> '+esc(o?.result||o?.status||'-')+'<br><b>ALAMAT:</b> '+esc(o?.address||'-')+'</div>').join('');const popup='<div style="min-width:280px;max-width:390px"><div style="font-size:17px;font-weight:800;margin-bottom:4px">'+esc(z.street)+'</div><div style="font-size:13px;margin-bottom:5px"><b>'+z.total+' ORDER</b> · ZONA '+esc(z.id)+'</div><div style="font-size:11px;opacity:.75;margin-bottom:6px">OPEN '+z.open+' · CLOSE '+z.close+' · UPDATE '+z.update+' · MENOLAK '+z.menolak+'</div>'+items+'</div>';L.marker([z.lat,z.lng],{icon:L.divIcon({className:'zone-label',html:'<span style="font-weight:800">'+esc(String(z.total))+' ORDER</span>',iconSize:null})}).bindPopup(popup,{maxWidth:410}).addTo(zoneLayer)});
+   customers.forEach(c=>L.circleMarker([c.latitude,c.longitude],{radius:5,weight:2,fillOpacity:.8}).bindPopup('<b>'+esc(c.customer_name||'-')+'</b><br>INET: '+esc(c.service_number||'-')+'<br>TIKET: '+esc(c.ticket_id||'-')+'<br>RESULT: '+esc(c.result||c.status||'-')+'<br>Alamat: '+esc(c.address||'-')+'<br><b>'+esc(c.zone_id)+'</b>').addTo(customerLayer));
+   const zg=document.getElementById('zg'),zz=document.getElementById('zz'),zc=document.getElementById('zc'),list=document.getElementById('zoneList');if(!zg||!zz||!zc||!list)return;zg.textContent=geocoded||customers.length;zz.textContent=Object.keys(groups).length;zc.textContent=customers.length;list.innerHTML=Object.values(groups).map(z=>'<div class="zone-item" data-lat="'+z.lat+'" data-lng="'+z.lng+'"><b>'+esc(z.street)+'</b><small>'+z.total+' order · OPEN '+z.open+' · CLOSE '+z.close+'</small></div>').join('')||'<p class="muted">Belum ada koordinat. Tekan SYNC ALAMAT.</p>';document.querySelectorAll('.zone-item').forEach(el=>el.onclick=()=>map.setView([+el.dataset.lat,+el.dataset.lng],17));if(customers.length){const b=L.latLngBounds(customers.map(c=>[c.latitude,c.longitude]));map.fitBounds(b,{padding:[40,40],maxZoom:15})}
+  }
+  const sync=document.getElementById('zoneSync');if(sync)sync.onclick=async()=>{sync.disabled=true;sync.textContent='GEOCODING...';try{await refresh(true)}catch(e){console.warn('zone sync',e)}finally{sync.disabled=false;sync.textContent='SYNC ALAMAT'}};await refresh(false);setInterval(()=>refresh(false).catch(console.warn),60000);window.KerjaBotCustomerZones={refresh,normalizeStreet};
+ })();try{return await opening}finally{opening=null}}
 window.KerjaBotOpenZoneMap=openZoneMap;
 })();
