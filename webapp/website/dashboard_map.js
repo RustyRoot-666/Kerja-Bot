@@ -8,7 +8,6 @@ const MYR_KECAMATAN = new Set(['SUKOLILO','MULYOREJO','GUBENG','TAMBAKSARI','TEN
 const SURABAYA_KECAMATAN_GEOJSON = 'https://cdn.jsdelivr.net/gh/rizalmaulanaairlangga/backend-health-facility-gis-surabaya@157cc75d34aa340f4863eec03cde52a3c2911e12/data/clean/surabaya_kecamatan.geojson';
 function isMyrKecamatan(name){return MYR_KECAMATAN.has(String(name||'').trim().toUpperCase());}
 function kecamatanKey(name){return String(name||'').trim().toUpperCase().replace(/\s+/g,' ');}
-
 function successColor(rate){const n=Number(rate||0);if(n<25)return '#ef4444';if(n<50)return '#f97316';if(n<75)return '#eab308';return '#22c55e';}
 function successLabel(rate){const n=Number(rate||0);if(n<25)return 'RENDAH';if(n<50)return 'PERLU DITINGKATKAN';if(n<75)return 'BAIK';return 'TINGGI';}
 function renderLeaderboard(rows){const el=document.querySelector('#leaderboard');if(!el)return;const data=Array.isArray(rows)?rows:[];if(!data.length){el.innerHTML='<p class="muted">BELUM ADA DATA LEADERBOARD.</p>';return;}el.innerHTML=data.slice(0,10).map((x,i)=>{const rank=i+1;return `<div class="leader-row"><span class="leader-rank">${String(rank).padStart(2,'0')}</span><div class="leader-person"><b>${esc(x.name||'-')}</b><small>${esc(x.nik||'-')} • ${esc(x.sto||'ALL')}</small></div><strong>${fmt(x.total||0)}</strong></div>`;}).join('');}
@@ -103,4 +102,47 @@ async function loadAreaSuccessMap(){const summary=document.querySelector('#areaM
     .map-more{padding-top:6px;color:#55e1a1;font-size:8px;font-weight:800}
     .leaflet-popup-content{margin:10px 12px}
   `;document.head.appendChild(s);
+})();
+
+/* FULL MAP workspace: map on the left, selected kecamatan/customer detail on the right. */
+let fullMap=null,fullPolygonLayer=null,fullMarkerLayer=null;
+const fullMapGeoCache={features:null};
+function fullMapDetailEmpty(){return '<div class="full-map-placeholder">KLIK SALAH SATU AREA DI PETA<br><small>DETAIL PELANGGAN AKAN MUNCUL DI SINI</small></div>';}
+function ensureFullMapWorkspace(){
+  let ws=document.getElementById('fullMapWorkspace');
+  if(ws)return ws;
+  ws=document.createElement('section');ws.id='fullMapWorkspace';ws.className='full-map-workspace';
+  ws.innerHTML='<div class="full-map-canvas"><div class="full-map-head"><div class="full-map-title">AREA SUCCESS / FULL MAP</div><button id="fullMapClose" type="button" class="full-map-close">✕ TUTUP</button></div><div id="fullMapLeaflet" class="full-map-leaflet"></div></div><aside class="full-map-detail"><div class="full-map-detail-head"><small>AREA INTELLIGENCE</small><h3 id="fullMapDetailTitle">PILIH AREA</h3></div><div id="fullMapDetailBody" class="full-map-detail-body">'+fullMapDetailEmpty()+'</div><div id="fullMapStatus" class="full-map-status">PILIH KECAMATAN STO MYR</div></aside></section>';
+  document.body.appendChild(ws);
+  document.getElementById('fullMapClose').addEventListener('click',closeFullMap);
+  return ws;
+}
+async function getFullMapFeatures(){
+  if(fullMapGeoCache.features)return fullMapGeoCache.features;
+  const response=await fetch(SURABAYA_KECAMATAN_GEOJSON,{cache:'force-cache'});if(!response.ok)throw new Error('GeoJSON HTTP '+response.status);
+  const geo=await response.json();
+  fullMapGeoCache.features=(Array.isArray(geo?.features)?geo.features:[]).filter(f=>isMyrKecamatan(f?.properties?.kecamatan||f?.properties?.WADMKC||f?.properties?.NAMOBJ));
+  return fullMapGeoCache.features;
+}
+function setFullMapDetailLoading(name){const t=document.getElementById('fullMapDetailTitle'),b=document.getElementById('fullMapDetailBody'),s=document.getElementById('fullMapStatus');if(t)t.textContent='KECAMATAN '+name;if(b)b.innerHTML='<div class="full-map-placeholder">MEMUAT DETAIL PELANGGAN...</div>';if(s)s.textContent='MEMUAT DATA '+name+'...';}
+function setFullMapDetail(d){const t=document.getElementById('fullMapDetailTitle'),b=document.getElementById('fullMapDetailBody'),s=document.getElementById('fullMapStatus');if(t)t.textContent='KECAMATAN '+String(d?.kecamatan||'-');if(b)b.innerHTML=detailHtml(d);if(s)s.textContent=`${fmt(d?.close||0)} CLOSE • ${fmt(d?.open||0)} OPEN • ${fmt(d?.total||0)} TOTAL • ${successLabel(d?.rate||0)}`;}
+async function selectFullMapArea(name){
+  if(!isMyrKecamatan(name))return;setFullMapDetailLoading(name);
+  try{const d=await json('/api/web/area-success?kecamatan='+encodeURIComponent(name));if(!d?.ok)throw new Error(d?.message||'Detail gagal');setFullMapDetail(d);}catch(e){const b=document.getElementById('fullMapDetailBody'),s=document.getElementById('fullMapStatus');if(b)b.innerHTML='<div class="full-map-placeholder">DETAIL GAGAL DIMUAT<br><small>CEK SESSION / API</small></div>';if(s)s.textContent='GAGAL MEMUAT DETAIL';}
+}
+async function renderFullMap(){
+  const d=await json('/api/web/area-success');if(!d?.ok)throw new Error(d?.message||d?.error||'Area API gagal');
+  const stats=new Map((Array.isArray(d.areas)?d.areas:[]).filter(a=>isMyrKecamatan(a?.name||a?.kecamatan)).map(a=>[kecamatanKey(a?.name||a?.kecamatan),a]));
+  const features=await getFullMapFeatures();fullPolygonLayer.clearLayers();fullMarkerLayer.clearLayers();const bounds=[];
+  features.forEach(feature=>{const name=String(feature?.properties?.kecamatan||feature?.properties?.WADMKC||feature?.properties?.NAMOBJ||'').trim().toUpperCase();const stat=stats.get(kecamatanKey(name));if(!stat)return;const rate=Number(stat.rate||0),color=successColor(rate);const polygon=L.geoJSON(feature,{style:polygonStyle(rate)});polygon.bindTooltip('KECAMATAN '+esc(name)+' • '+Math.round(rate)+'%',{sticky:true});polygon.on('click',()=>selectFullMapArea(name));polygon.on('mouseover',()=>polygon.setStyle({weight:3,fillOpacity:.45}));polygon.on('mouseout',()=>polygon.setStyle(polygonStyle(rate)));polygon.addTo(fullPolygonLayer);const center=polygon.getBounds().getCenter();L.marker(center,{icon:L.divIcon({className:'area-rate-marker',html:`<span style="--rate-color:${color}">${Math.round(rate)}%</span>`,iconSize:[52,28],iconAnchor:[26,14]}),keyboard:true}).on('click',()=>selectFullMapArea(name)).addTo(fullMarkerLayer);bounds.push(center);});
+  if(bounds.length)fullMap.fitBounds(L.latLngBounds(bounds),{padding:[35,35],maxZoom:13});
+}
+async function openFullMap(){
+  const ws=ensureFullMapWorkspace();ws.classList.add('is-open');document.body.style.overflow='hidden';
+  if(!fullMap){const el=document.getElementById('fullMapLeaflet');fullMap=L.map(el,{zoomControl:true,scrollWheelZoom:true}).setView([-7.2575,112.7521],12);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'}).addTo(fullMap);fullPolygonLayer=L.layerGroup().addTo(fullMap);fullMarkerLayer=L.layerGroup().addTo(fullMap);}
+  setTimeout(()=>fullMap.invalidateSize(),60);try{await renderFullMap();}catch(e){console.warn('[FULL MAP]',e);const s=document.getElementById('fullMapStatus');if(s)s.textContent='MAP GAGAL DIMUAT — CEK SESSION / API';}
+}
+function closeFullMap(){const ws=document.getElementById('fullMapWorkspace');if(ws)ws.classList.remove('is-open');document.body.style.overflow='';}
+(function installFullMapButton(){
+  const btn=document.getElementById('fullMapBtn');if(!btn)return;btn.addEventListener('click',openFullMap);
 })();
