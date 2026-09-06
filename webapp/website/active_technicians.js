@@ -10,10 +10,49 @@ const style=document.createElement('style');style.textContent=`
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 let leafletPromise=null,map=null,markers=new Map(),poll=null;
 function loadLeaflet(){if(leafletPromise)return leafletPromise;leafletPromise=new Promise((resolve,reject)=>{if(window.L)return resolve();const css=document.createElement('link');css.rel='stylesheet';css.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';document.head.appendChild(css);const s=document.createElement('script');s.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';s.onload=resolve;s.onerror=reject;document.head.appendChild(s)});return leafletPromise}
-function markerIcon(status){return L.divIcon({className:'',html:`<div class="tech-marker ${status.toLowerCase()}"></div>`,iconSize:[18,18],iconAnchor:[9,9]})}
+function markerIcon(status){return L.divIcon({className:'',html:`<div class="tech-marker ${String(status||'OFFLINE').toLowerCase()}"></div>`,iconSize:[18,18],iconAnchor:[9,9]})}
 async function loadData(){const r=await fetch('/api/web/technician-locations',{credentials:'same-origin',cache:'no-store'});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.message||d.error||'Lokasi gagal dimuat');return d}
-function render(d){const list=document.querySelector('#activeTechList');const seen=new Set();(d.locations||[]).forEach(t=>{seen.add(String(t.technician_id));const lat=t.latitude,lng=t.longitude;if(markers.has(String(t.technician_id))){const m=markers.get(String(t.technician_id));m.setLatLng([lat,lng]).setIcon(markerIcon(t.status));m.setPopupContent(`<div class="tech-popup"><strong>${esc(t.name)}</strong><small>NIK ${esc(t.nik)} • STO ${esc(t.sto)}</small><small>${esc(t.status)} • update ${esc(t.age_seconds)} detik lalu</small></div>`)}else{const m=L.marker([lat,lng],{icon:markerIcon(t.status)}).addTo(map);m.bindPopup(`<div class="tech-popup"><strong>${esc(t.name)}</strong><small>NIK ${esc(t.nik)} • STO ${esc(t.sto)}</small><small>${esc(t.status)} • update ${esc(t.age_seconds)} detik lalu</small></div>`);markers.set(String(t.technician_id),m)}});for(const [id,m] of markers){if(!seen.has(id)){map.removeLayer(m);markers.delete(id)}}list.innerHTML='';if(!d.locations?.length){list.innerHTML='<div class="active-tech-card"><b>BELUM ADA LOKASI AKTIF</b><small>Teknisi perlu membuka Mini App dan mengizinkan lokasi.</small></div>';return}d.locations.forEach(t=>{const c=document.createElement('button');c.className='active-tech-card '+t.status.toLowerCase();c.style.cssText='width:100%;text-align:left;color:#e8f4ff;cursor:pointer';c.innerHTML=`<b>${esc(t.name)}</b><small>NIK ${esc(t.nik)} • ${esc(t.sto)}</small><small>${Number(t.latitude).toFixed(6)}, ${Number(t.longitude).toFixed(6)}</small><span class="tech-status">${esc(t.status)} • ${esc(t.age_seconds)}s</span>`;c.onclick=()=>{map.setView([t.latitude,t.longitude],16);markers.get(String(t.technician_id))?.openPopup()};list.appendChild(c)})}
-async function open(){await loadLeaflet();const overlay=document.createElement('section');overlay.className='active-tech-overlay';overlay.innerHTML=`<div class="active-tech-panel"><div class="active-tech-head"><div><h2>TEKNISI AKTIF</h2><small>LIVE FIELD LOCATION • LAST HEARTBEAT</small></div><span id="activeTechCount" class="live-badge">LIVE</span><button class="secondary small active-tech-close">TUTUP</button></div><div class="active-tech-body"><div id="activeTechMap" class="active-tech-map"></div><div id="activeTechList" class="active-tech-list"></div></div></div>`;document.body.appendChild(overlay);overlay.querySelector('.active-tech-close').onclick=close;map=L.map('activeTechMap',{zoomControl:true}).setView([-7.2575,112.7521],13);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'}).addTo(map);markers.clear();try{const d=await loadData();render(d)}catch(e){overlay.querySelector('#activeTechList').innerHTML=`<div class="active-tech-card"><b>GAGAL MEMUAT</b><small>${esc(e.message)}</small></div>`}poll=setInterval(async()=>{try{render(await loadData())}catch{}},30000);setTimeout(()=>map.invalidateSize(),100)}
+function render(d){
+  const list=document.querySelector('#activeTechList');
+  const count=document.querySelector('#activeTechCount');
+  const seen=new Set();
+  (d.locations||[]).forEach(t=>{
+    const id=String(t.technician_id);seen.add(id);
+    const hasGps=!!t.gps_active && Number.isFinite(Number(t.latitude)) && Number.isFinite(Number(t.longitude));
+    if(hasGps){
+      const lat=Number(t.latitude),lng=Number(t.longitude);
+      if(markers.has(id)){
+        const m=markers.get(id);m.setLatLng([lat,lng]).setIcon(markerIcon(t.status));
+        m.setPopupContent(`<div class="tech-popup"><strong>${esc(t.name)}</strong><small>NIK ${esc(t.nik)} • STO ${esc(t.sto)}</small><small>🟢 ${esc(t.status)} • GPS AKTIF • update ${esc(t.gps_age_seconds??t.age_seconds)} detik lalu</small></div>`);
+      }else{
+        const m=L.marker([lat,lng],{icon:markerIcon(t.status)}).addTo(map);
+        m.bindPopup(`<div class="tech-popup"><strong>${esc(t.name)}</strong><small>NIK ${esc(t.nik)} • STO ${esc(t.sto)}</small><small>🟢 ${esc(t.status)} • GPS AKTIF • update ${esc(t.gps_age_seconds??t.age_seconds)} detik lalu</small></div>`);
+        markers.set(id,m);
+      }
+    }else if(markers.has(id){
+      map.removeLayer(markers.get(id));markers.delete(id);
+    }
+  });
+  for(const [id,m] of markers){if(!seen.has(id)){map.removeLayer(m);markers.delete(id)}}
+  const rows=d.locations||[];
+  const online=rows.filter(t=>t.online).length;
+  const gps=rows.filter(t=>t.gps_active).length;
+  if(count)count.textContent=`${online} ONLINE • ${gps} GPS`;
+  list.innerHTML='';
+  if(!rows.length){list.innerHTML='<div class="active-tech-card"><b>BELUM ADA TEKNISI AKTIF</b><small>Teknisi perlu membuka Mini App. GPS hanya tampil jika izin lokasi sudah aktif.</small></div>';return}
+  rows.forEach(t=>{
+    const hasGps=!!t.gps_active && Number.isFinite(Number(t.latitude)) && Number.isFinite(Number(t.longitude));
+    const c=document.createElement('button');
+    c.className='active-tech-card '+String(t.status||'OFFLINE').toLowerCase();
+    c.style.cssText='width:100%;text-align:left;color:#e8f4ff;cursor:pointer';
+    const onlineLabel=t.online?'🟢 ONLINE':'⚪ '+esc(t.status);
+    const gpsLabel=hasGps?'📍 GPS AKTIF':'📍 GPS BELUM AKTIF';
+    c.innerHTML=`<b>${esc(t.name)}</b><small>NIK ${esc(t.nik)} • ${esc(t.sto)}</small><small>${onlineLabel} • ${gpsLabel}</small><span class="tech-status">${esc(t.age_seconds??'-')}s sejak online</span>`;
+    c.onclick=()=>{if(hasGps){map.setView([Number(t.latitude),Number(t.longitude)],16);markers.get(String(t.technician_id))?.openPopup()}};
+    list.appendChild(c);
+  });
+}
+async function open(){await loadLeaflet();const overlay=document.createElement('section');overlay.className='active-tech-overlay';overlay.innerHTML=`<div class="active-tech-panel"><div class="active-tech-head"><div><h2>TEKNISI AKTIF</h2><small>ONLINE PRESENCE • GPS LIVE LOCATION</small></div><span id="activeTechCount" class="live-badge">LIVE</span><button class="secondary small active-tech-close">TUTUP</button></div><div class="active-tech-body"><div id="activeTechMap" class="active-tech-map"></div><div id="activeTechList" class="active-tech-list"></div></div></div>`;document.body.appendChild(overlay);overlay.querySelector('.active-tech-close').onclick=close;map=L.map('activeTechMap',{zoomControl:true}).setView([-7.2575,112.7521],13);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'}).addTo(map);markers.clear();try{const d=await loadData();render(d)}catch(e){overlay.querySelector('#activeTechList').innerHTML=`<div class="active-tech-card"><b>GAGAL MEMUAT</b><small>${esc(e.message)}</small></div>`}poll=setInterval(async()=>{try{render(await loadData())}catch{}},30000);setTimeout(()=>map.invalidateSize(),100)}
 function close(){if(poll)clearInterval(poll);poll=null;markers.clear();map?.remove();map=null;document.querySelector('.active-tech-overlay')?.remove()}
 function init(){const b=document.createElement('button');b.id='activeTechBtn';b.className='secondary small';b.textContent='TEKNISI AKTIF';b.onclick=()=>open().catch(e=>console.error(e));const top=document.querySelector('.topbar');if(top)top.insertBefore(b,document.querySelector('#logoutBtn'));}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
