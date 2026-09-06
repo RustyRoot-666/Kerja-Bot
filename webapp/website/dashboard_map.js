@@ -44,9 +44,9 @@ function renderAreaSuccessMap(data){
   areaLayer.clearLayers();
   const areas=Array.isArray(data?.areas)?data.areas:[];
   const bounds=[];
-  let close=0,total=0;
-  areas.forEach(a=>{close+=Number(a.close||0);total+=Number(a.total||0)});
-  if(summary)summary.textContent=`${fmt(areas.length)} RANGE • ${fmt(close)} CLOSE / ${fmt(total)} TOTAL`;
+  let close=0,total=0,geocoded=0;
+  areas.forEach(a=>{close+=Number(a.close||0);total+=Number(a.total||0);if(a.geocoded)geocoded++});
+  if(summary)summary.textContent=`${fmt(areas.length)} RANGE • ${fmt(close)} CLOSE / ${fmt(total)} TOTAL • ${fmt(geocoded)} MAP POINT`;
   areas.forEach(a=>{
     if(!a.geocoded||a.latitude==null||a.longitude==null)return;
     const rate=Number(a.rate||0),color=successColor(rate),radius=Number(a.radius_m||180);
@@ -59,5 +59,14 @@ function renderAreaSuccessMap(data){
   if(bounds.length)map.fitBounds(bounds,{padding:[20,20],maxZoom:14});
 }
 async function loadAreaSuccessMap(){
-  try{const d=await json('/api/web/area-success');renderAreaSuccessMap(d);}catch(e){const s=document.querySelector('#areaMapSummary');if(s)s.textContent='MAP DATA GAGAL DIMUAT';}
+  const summary=document.querySelector('#areaMapSummary');
+  if(summary)summary.textContent='MEMUAT AREA...';
+  try{
+    const d=await json('/api/web/area-success');
+    if(!d?.ok)throw new Error(d?.message||d?.error||'Area API gagal');
+    renderAreaSuccessMap(d);
+  }catch(e){
+    console.warn('[AREA SUCCESS]',e);
+    if(summary)summary.textContent='MAP DATA GAGAL DIMUAT — CEK SESSION / API';
+  }
 }
