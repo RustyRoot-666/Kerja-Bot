@@ -64,21 +64,35 @@ if($path==='/api/auth/password'&&$method==='POST'){
 if($path==='/api/auth/logout'&&$method==='POST'){auth_logout();web_auth_respond(['ok'=>true]);}
 
 // Legacy Mini App endpoints are kept because Orderanku's Telegram WebApp uses
-// telegram_id directly. The /api/web/* routes above are for authenticated Website.
+// telegram_id directly. The /api/web/* routes are for authenticated Website.
 if($path==='/api/my-open-orders'&&$method==='GET'){
     $raw=trim((string)($_GET['telegram_id']??''));
     if(!ctype_digit($raw))web_auth_respond(['ok'=>false,'error'=>'telegram_id_required'],400);
-    $result=load_orders_for_viewer_php((int)$raw,(string)($_GET['target_nik']??''),((string)($_GET['force']??'0'))==='1');
-    if($result['ok']??false)$result=unified_enrich_open_orders_result($result,(int)$raw);
-    $status=($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:404);
-    web_auth_respond($result,$status);
+    // Use the dedicated Orderanku loader. It is the canonical Telegram Mini App
+    // path and already returns the {areas:[...orders...]} payload consumed by the UI.
+    // Do not route this through the Website enrichment layer: that layer may depend
+    // on authenticated web-session state and can turn a valid Mini App request into
+    // an HTML/PHP error response.
+    try {
+        $result=load_my_open_orders_fixed((int)$raw,((string)($_GET['force']??'0'))==='1');
+        $status=($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:404);
+        web_auth_respond($result,$status);
+    } catch(Throwable $e) {
+        error_log('[miniapp-php] my-open-orders: '.$e->getMessage().' @ '.$e->getFile().':'.$e->getLine());
+        web_auth_respond(['ok'=>false,'error'=>'internal_error','message'=>'Orderanku gagal membaca data.'],500);
+    }
 }
 if($path==='/api/my-report'&&$method==='GET'){
     $raw=trim((string)($_GET['telegram_id']??''));
     if(!ctype_digit($raw))web_auth_respond(['ok'=>false,'error'=>'telegram_id_required'],400);
-    $result=load_report_for_viewer_php((int)$raw,(string)($_GET['target_nik']??''));
-    $status=($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:404);
-    web_auth_respond($result,$status);
+    try {
+        $result=load_report_for_viewer_php((int)$raw,(string)($_GET['target_nik']??''));
+        $status=($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:404);
+        web_auth_respond($result,$status);
+    } catch(Throwable $e) {
+        error_log('[miniapp-php] my-report: '.$e->getMessage().' @ '.$e->getFile().':'.$e->getLine());
+        web_auth_respond(['ok'=>false,'error'=>'internal_error','message'=>'Laporan Orderanku gagal dimuat.'],500);
+    }
 }
 
 if($path==='/api/web/my-report'&&$method==='GET'){$tech=auth_require(['technician','admin','superadmin']);$result=load_report_for_viewer_php((int)$tech['telegram_id'],'');web_auth_respond($result,($result['ok']??false)?200:404);}
