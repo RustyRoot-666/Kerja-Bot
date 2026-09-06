@@ -7,6 +7,7 @@
 
   let timer=null, started=false, permissionState='unknown';
   const KEY='kerja-bot-location-permission-v2';
+  const LEGACY_KEY='kerja-bot-location-permission-v1';
 
   function saveState(value){
     permissionState=value;
@@ -14,25 +15,15 @@
   }
 
   function loadState(){
-    try{return localStorage.getItem(KEY)||'unknown'}catch(e){return 'unknown'}
+    try{
+      return localStorage.getItem(KEY) || localStorage.getItem(LEGACY_KEY) || 'unknown';
+    }catch(e){return 'unknown'}
   }
 
   async function send(pos){
-    const body={
-      init_data:tg.initData,
-      latitude:pos.coords.latitude,
-      longitude:pos.coords.longitude,
-      accuracy:pos.coords.accuracy
-    };
-    try{
-      await fetch('/api/technician-location',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(body),
-        cache:'no-store',
-        keepalive:true
-      });
-    }catch(e){console.debug('location heartbeat failed',e);}
+    const body={init_data:tg.initData,latitude:pos.coords.latitude,longitude:pos.coords.longitude,accuracy:pos.coords.accuracy};
+    try{await fetch('/api/technician-location',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),cache:'no-store',keepalive:true});}
+    catch(e){console.debug('location heartbeat failed',e);}
   }
 
   function locate(){
@@ -77,32 +68,29 @@
   async function silentStart(){
     const state=await browserPermission();
 
-    // IMPORTANT: never trigger a permission prompt automatically when the
-    // Mini App opens. If the browser reports "prompt", wait for an explicit
-    // user action through KerjaBotLocation.request().
+    // Never trigger a permission prompt automatically when the Mini App opens.
+    // If permission is still "prompt", wait for an explicit user action.
     if(state==='granted'){
       start();
       return;
     }
-
     if(state==='denied'){
       saveState('denied');
       return;
     }
-
     if(state==='prompt'){
       permissionState='prompt';
       return;
     }
 
-    // Older Telegram WebViews may not expose Permissions API. Only resume
-    // silently when we previously know that permission was granted.
+    // Older Telegram WebViews may not expose Permissions API. Resume silently
+    // only when a previous session already recorded that permission was granted.
     if(loadState()==='granted') start();
   }
 
   async function request(){
-    // This function is intentionally the ONLY path that may open the native
-    // location permission dialog. Call it from an explicit user gesture.
+    // This is the only path allowed to trigger the native permission dialog.
+    // It should be called from an explicit user gesture.
     const state=await browserPermission();
     if(state==='granted'){
       saveState('granted');
@@ -128,18 +116,13 @@
   }
 
   document.addEventListener('visibilitychange',()=>{
-    if(document.visibilityState==='visible'){
-      // Resume only when permission is already granted. Never prompt merely
-      // because the user returned to the Mini App.
-      silentStart();
-    }else{
-      stop();
-    }
+    if(document.visibilityState==='visible') silentStart();
+    else stop();
   });
 
   window.KerjaBotLocation={request,start,stop,permission:browserPermission};
 
-  // Do NOT call request() here. Opening the Mini App must not show the
-  // native permission dialog repeatedly.
+  // Intentionally silent. Opening/reopening the Mini App must not request
+  // location permission repeatedly.
   setTimeout(silentStart,1200);
 })();
