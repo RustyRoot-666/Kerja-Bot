@@ -19,20 +19,28 @@ function area_success_locality(string $address): string {
     $s = area_success_normalize($address);
     if ($s === '') return 'LAINNYA';
 
-    // Customer-area key: keep the street/building name and stop at the
-    // house/section number. This preserves names such as
-    // "KEDUNG TARUKAN BARU" instead of incorrectly using the final
-    // administrative token (for example MOJO).
-    $s = preg_replace('/\bNO\.?\s*\d+[A-Z]?\b.*$/i', '', $s) ?: $s;
-    $s = preg_replace('/\bNOMER\s*\d+[A-Z]?\b.*$/i', '', $s) ?: $s;
-    $tokens = preg_split('/\s+/', trim($s)) ?: [];
-    $roman = '/^(?:I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX)$/';
+    // Build the customer-area key from the actual locality/street/building
+    // portion of the address. Everything after the first house/section/unit
+    // token is detail, not a separate customer area.
+    $s = preg_replace('/\bNO\.?\s*[A-Z]?\d+[A-Z]?\b.*$/i', '', $s) ?: $s;
+    $s = preg_replace('/\bNOMER\s*[A-Z]?\d+[A-Z]?\b.*$/i', '', $s) ?: $s;
 
+    $tokens = preg_split('/\s+/', trim($s)) ?: [];
+    $roman = '/^(?:I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX)$/i';
     $kept = [];
+
     foreach ($tokens as $token) {
         $token = trim($token);
         if ($token === '') continue;
-        if (preg_match('/^\d+[A-Z]?$/', $token) || preg_match($roman, strtoupper($token))) break;
+
+        // House number, block/unit code, floor, or mixed numeric suffix.
+        // Examples: 4, 55, B7, B1527, LT23, E2, Z8.
+        if (preg_match('/^(?:LT)?\d+[A-Z]?$/i', $token)
+            || preg_match('/^[A-Z]+\d+[A-Z]?$/i', $token)
+            || preg_match('/^\d+[A-Z]?$/i', $token)
+            || preg_match($roman, $token)) {
+            break;
+        }
         $kept[] = $token;
     }
 
@@ -46,11 +54,19 @@ function area_success_locality(string $address): string {
     if ($candidate === '') return 'LAINNYA';
 
     // Apartment addresses are represented by the building name only.
-    if (preg_match('/^(?:APARTEMEN|APARTEMENT)\s+(.+?)(?:\s+[A-Z]?\d+[A-Z]?)?$/i', $candidate, $m)) {
-        $candidate = 'APARTEMEN ' . trim($m[1]);
+    if (preg_match('/^(?:APARTEMEN|APARTEMENT|APARTMENT)\s+(.+)$/i', $candidate, $m)) {
+        $building = trim($m[1]);
+        // Tower/block suffixes such as "B" are unit detail when there is a
+        // multi-word building name. Keep the actual building name.
+        $building = preg_replace('/\s+[A-Z]$/i', '', $building) ?: $building;
+        $candidate = 'APARTEMEN ' . trim($building);
+    } else {
+        // A trailing single-letter block/section (e.g. BASKARA SELATAN E)
+        // is normally address detail, not a distinct customer area.
+        $candidate = preg_replace('/\s+[A-Z]$/i', '', $candidate) ?: $candidate;
     }
 
-    return strtoupper($candidate);
+    return strtoupper(trim($candidate));
 }
 
 function area_success_geocode_cached(string $area): ?array {
