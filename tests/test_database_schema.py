@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
+import sys
 import tempfile
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from database import Database
 
@@ -13,8 +19,6 @@ async def main() -> None:
         db = Database(db_path)
         await db.initialize()
         await db.initialize()  # migration/init must be idempotent
-
-        import sqlite3
 
         with sqlite3.connect(db_path) as conn:
             tables = {
