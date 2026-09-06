@@ -48,5 +48,5 @@
 
   // workflow_area.js loads this file dynamically. If Orderanku already loaded
   // before this override arrived, immediately repaint it with the area groups.
-  if(window.state?.myOpenOrders) setTimeout(()=>renderMyOrderAreas(window.state.myOpenOrders),0);
+  if(typeof state!=='undefined' && state.myOpenOrders) setTimeout(()=>renderMyOrderAreas(state.myOpenOrders),0);
 })();
