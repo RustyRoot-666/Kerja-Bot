@@ -84,5 +84,5 @@ renderWorkflowForm = function renderWorkflowFormWithAreaContext(action, order) {
   if (ticketBlock?.parentNode === article) ticketBlock.insertAdjacentElement('afterend', context); else article.insertBefore(context, article.querySelector('form'));
 };
 
-// Load the broad operational area override after all app functions are defined.
-(function(){ const s=document.createElement('script'); s.src='/website/order_area_filter.js?v=20260906-area3'; s.async=false; document.head.appendChild(s); })();
+// Load the customer-address category override after all app functions are defined.
+(function(){ const s=document.createElement('script'); s.src='/website/order_area_filter.js?v=20260906-address1'; s.async=false; document.head.appendChild(s); })();
