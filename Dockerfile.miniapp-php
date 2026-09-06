@@ -7,6 +7,7 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY webapp/ /app/webapp/
+COPY scripts/ /app/scripts/
 
 # Temporary build-time repair for the restored backend source, then fail the build
 # immediately if any PHP syntax error remains.
@@ -19,7 +20,8 @@ RUN sed -i "s#\$rawNik=trim((string)\$r\['nik'\];#\$rawNik=trim((string)\$r['nik
     && php -l /app/webapp/php_technician_profile.php \
     && php -l /app/webapp/php_dashboard_identity_readonly.php \
     && php -l /app/webapp/php_entry_router.php \
-    && php -l /app/webapp/php_router.php
+    && php -l /app/webapp/php_router.php \
+    && php -l /app/scripts/geocode_area_success.php
 
 ENV PHP_CLI_SERVER_WORKERS=4
 EXPOSE 8080
