@@ -12,7 +12,8 @@ function area_success_location_context(string $address): array {
     $s = area_success_normalize($address);
     if ($s === '') return ['kelurahan'=>'', 'kecamatan'=>''];
     $map = [
-        'KEJAWAN PUTIH TAMBAK'=>'SUKOLILO','MEDOKAN SEMAMPIR'=>'SUKOLILO','KALISARI'=>'MULYOREJO',
+        'KEJAWAN PUTIH TAMBAK'=>'MULYOREJO','KEJAWAN PUTIH MUTIARA'=>'MULYOREJO',
+        'MEDOKAN SEMAMPIR'=>'SUKOLILO','KALISARI'=>'MULYOREJO',
         'NGINDEN JANGKUNGAN'=>'SUKOLILO','MENUR PUMPUNGAN'=>'SUKOLILO','KEPUTIH'=>'SUKOLILO','NGINDEN'=>'SUKOLILO','PUMPUNGAN'=>'SUKOLILO','SEMOLOWARU'=>'SUKOLILO',
         'KERTAJAYA'=>'GUBENG','MOJO'=>'GUBENG','AIRLANGGA'=>'GUBENG','GUBENG'=>'GUBENG','MULYOREJO'=>'MULYOREJO',
         'TENGGILIS MEJOYO'=>'TENGGILIS MEJOYO','GUNUNG ANYAR'=>'GUNUNG ANYAR','RUNGKUT'=>'RUNGKUT','TAMBAKSARI'=>'TAMBAKSARI','WONOCOLO'=>'WONOCOLO','WONOKROMO'=>'WONOKROMO',
@@ -28,8 +29,11 @@ function area_success_location_context(string $address): array {
 
 function area_success_area_context(string $area): array {
     $known = [
-        'APARTEMEN BALE HINGGIL'=>['MEDOKAN SEMAMPIR','SUKOLILO'],'APARTEMEN EDUCITY'=>['KEJAWAN PUTIH TAMBAK','SUKOLILO'],
-        'APARTEMEN ONE GALAXY'=>['MULYOREJO','MULYOREJO'],'APARTEMEN PUNCAK KERTAJAYA'=>['KERTAJAYA','GUBENG'],'APARTEMEN DIAN REGENCY'=>['KEPUTIH','SUKOLILO'],
+        'APARTEMEN BALE HINGGIL'=>['MEDOKAN SEMAMPIR','SUKOLILO'],
+        'APARTEMEN EDUCITY'=>['KEJAWAN PUTIH TAMBAK','MULYOREJO'],
+        'APARTEMEN ONE GALAXY'=>['MULYOREJO','MULYOREJO'],
+        'APARTEMEN PUNCAK KERTAJAYA'=>['KERTAJAYA','GUBENG'],
+        'APARTEMEN DIAN REGENCY'=>['KEPUTIH','SUKOLILO'],
         'BASKARA'=>['KALISARI','MULYOREJO'],'BASKARA SARI'=>['KALISARI','MULYOREJO'],'BASKARA SAWAH'=>['KALISARI','MULYOREJO'],
         'BASKARA SELATAN'=>['KALISARI','MULYOREJO'],'BASKARA TENGAH'=>['KALISARI','MULYOREJO'],'BASKARA UTARA'=>['KALISARI','MULYOREJO']
     ];
@@ -62,14 +66,9 @@ function geocode_http(string $query): ?array {
 
 function geocode_area_candidates(string $area,string $kelurahan,string $kecamatan,array $addresses): ?array {
     $queries=[];
-    // Primary strategy: area + KECAMATAN. Kelurahan is intentionally not required.
     $queries[]=implode(', ',array_filter([$area,$kecamatan,'Surabaya','Jawa Timur','Indonesia']));
-    // Second: area + Surabaya, useful for POI/building names.
     $queries[]=implode(', ',array_filter([$area,'Surabaya','Jawa Timur','Indonesia']));
-    // Final fallback: real customer addresses, enriched only with kecamatan.
-    foreach(array_slice($addresses,0,3) as $address){
-        $queries[]=implode(', ',array_filter([trim($address),$kecamatan,'Surabaya','Jawa Timur','Indonesia']));
-    }
+    foreach(array_slice($addresses,0,3) as $address) $queries[]=implode(', ',array_filter([trim($address),$kecamatan,'Surabaya','Jawa Timur','Indonesia']));
     $points=[];$names=[];
     foreach(array_values(array_unique($queries)) as $query){
         $geo=geocode_http($query);
