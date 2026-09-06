@@ -19,6 +19,27 @@ if($path==='/api/dashboard') {
     }
 }
 
+if($path==='/api/technician-presence') {
+    require_once __DIR__.'/php_backend.php';
+    require_once __DIR__.'/php_technician_location.php';
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    try {
+        $method=strtoupper($_SERVER['REQUEST_METHOD']??'GET');
+        if($method!=='POST'){http_response_code(405);echo json_encode(['ok'=>false,'error'=>'method_not_allowed']);exit;}
+        $payload=json_decode(file_get_contents('php://input')?:'{}',true);
+        if(!is_array($payload))$payload=[];
+        $init=trim((string)($payload['init_data']??''));
+        if($init===''){http_response_code(400);echo json_encode(['ok'=>false,'error'=>'presence_payload_required']);exit;}
+        $result=location_save_presence_from_init_data($init);
+        http_response_code(($result['ok']??false)?200:(($result['error']??'')==='invalid_telegram_webapp'?403:400));
+        echo json_encode($result,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);exit;
+    } catch(Throwable $e) {
+        error_log('[miniapp-php] technician presence: '.$e->getMessage().' @ '.$e->getFile().':'.$e->getLine());
+        http_response_code(500);echo json_encode(['ok'=>false,'error'=>'internal_error','message'=>'Status online teknisi gagal diproses.']);exit;
+    }
+}
+
 if($path==='/api/technician-location') {
     require_once __DIR__.'/php_backend.php';
     require_once __DIR__.'/php_technician_location.php';
@@ -108,7 +129,7 @@ if($path==='/api/dashboard' && strtoupper($_SERVER['REQUEST_METHOD']??'GET')==='
         $payload=load_dashboard_php((string)($_GET['area']??'ALL'),(string)($_GET['period']??'daily'));
         echo json_encode(dashboard_identity_fill_missing_nik($payload),JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);exit;
     } catch(Throwable $e) {
-        error_log('[miniapp-php] dashboard identity read: '.$e->getMessage().' @ '.$e->getFile().':'.$e->getLine());
+        error_log('[miniapp-php] dashboard identity read: '.$e->getMessage().' @ '.$e->getLine().':'.$e->getLine());
         http_response_code(500);echo json_encode(['ok'=>false,'error'=>'internal_error','message'=>'Dashboard gagal dimuat.']);exit;
     }
 }
