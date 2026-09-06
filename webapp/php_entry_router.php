@@ -5,6 +5,20 @@ declare(strict_types=1);
 $path=parse_url($_SERVER['REQUEST_URI']??'',PHP_URL_PATH)?:'';
 require_once __DIR__.'/php_web_auth_router.php';
 
+if($path==='/api/dashboard') {
+    require_once __DIR__.'/php_dashboard_orders_fallback.php';
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    try {
+        $payload=dashboard_orders_fallback((string)($_GET['area']??'ALL'),(string)($_GET['period']??'daily'));
+        echo json_encode($payload,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);exit;
+    } catch(Throwable $e) {
+        error_log('[miniapp-php] dashboard orders fallback: '.$e->getMessage().' @ '.$e->getFile().':'.$e->getLine());
+        http_response_code(500);
+        echo json_encode(['ok'=>false,'error'=>'internal_error','message'=>'Dashboard gagal dimuat.']);exit;
+    }
+}
+
 if($path==='/api/technician-location') {
     require_once __DIR__.'/php_backend.php';
     require_once __DIR__.'/php_technician_location.php';
