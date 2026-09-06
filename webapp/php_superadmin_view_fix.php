@@ -194,13 +194,15 @@ function superadmin_dashboard_from_history_php(string $area, string $period): ar
 function load_superadmin_dashboard_php(string $area,string $period): array {
     $payload = superadmin_dashboard_from_history_php($area,$period);
 
-    // Prefer the established report tables when they actually contain data.
-    // The history fallback is required after database recovery and when report
-    // aggregation tables have not yet been rebuilt.
-    if ((int)($payload['summary']['total_close']??0) === 0 && table_exists('report_group_orders')) {
+    // Prefer the established report aggregation when it contains data. The
+    // histories table can be sparse after a database recovery, so a non-zero
+    // history count must not prevent the canonical report dataset from being used.
+    if (table_exists('report_group_orders')) {
         try {
             $legacy = load_dashboard_php($area,$period);
-            if ((int)($legacy['summary']['total_close']??0) > 0) return $legacy;
+            $legacyTotal = (int)($legacy['summary']['total_close']??0);
+            $historyTotal = (int)($payload['summary']['total_close']??0);
+            if ($legacyTotal > 0 && $legacyTotal >= $historyTotal) return $legacy;
         } catch (Throwable $e) {
             error_log('[miniapp-php] legacy dashboard fallback failed: '.$e->getMessage());
         }
