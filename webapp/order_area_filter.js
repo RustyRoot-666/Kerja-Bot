@@ -5,11 +5,13 @@
 
   const _renderMyOrderAreas=renderMyOrderAreas;
 
-  function operationalArea(address){
-    const text=String(address||'').toUpperCase().replace(/[^A-Z0-9 ]+/g,' ').replace(/\s+/g,' ').trim();
-    if(text.includes('NGINDEN')) return 'NGINDEN';
-    if(text.includes('SEMOLO')) return 'SEMOLO';
+  function operationalArea(order){
+    const text=String(order?.address||'').toUpperCase().replace(/[^A-Z0-9 ]+/g,' ').replace(/\s+/g,' ').trim();
+    const existing=String(order?.area||'').toUpperCase().trim();
+    if(existing==='NGINDEN'||existing==='SEMOLO'||existing==='JAGIR') return existing;
     if(text.includes('JAGIR')) return 'JAGIR';
+    if(/\bNGINDEN\b|NGINDEN JANGKUNGAN|NGINDEN SEMOLO|NGINDEN INTAN|NGINDEN BARU/.test(text)) return 'NGINDEN';
+    if(/\bSEMOLO\b|SEMOLOWARU|KEPUTIH|BUMI MARINA|MEDOKAN SEMAMPIR|KLAMPIS NGASEM|MENUR PUMPUNGAN|GEBANG PUTIH/.test(text)) return 'SEMOLO';
     return 'LAINNYA';
   }
 
@@ -17,13 +19,12 @@
     const map=new Map();
     (payload?.areas||[]).forEach(sourceArea=>{
       (sourceArea.orders||[]).forEach(order=>{
-        const area=operationalArea(order.address);
+        const area=operationalArea(order);
         if(!map.has(area)) map.set(area,{area,open:0,close:0,update:0,orders:[]});
         const group=map.get(area);
         group.open++;
         group.orders.push({...order,area});
       });
-      // Preserve status totals even when an area currently has no OPEN order.
       if(!(sourceArea.orders||[]).length){
         const area=String(sourceArea.area||'LAINNYA').toUpperCase();
         if(['NGINDEN','SEMOLO','JAGIR'].includes(area)){
@@ -34,16 +35,18 @@
         }
       }
     });
-
     const priority=['NGINDEN','SEMOLO','JAGIR','LAINNYA'];
     return Array.from(map.values()).sort((a,b)=>priority.indexOf(a.area)-priority.indexOf(b.area));
   }
 
   window.renderMyOrderAreas=function renderMyOrderAreasOperational(payload){
     const grouped={...payload,areas:groupAreas(payload)};
-    // Do not expose street names as area buttons; clicking an area still shows all orders.
     return _renderMyOrderAreas(grouped);
   };
 
   window.KerjaBotOrderArea={operationalArea,groupAreas};
+
+  // workflow_area.js loads this file dynamically. If Orderanku already loaded
+  // before this override arrived, immediately repaint it with the area groups.
+  if(window.state?.myOpenOrders) setTimeout(()=>renderMyOrderAreas(window.state.myOpenOrders),0);
 })();
