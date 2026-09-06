@@ -18,26 +18,39 @@ function area_success_color(float $rate): string {
 function area_success_locality(string $address): string {
     $s = area_success_normalize($address);
     if ($s === '') return 'LAINNYA';
-    $tokens = preg_split('/\s+/', $s) ?: [];
-    $roman = '/^(?:I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX)$/';
-    while ($tokens && (preg_match('/^\d+[A-Z]?$/', end($tokens)) || preg_match($roman, end($tokens)))) array_pop($tokens);
-    if (!$tokens) return 'LAINNYA';
 
-    $aliases = [
-        'TENGGILIS MEJOYO','TENGGILIS','GUNUNG ANYAR','WIYUNG','LAKARSANTRI',
-        'SUKOLILO','MULYOREJO','RUNGKUT','GUBENG','KARANG PILANG','KARANGPILANG',
-        'DUKUH PAKIS','SAWAHAN','WONOKROMO','WONOCOLO','JAMBANGAN','GAYUNGAN',
-        'SIMOKERTO','BENOWO','PAKAL','ASEMROWO','TAMBAKSARI','SEMAMPIR','KENJERAN',
-        'BULAK','KREMBANGAN','PABEAN CANTIAN','TEGALSARI','GENTENG','BUBUTAN',
-        'SUKOMANUNGGAL','TANDES','MOJO','KERTAJAYA','AIRLANGGA','KEPUTIH','NGINDEN',
-        'PUMPUNGAN','MENUR','SEMOLOWARU','MANYAR'
-    ];
-    $upper = strtoupper(implode(' ', $tokens));
-    foreach ($aliases as $alias) {
-        $alias = strtoupper($alias);
-        if (preg_match('/(?:^| )'.preg_quote($alias,'/').'$/', $upper)) return $alias;
+    // Customer-area key: keep the street/building name and stop at the
+    // house/section number. This preserves names such as
+    // "KEDUNG TARUKAN BARU" instead of incorrectly using the final
+    // administrative token (for example MOJO).
+    $s = preg_replace('/\bNO\.?\s*\d+[A-Z]?\b.*$/i', '', $s) ?: $s;
+    $s = preg_replace('/\bNOMER\s*\d+[A-Z]?\b.*$/i', '', $s) ?: $s;
+    $tokens = preg_split('/\s+/', trim($s)) ?: [];
+    $roman = '/^(?:I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX)$/';
+
+    $kept = [];
+    foreach ($tokens as $token) {
+        $token = trim($token);
+        if ($token === '') continue;
+        if (preg_match('/^\d+[A-Z]?$/', $token) || preg_match($roman, strtoupper($token))) break;
+        $kept[] = $token;
     }
-    return strtoupper((string)end($tokens));
+
+    $candidate = trim(implode(' ', $kept));
+    if ($candidate === '') $candidate = $s;
+
+    // Remove common street prefixes; the map should show the customer area,
+    // not the transport/address prefix.
+    $candidate = preg_replace('/^(?:JL\.?|JALAN|GG\.?|GANG)\s+/i', '', $candidate) ?: $candidate;
+    $candidate = trim(preg_replace('/\s+/', ' ', $candidate) ?: '');
+    if ($candidate === '') return 'LAINNYA';
+
+    // Apartment addresses are represented by the building name only.
+    if (preg_match('/^(?:APARTEMEN|APARTEMENT)\s+(.+?)(?:\s+[A-Z]?\d+[A-Z]?)?$/i', $candidate, $m)) {
+        $candidate = 'APARTEMEN ' . trim($m[1]);
+    }
+
+    return strtoupper($candidate);
 }
 
 function area_success_geocode_cached(string $area): ?array {
