@@ -19,9 +19,6 @@ function area_success_locality(string $address): string {
     $s = area_success_normalize($address);
     if ($s === '') return 'LAINNYA';
 
-    // Build the customer-area key from the actual locality/street/building
-    // portion of the address. Everything after the first house/section/unit
-    // token is detail, not a separate customer area.
     $s = preg_replace('/\bNO\.?\s*[A-Z]?\d+[A-Z]?\b.*$/i', '', $s) ?: $s;
     $s = preg_replace('/\bNOMER\s*[A-Z]?\d+[A-Z]?\b.*$/i', '', $s) ?: $s;
 
@@ -32,9 +29,6 @@ function area_success_locality(string $address): string {
     foreach ($tokens as $token) {
         $token = trim($token);
         if ($token === '') continue;
-
-        // House number, block/unit code, floor, or mixed numeric suffix.
-        // Examples: 4, 55, B7, B1527, LT23, E2, Z8.
         if (preg_match('/^(?:LT)?\d+[A-Z]?$/i', $token)
             || preg_match('/^[A-Z]+\d+[A-Z]?$/i', $token)
             || preg_match('/^\d+[A-Z]?$/i', $token)
@@ -46,23 +40,28 @@ function area_success_locality(string $address): string {
 
     $candidate = trim(implode(' ', $kept));
     if ($candidate === '') $candidate = $s;
-
-    // Remove common street prefixes; the map should show the customer area,
-    // not the transport/address prefix.
     $candidate = preg_replace('/^(?:JL\.?|JALAN|GG\.?|GANG)\s+/i', '', $candidate) ?: $candidate;
     $candidate = trim(preg_replace('/\s+/', ' ', $candidate) ?: '');
     if ($candidate === '') return 'LAINNYA';
 
-    // Apartment addresses are represented by the building name only.
+    // Apartments: the customer area is the building/complex, not its tower,
+    // unit, floor, or block. Examples:
+    // APARTEMEN BALE HINGGIL B1527 -> APARTEMEN BALE HINGGIL
+    // APARTEMEN BALE HINGGIL TOWER B -> APARTEMEN BALE HINGGIL
+    // APARTEMEN EDUCITY HARVARD -> APARTEMEN EDUCITY
+    // APARTEMEN PUNCAK KERTAJAYA B UTARA -> APARTEMEN PUNCAK KERTAJAYA
     if (preg_match('/^(?:APARTEMEN|APARTEMENT|APARTMENT)\s+(.+)$/i', $candidate, $m)) {
         $building = trim($m[1]);
-        // Tower/block suffixes such as "B" are unit detail when there is a
-        // multi-word building name. Keep the actual building name.
+        $building = preg_replace('/\s+TOWER(?:\s+[A-Z0-9]+)?(?:\s+.*)?$/i', '', $building) ?: $building;
+        $building = preg_replace('/\s+UNIT(?:\s+[A-Z0-9]+)?(?:\s+.*)?$/i', '', $building) ?: $building;
+        $building = preg_replace('/\s+(?:LT|LANTAI)\s*\d+.*$/i', '', $building) ?: $building;
+        $building = preg_replace('/\s+[A-Z]\s+(?:UTARA|SELATAN|TIMUR|BARAT)(?:\s+.*)?$/i', '', $building) ?: $building;
+        $building = preg_replace('/\s+(?:HARVARD|YALE|PRINCETON|STAMFORD)\s*$/i', '', $building) ?: $building;
         $building = preg_replace('/\s+[A-Z]$/i', '', $building) ?: $building;
-        $candidate = 'APARTEMEN ' . trim($building);
+        $building = trim($building);
+        if ($building === '') $building = trim($m[1]);
+        $candidate = 'APARTEMEN ' . $building;
     } else {
-        // A trailing single-letter block/section (e.g. BASKARA SELATAN E)
-        // is normally address detail, not a distinct customer area.
         $candidate = preg_replace('/\s+[A-Z]$/i', '', $candidate) ?: $candidate;
     }
 
