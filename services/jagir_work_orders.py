@@ -11,6 +11,7 @@ from telegram.ext import ContextTypes
 
 from database import Database
 from services.dismantle_orders import capture_dismantle_order
+from services.report_multi_topic import get_topic_identity
 
 TARGET_GROUP = "WORK ORDER JAGIR"
 BLOCK_SPLIT_RE = re.compile(r"\n\s*==\s*\n", re.IGNORECASE)
@@ -234,10 +235,30 @@ async def capture_jagir_work_order(update: Update, context: ContextTypes.DEFAULT
     message = update.effective_message
     if not chat or not message or chat.type not in {"group", "supergroup"}:
         return
-    if _norm(chat.title) != TARGET_GROUP:
-        return
+
     text = (message.text or message.caption or "").strip()
     if "SERVICE NO" not in _norm(text) or "==" not in text:
+        return
+
+    # JAGIR bisa memakai grup khusus WORK ORDER JAGIR maupun topic JAGIR
+    # di grup REPORT. Jangan bergantung hanya pada judul grup karena topic
+    # identity sudah menjadi sumber kebenaran untuk STO/area di sistem ini.
+    is_jagir_group = _norm(chat.title) == TARGET_GROUP
+    is_jagir_topic = False
+    if message.message_thread_id is not None:
+        db: Database = context.application.bot_data["db"]
+        try:
+            identity = await asyncio.to_thread(
+                get_topic_identity,
+                db.db_path,
+                chat.id,
+                message.message_thread_id,
+            )
+            is_jagir_topic = identity is not None and identity[1] == "JGR"
+        except Exception:
+            logging.exception("Gagal membaca identity topic saat capture WORK ORDER JAGIR")
+
+    if not is_jagir_group and not is_jagir_topic:
         return
 
     db: Database = context.application.bot_data["db"]
@@ -248,5 +269,12 @@ async def capture_jagir_work_order(update: Update, context: ContextTypes.DEFAULT
         return
     if total:
         await message.reply_text(f"✅ {total} WO JAGIR tersimpan\n👷 Assign: {owner}\n🏢 STO: JGR")
+        logging.info(
+            "JAGIR WO captured: total=%s owner=%s chat=%s thread=%s",
+            total,
+            owner,
+            chat.id,
+            message.message_thread_id,
+        )
     else:
         await message.reply_text(f"⚠️ WO JAGIR belum tersimpan: {owner}")
