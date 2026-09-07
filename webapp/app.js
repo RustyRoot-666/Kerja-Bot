@@ -129,7 +129,7 @@ document.querySelectorAll('[data-close-more]').forEach(i=>i.addEventListener('cl
 document.querySelector('#refreshButton')?.addEventListener('click',async()=>{closeOverlays();await loadDashboard();if(!document.querySelector('#ordersPage').classList.contains('hidden'))await loadMyOpenOrders(true);showToast('Data diperbarui');});
 document.querySelector('#closeMiniAppButton')?.addEventListener('click',()=>tg?.close?.());
 
-/* Theme modes: Dark (default) + Light. Kept here so the existing HTML stays untouched. */
+/* Theme modes: Dark (default) + Light. */
 (function initThemeModes(){
   const css=`
     body.theme-light{background:#f3f6fa!important;color:#142235!important}
@@ -171,9 +171,9 @@ document.querySelector('#closeMiniAppButton')?.addEventListener('click',()=>tg?.
     body.theme-light .skeleton-line{background:#e3eaf1}
   `;
   const style=document.createElement('style');style.id='kerja-theme-modes';style.textContent=css;document.head.appendChild(style);
-  const btn=document.createElement('button');btn.id='themeToggle';btn.type='button';btn.setAttribute('aria-label','Ganti mode tampilan');btn.title='Ganti mode tampilan';document.body.appendChild(btn);
+  const btn=document.createElement('button');btn.id='themeToggle';btn.type='button';btn.setAttribute('aria-label','Ganti mode tampilan');btn.title='Ganti mode tampilan';btn.style.cssText='position:fixed;right:14px;top:78px;z-index:110;width:42px;height:42px;border:1px solid #2b4564;border-radius:50%;background:#0b1828;color:#fff;font-size:18px;display:grid;place-items:center;box-shadow:0 6px 20px rgba(0,0,0,.22);cursor:pointer;';document.body.appendChild(btn);
   const saved=localStorage.getItem('kerja-bot-theme')||'dark';
-  function apply(theme){const light=theme==='light';document.body.classList.toggle('theme-light',light);btn.textContent=light?'🌙':'☀️';btn.dataset.theme=theme;localStorage.setItem('kerja-bot-theme',theme);}
+  function apply(theme){const light=theme==='light';document.body.classList.toggle('theme-light',light);btn.textContent=light?'🌙':'☀️';btn.dataset.theme=theme;btn.style.background=light?'#fff':'#0b1828';btn.style.color=light?'#26384d':'#fff';btn.style.borderColor=light?'#d7e0e9':'#2b4564';localStorage.setItem('kerja-bot-theme',theme);}
   btn.addEventListener('click',()=>apply(btn.dataset.theme==='light'?'dark':'light'));
   apply(saved==='light'?'light':'dark');
 })();
