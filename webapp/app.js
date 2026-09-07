@@ -129,4 +129,53 @@ document.querySelectorAll('[data-close-more]').forEach(i=>i.addEventListener('cl
 document.querySelector('#refreshButton')?.addEventListener('click',async()=>{closeOverlays();await loadDashboard();if(!document.querySelector('#ordersPage').classList.contains('hidden'))await loadMyOpenOrders(true);showToast('Data diperbarui');});
 document.querySelector('#closeMiniAppButton')?.addEventListener('click',()=>tg?.close?.());
 
+/* Theme modes: Dark (default) + Light. Kept here so the existing HTML stays untouched. */
+(function initThemeModes(){
+  const css=`
+    body.theme-light{background:#f3f6fa!important;color:#142235!important}
+    body.theme-light .app-header{border-bottom-color:#dbe3ec}
+    body.theme-light .brand-center strong,body.theme-light .name-row h1,body.theme-light .kpi-card strong,body.theme-light .leader-name,body.theme-light .area-row,body.theme-light .panel-head strong,body.theme-light .tool-card,body.theme-light .tool-action,body.theme-light .drawer-link,body.theme-light .more-box button,body.theme-light .detail-sheet,body.theme-light .detail-sheet h2,body.theme-light .payroll-hero h1,body.theme-light .pay-stat strong{color:#142235!important}
+    body.theme-light .brand-center small,body.theme-light .hello,body.theme-light .date-line,body.theme-light .panel-meta,body.theme-light .panel-sub,body.theme-light .kpi-card small,body.theme-light .kpi-card em,body.theme-light .trend-label,body.theme-light .leader-meta,body.theme-light .area-row small,body.theme-light .subtle,body.theme-light .tool-sub,body.theme-light .tool-card small,body.theme-light .my-summary span,body.theme-light .my-summary div span,body.theme-light .pay-stat small,body.theme-light .pay-stat span,body.theme-light .payroll-hero p{color:#66778a!important}
+    body.theme-light .round-btn{background:#fff;border-color:#d7e0e9;color:#26384d}
+    body.theme-light .period-pill{background:#fff;border-color:#d7e0e9}
+    body.theme-light .period-pill small{color:#718196}
+    body.theme-light .segmented{background:#e9eef4;border-color:#d6dfe8}
+    body.theme-light .segment,body.theme-light .period{color:#64768a}
+    body.theme-light .kpi-card,body.theme-light .panel,body.theme-light .tool-card,body.theme-light .pay-stat{background:#fff!important;border-color:#d9e2eb!important;box-shadow:0 8px 24px rgba(20,45,70,.07)}
+    body.theme-light .search-wrap{background:#f7f9fb;border-color:#d7e0e9}
+    body.theme-light .search-wrap input{color:#17283c}
+    body.theme-light .leader-row,body.theme-light .area-row,body.theme-light .activity-item{border-bottom-color:#e4eaf0;color:#17283c}
+    body.theme-light .rank{background:#e8edf3;color:#42566c}
+    body.theme-light .info-box{background:#f5f8fb;border-color:#dce5ed}
+    body.theme-light .info-box p{color:#66778a}
+    body.theme-light .progress-ring{background:conic-gradient(#19a875 0deg,#2487ff var(--p),#dce5ed var(--p))}
+    body.theme-light .progress-ring:after{background:#fff}
+    body.theme-light .progress-copy p strong{color:#142235}
+    body.theme-light .placeholder-chart p{color:#66778a}
+    body.theme-light .placeholder-pie{box-shadow:inset 0 0 0 24px #fff}
+    body.theme-light .bottom-nav{background:rgba(255,255,255,.94);border-color:#d6e0e9;box-shadow:0 8px 30px rgba(20,45,70,.12)}
+    body.theme-light .nav-item{color:#65778b}
+    body.theme-light .drawer-backdrop,body.theme-light .more-backdrop{background:rgba(25,42,60,.28)}
+    body.theme-light .drawer-sheet{background:#fff;border-right-color:#d7e0e9}
+    body.theme-light .more-box{background:#fff;border-color:#d7e0e9;box-shadow:0 18px 50px rgba(20,45,70,.15)}
+    body.theme-light .drawer-link,body.theme-light .more-box button{color:#25384d!important}
+    body.theme-light .detail-backdrop{background:rgba(25,42,60,.3)}
+    body.theme-light .detail-sheet{background:#fff;border-color:#d7e0e9}
+    body.theme-light .detail-metrics div,body.theme-light .order-row,body.theme-light .mini-order{background:#f7f9fb;border-color:#dce5ed}
+    body.theme-light .detail-metrics span,body.theme-light .order-row small,body.theme-light .mini-order small{color:#66778a}
+    body.theme-light .tool-action{background:#f8fafc;border-color:#d7e0e9}
+    body.theme-light .tool-action span{color:#1688d8}
+    body.theme-light .toast{background:#fff;border-color:#d7e0e9;color:#1d3046;box-shadow:0 10px 30px rgba(20,45,70,.16)}
+    body.theme-light input,body.theme-light textarea,body.theme-light select{color:#17283c!important;background:#fff!important;border-color:#ccd8e3!important}
+    body.theme-light pre{background:#f3f6f9!important;color:#24374d!important;border-color:#d8e2eb!important}
+    body.theme-light .skeleton-line{background:#e3eaf1}
+  `;
+  const style=document.createElement('style');style.id='kerja-theme-modes';style.textContent=css;document.head.appendChild(style);
+  const btn=document.createElement('button');btn.id='themeToggle';btn.type='button';btn.setAttribute('aria-label','Ganti mode tampilan');btn.title='Ganti mode tampilan';document.body.appendChild(btn);
+  const saved=localStorage.getItem('kerja-bot-theme')||'dark';
+  function apply(theme){const light=theme==='light';document.body.classList.toggle('theme-light',light);btn.textContent=light?'🌙':'☀️';btn.dataset.theme=theme;localStorage.setItem('kerja-bot-theme',theme);}
+  btn.addEventListener('click',()=>apply(btn.dataset.theme==='light'?'dark':'light'));
+  apply(saved==='light'?'light':'dark');
+})();
+
 setWelcome(); renderWorkflowHome(); loadDashboard();
