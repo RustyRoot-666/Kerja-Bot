@@ -126,13 +126,12 @@ function dashboard_orders_fallback(string $area, string $period): array {
     }
     usort($leaderboard,fn($a,$b)=>$b['total']<=>$a['total'] ?: strcmp(norm_name($a['name']),norm_name($b['name'])));
 
+    // Grafik Mini App selalu mengikuti siklus operasional Jumat -> Kamis.
+    // Bukan rolling 7 hari. Hari yang belum terjadi tetap dikirim sebagai 0.
     $trend=[];
-    if ($period === 'weekly') {
-        $trendDates=[];
-        for($d=$weekStart;$d <= $weekEnd;$d=$d->modify('+1 day')) $trendDates[]=$d;
-    } else {
-        $trendDates=[];
-        for($i=6;$i>=0;$i--) $trendDates[]=$today->modify("-$i days");
+    $trendDates=[];
+    for($d=$weekStart;$d <= $weekEnd;$d=$d->modify('+1 day')) {
+        $trendDates[]=$d;
     }
     foreach ($trendDates as $d) {
         $day=$d->format('Y-m-d');
