@@ -25,6 +25,10 @@ body.theme-light .menu-item b{color:#1264ad}
 body.theme-light .menu-item small{color:#6b88a2}
 body.theme-light .menu-item[data-view="orders"]{border-color:#42aef2;background:linear-gradient(135deg,#e8f7ff,#cdeeff);box-shadow:0 8px 24px rgba(0,132,235,.16),inset 0 1px #fff}
 body.theme-light .menu-item[data-view="orders"] b{color:#075ca8}
+body.theme-light .menu-item.active{border-color:#42aef2;background:linear-gradient(135deg,#e8f7ff,#cdeeff);box-shadow:0 8px 24px rgba(0,132,235,.16),inset 0 1px #fff}
+body.theme-light .menu-item.active b{color:#075ca8}
+.menu-item.active{border-color:rgba(92,224,255,.55);background:rgba(92,224,255,.12);box-shadow:0 0 0 1px rgba(92,224,255,.08),0 8px 22px rgba(0,0,0,.12)}
+.menu-item.active b{color:#5ce0ff}
 body.theme-light .menu-footer{border-color:#c9e2f2;color:#5f7d96}
 body.theme-light .feature-view h1{color:#123d70}
 body.theme-light .feature-view .feature-kicker{color:#1689d5}
@@ -52,7 +56,18 @@ function closeMenu(){ov.classList.remove('open')}
 function setDashboardSections(visible){[main,hero,kpi,grid,orders,analytics].forEach(x=>{if(x)x.style.display=visible?'':'none'});}
 function showDashboard(){host.querySelectorAll('.feature-view').forEach(v=>v.classList.remove('active'));setDashboardSections(true);closeMenu()}
 function show(id){setDashboardSections(false);host.querySelectorAll('.feature-view').forEach(v=>v.classList.remove('active'));const view=$('#view-'+id);if(view)view.classList.add('active');closeMenu();loadView(id)}
-host.querySelectorAll('.back-dashboard').forEach(b=>b.onclick=showDashboard);ov.querySelectorAll('.menu-item').forEach(b=>b.onclick=()=>{const id=b.dataset.view;if(id==='techs'){closeMenu();const x=$('#activeTechBtn');if(x)x.click();else window.KerjaBotOpenActiveTechnicians?.()}else show(id)});
+host.querySelectorAll('.back-dashboard').forEach(b=>b.onclick=showDashboard);
+ov.querySelectorAll('.menu-item').forEach(b=>b.onclick=()=>{
+  const id=b.dataset.view;
+  ov.querySelectorAll('.menu-item').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  if(id==='techs'){
+    closeMenu();
+    const x=$('#activeTechBtn');
+    if(x)x.click();
+    else window.KerjaBotOpenActiveTechnicians?.();
+  }else show(id);
+});
 async function ensureZoneMap(c){
   if(typeof window.KerjaBotOpenZoneMap==='function')return window.KerjaBotOpenZoneMap();
   await new Promise((resolve,reject)=>{const src='/website/customer_zones.js?v=20260906-zones3';const old=document.querySelector('script[data-zone-loader="1"]');if(old){old.addEventListener('load',resolve,{once:true});old.addEventListener('error',reject,{once:true});return}const s=document.createElement('script');s.src=src;s.dataset.zoneLoader='1';s.onload=resolve;s.onerror=()=>reject(new Error('customer_zones.js gagal dimuat'));document.body.appendChild(s)});
