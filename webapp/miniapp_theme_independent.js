@@ -4,16 +4,10 @@
   const KEY = 'kerja-miniapp-theme';
   const DARK = 'dark';
   const LIGHT = 'light';
+  const TOGGLE_ID = 'kerjaThemeToggleIndependent';
 
   function getTheme() {
-    const saved = localStorage.getItem(KEY);
-    return saved === LIGHT ? LIGHT : DARK;
-  }
-
-  function findToggle() {
-    return document.querySelector(
-      '#themeToggle, [data-theme-toggle], [aria-label*="theme" i], [aria-label*="tema" i]'
-    );
+    return localStorage.getItem(KEY) === LIGHT ? LIGHT : DARK;
   }
 
   function applyTheme(theme) {
@@ -28,15 +22,15 @@
       );
     }
 
-    const button = findToggle();
+    const button = document.getElementById(TOGGLE_ID);
 
     if (button) {
-      button.dataset.kerjaThemeToggle = mode;
       button.textContent = mode === LIGHT ? '🌙' : '☀️';
       button.title =
         mode === LIGHT
           ? 'Gunakan mode gelap'
           : 'Gunakan mode terang';
+
       button.setAttribute(
         'aria-label',
         mode === LIGHT
@@ -48,47 +42,60 @@
     localStorage.setItem(KEY, mode);
   }
 
-  function ensureToggle() {
-    let button = findToggle();
+  function createIndependentToggle() {
+    let button = document.getElementById(TOGGLE_ID);
 
     if (!button) {
       button = document.createElement('button');
 
+      button.id = TOGGLE_ID;
       button.type = 'button';
-      button.id = 'themeToggle';
-      button.dataset.themeToggle = '1';
 
-      button.style.cssText = [
-        'position:fixed',
-        'top:calc(env(safe-area-inset-top, 0px) + 10px)',
-        'right:12px',
-        'z-index:99999',
-        'cursor:pointer',
-        'border:0',
-        'background:transparent',
-        'font-size:20px',
-        'line-height:1',
-        'padding:6px',
-        'width:40px',
-        'height:40px'
-      ].join(';');
-
-      const header =
-        document.querySelector('header') ||
-        document.querySelector('.topbar') ||
-        document.querySelector('.header') ||
-        document.body;
-
-      header.appendChild(button);
+      /*
+       * PENTING:
+       * Tombol langsung ditempel ke <html>,
+       * bukan ke card/header/container dashboard.
+       */
+      document.documentElement.appendChild(button);
     }
 
-    button.style.position = 'fixed';
-    button.style.top = 'calc(env(safe-area-inset-top, 0px) + 10px)';
-    button.style.right = '12px';
-    button.style.zIndex = '99999';
+    button.style.cssText = `
+      position: fixed !important;
+      top: calc(env(safe-area-inset-top, 0px) + 72px) !important;
+      right: 12px !important;
+      width: 48px !important;
+      height: 48px !important;
+      min-width: 48px !important;
+      min-height: 48px !important;
+      z-index: 2147483647 !important;
 
-    if (!button.dataset.kerjaThemeBound) {
-      button.dataset.kerjaThemeBound = '1';
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+
+      margin: 0 !important;
+      padding: 0 !important;
+
+      border: 1px solid rgba(90, 180, 255, .30) !important;
+      border-radius: 50% !important;
+
+      background: rgba(7, 24, 42, .94) !important;
+      color: #ffffff !important;
+
+      font-size: 22px !important;
+      line-height: 1 !important;
+
+      box-shadow: 0 4px 18px rgba(0, 0, 0, .35) !important;
+
+      cursor: pointer !important;
+      touch-action: manipulation !important;
+
+      transform: none !important;
+      filter: none !important;
+    `;
+
+    if (!button.dataset.bound) {
+      button.dataset.bound = '1';
 
       button.addEventListener(
         'click',
@@ -96,8 +103,10 @@
           event.preventDefault();
           event.stopPropagation();
 
-          const current = getTheme();
-          applyTheme(current === DARK ? LIGHT : DARK);
+          const next =
+            getTheme() === DARK ? LIGHT : DARK;
+
+          applyTheme(next);
         },
         true
       );
@@ -106,12 +115,30 @@
     applyTheme(getTheme());
   }
 
+  function hideOldThemeButtons() {
+    const selectors = [
+      '#themeToggle',
+      '[data-theme-toggle]',
+      '[aria-label*="theme" i]',
+      '[aria-label*="tema" i]'
+    ];
+
+    document.querySelectorAll(selectors.join(',')).forEach((el) => {
+      if (el.id !== TOGGLE_ID) {
+        el.style.setProperty('display', 'none', 'important');
+        el.style.setProperty('visibility', 'hidden', 'important');
+        el.style.setProperty('pointer-events', 'none', 'important');
+      }
+    });
+  }
+
   function injectLightModeCSS() {
     if (document.getElementById('kerja-miniapp-theme-css')) {
       return;
     }
 
     const style = document.createElement('style');
+
     style.id = 'kerja-miniapp-theme-css';
 
     style.textContent = `
@@ -164,7 +191,8 @@
 
   function init() {
     injectLightModeCSS();
-    ensureToggle();
+    hideOldThemeButtons();
+    createIndependentToggle();
     applyTheme(getTheme());
   }
 
