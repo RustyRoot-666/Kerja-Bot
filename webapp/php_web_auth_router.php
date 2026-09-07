@@ -25,7 +25,13 @@ function web_auth_same_origin(): void {
 }
 
 $path=parse_url($_SERVER['REQUEST_URI']??'',PHP_URL_PATH)?:'';$method=strtoupper($_SERVER['REQUEST_METHOD']??'GET');
-if($path==='/website'||$path==='/website/'){header('Content-Type: text/html; charset=utf-8');header('Cache-Control: no-store');readfile(__DIR__.'/website/index.html');exit;}
+if($path==='/website'||$path==='/website/'){
+    header('Content-Type: text/html; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    header('Pragma: no-cache'); header('Expires: 0');
+    require __DIR__.'/website/index.php';
+    exit;
+}
 if($path==='/api/auth/link/request'&&$method==='POST'){$p=web_auth_input();$id=trim((string)($p['telegram_id']??''));if(!ctype_digit($id))web_auth_respond(['ok'=>false,'error'=>'telegram_id_required','message'=>'Telegram ID tidak valid.'],400);$result=auth_request_link((int)$id);if(!($result['ok']??false))web_auth_respond($result,404);$token=(string)$result['token'];if(!auth_send_telegram_confirmation((int)$id,$token)){db()->prepare("UPDATE web_link_requests SET status='cancelled' WHERE token_hash=?")->execute([auth_hash_token($token)]);web_auth_respond(['ok'=>false,'error'=>'telegram_delivery_failed','message'=>'Bot gagal mengirim pesan Telegram. Pastikan bot sudah pernah dibuka oleh akun tersebut.'],502);}web_auth_respond(['ok'=>true,'token'=>$token,'expires_at'=>$result['expires_at'],'technician'=>$result['technician']]);}
 if($path==='/api/auth/link/status'&&$method==='GET'){web_auth_respond(auth_link_status(trim((string)($_GET['token']??''))));}
 if($path==='/api/auth/login'&&$method==='POST'){$p=web_auth_input();$result=auth_login(trim((string)($p['nik']??'')),(string)($p['password']??''));web_auth_respond($result,($result['ok']??false)?200:401);}
