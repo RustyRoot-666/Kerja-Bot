@@ -59,12 +59,18 @@
       button.dataset.themeToggle = '1';
 
       button.style.cssText = [
+        'position:fixed',
+        'top:calc(env(safe-area-inset-top, 0px) + 10px)',
+        'right:12px',
+        'z-index:99999',
         'cursor:pointer',
         'border:0',
         'background:transparent',
         'font-size:20px',
         'line-height:1',
-        'padding:6px'
+        'padding:6px',
+        'width:40px',
+        'height:40px'
       ].join(';');
 
       const header =
@@ -75,6 +81,11 @@
 
       header.appendChild(button);
     }
+
+    button.style.position = 'fixed';
+    button.style.top = 'calc(env(safe-area-inset-top, 0px) + 10px)';
+    button.style.right = '12px';
+    button.style.zIndex = '99999';
 
     if (!button.dataset.kerjaThemeBound) {
       button.dataset.kerjaThemeBound = '1';
