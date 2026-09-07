@@ -23,8 +23,6 @@ body.theme-light .menu-item{border:1px solid #cfe4f2;background:linear-gradient(
 body.theme-light .menu-item:hover{border-color:#54b9f5;background:linear-gradient(145deg,#fff,#e5f5ff);box-shadow:0 9px 24px rgba(24,135,213,.14)}
 body.theme-light .menu-item b{color:#1264ad}
 body.theme-light .menu-item small{color:#6b88a2}
-body.theme-light .menu-item[data-view="orders"]{border-color:#42aef2;background:linear-gradient(135deg,#e8f7ff,#cdeeff);box-shadow:0 8px 24px rgba(0,132,235,.16),inset 0 1px #fff}
-body.theme-light .menu-item[data-view="orders"] b{color:#075ca8}
 body.theme-light .menu-item.active{border-color:#42aef2;background:linear-gradient(135deg,#e8f7ff,#cdeeff);box-shadow:0 8px 24px rgba(0,132,235,.16),inset 0 1px #fff}
 body.theme-light .menu-item.active b{color:#075ca8}
 .menu-item.active{border-color:rgba(92,224,255,.55);background:rgba(92,224,255,.12);box-shadow:0 0 0 1px rgba(92,224,255,.08),0 8px 22px rgba(0,0,0,.12)}
