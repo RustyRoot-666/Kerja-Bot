@@ -2,13 +2,44 @@
 declare(strict_types=1);
 
 function web_report_day_match(string $day,string $period): bool {
-    $day=substr(trim($day),0,10); if($day==='') return false;
+    $day=trim($day);
     $period=strtolower(trim($period));
+
     if($period==='all') return true;
+    if($day==='') return false;
+
+    $date=null;
+
+    // Google Sheet replacement memakai format DD/MM/YYYY.
+    if(preg_match('/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})$/',$day,$m)){
+        $candidate=sprintf('%04d-%02d-%02d',(int)$m[3],(int)$m[2],(int)$m[1]);
+        $date=DateTimeImmutable::createFromFormat('!Y-m-d',$candidate);
+        $errors=DateTimeImmutable::getLastErrors();
+
+        if($date===false || (is_array($errors) && ($errors['warning_count']??0)>0)){
+            return false;
+        }
+    } else {
+        // Fallback untuk tanggal yang sudah berupa YYYY-MM-DD.
+        $date=DateTimeImmutable::createFromFormat('!Y-m-d',substr($day,0,10));
+        $errors=DateTimeImmutable::getLastErrors();
+
+        if($date===false || (is_array($errors) && ($errors['warning_count']??0)>0)){
+            return false;
+        }
+    }
+
+    $dateKey=$date->format('Y-m-d');
     $today=new DateTimeImmutable('today');
-    if($period==='daily') return $day===$today->format('Y-m-d');
+
+    if($period==='daily'){
+        return $dateKey===$today->format('Y-m-d');
+    }
+
     [$start,$end]=period_bounds($today);
-    return $day>=$start->format('Y-m-d') && $day<=$end->format('Y-m-d');
+
+    return $dateKey>=$start->format('Y-m-d')
+        && $dateKey<=$end->format('Y-m-d');
 }
 function web_report_area_match(string $sto,string $area): bool {
     $area=strtoupper(trim($area)); $sto=strtoupper(trim($sto));
@@ -58,7 +89,7 @@ function web_replacement_rows(): array {
         else foreach(($updates[$inet]??[]) as $u){
             $s=(string)$u['status'];
             if(str_contains($s,'MENOLAK')||str_contains($s,'REJECT')||$s==='DITOLAK')$latestUpdate=['status'=>'MENOLAK','rca'=>(string)$u['rca'],'id'=>(int)$u['id']];
-            elseif($s==='UPDATE'||str_contains($s,'UPDATE')||str_contains($s,'PROGRESS'))$latestUpdate=['status'=>'UPDATE','rca'=>(string)$u['rca'],'id'=>(int)$u['id'];
+            elseif($s==='UPDATE'||str_contains($s,'UPDATE')||str_contains($s,'PROGRESS'))$latestUpdate=['status'=>'UPDATE','rca'=>(string)$u['rca'],'id'=>(int)$u['id']];
         }
         if($latestUpdate){$status=$latestUpdate['status'];$rca=$latestUpdate['rca'];}
         $out[]=['service_number'=>$inet,'status'=>$status,'result'=>$status,'rca'=>$rca,'sheet_rca'=>norm($row[$rcaSheetCol]??''),'technician_name'=>trim((string)($row[$nameCol]??'')),'date'=>trim((string)($row[$dateCol]??'')),'raw_day'=>substr(trim((string)($row[$dateCol]??'')),0,10),'ticket_id'=>trim((string)($row[$ticketCol]??'')),'address'=>trim((string)($row[$addressCol]??'')),'customer_name'=>trim((string)($row[$customerCol]??'')),'customer_phone'=>trim((string)($row[$phoneCol]??'')),'source'=>'replacement_sheet'];
@@ -77,10 +108,144 @@ function web_replacement_orders_for_tech(array $tech,string $area,string $period
     return$orders;
 }
 function web_report_technician_list(string $area,string $period): array {
-    $out=[];try{$replacement=web_replacement_rows();}catch(Throwable $e){error_log('[miniapp-php] replacement report unavailable: '.$e->getMessage());$replacement=[];}
-    foreach(report_filter_technicians() as $tech){if(!web_report_area_match((string)$tech['sto'],$area))continue;$orders=[];foreach($replacement as $o)if(web_replacement_technician_matches($o,$tech)&&web_report_day_match((string)($o['raw_day']??''),$period)){$o['technician_nik']=$tech['nik'];$o['technician_name']=$tech['name'];$o['sto']=$tech['sto'];$orders[]=$o;}$counts=['close'=>0,'open'=>0,'update'=>0,'reject'=>0];foreach($orders as $o)$counts[web_report_bucket(web_report_status($o))]++;$out[]=['nik'=>$tech['nik'],'name'=>$tech['name'],'sto'=>$tech['sto'],'telegram_id'=>(int)($tech['telegram_id']??0),'total'=>count($orders),'close'=>$counts['close'],'open'=>$counts['open'],'update'=>$counts['update'],'menolak'=>$counts['reject'],'progress'=>count($orders)?round($counts['close']*100/count($orders),1):0];}
-    usort($out,fn($a,$b)=>((int)$b['total']<=>(int)$a['total'])?:strcmp($a['name'],$b['name']));return$out;
+    $out=[];
+
+    try{
+        $replacement=web_replacement_rows();
+    }catch(Throwable $e){
+        error_log('[miniapp-php] replacement report unavailable: '.$e->getMessage());
+        $replacement=[];
+    }
+
+    /*
+     * Replacement roster berasal langsung dari NAMA PETUGAS Sheet.
+     * Kepemilikan order TIDAK bergantung pada tabel technicians.
+     */
+    $sheetTech=[];
+
+    foreach($replacement as $o){
+        $name=trim((string)($o['technician_name']??''));
+        $key=norm_name($name);
+
+        if($key==='') continue;
+
+        if(!isset($sheetTech[$key])){
+            $sheetTech[$key]=[
+                'name'=>$name,
+                'sto'=>'MYR',
+                'nik'=>'',
+                'telegram_id'=>0
+            ];
+        }
+    }
+
+    /*
+     * Metadata database, jika tersedia.
+     */
+    $dbTech=[];
+
+    foreach(report_filter_technicians() as $tech){
+        $key=norm_name((string)($tech['name']??''));
+        if($key!=='') $dbTech[$key]=$tech;
+    }
+
+    /*
+     * Alias nama Sheet -> nama database.
+     */
+    $aliases=[
+        norm_name('ABDULLAH IKHSAN')=>norm_name('ABDULLAH IKHSAN ALFATHSALAM')
+    ];
+
+    foreach($sheetTech as $key=>$base){
+
+        $tech=$base;
+
+        if(isset($dbTech[$key])){
+            $tech=array_merge($tech,$dbTech[$key]);
+        }elseif(isset($aliases[$key]) && isset($dbTech[$aliases[$key]])){
+            $tech=array_merge($tech,$dbTech[$aliases[$key]]);
+        }
+
+        /*
+         * Area Replacement saat ini adalah MYR.
+         */
+        if(!web_report_area_match(
+            (string)($tech['sto']??'MYR'),
+            $area
+        )) continue;
+
+        /*
+         * PENTING:
+         * Order dicocokkan langsung dengan NAMA PETUGAS Sheet.
+         * Jangan menggunakan nama canonical dari database.
+         */
+        $orders=[];
+
+        foreach($replacement as $o){
+
+            $orderName=norm_name(
+                (string)($o['technician_name']??'')
+            );
+
+            if(
+                $orderName===$key &&
+                web_report_day_match(
+                    (string)($o['raw_day']??''),
+                    $period
+                )
+            ){
+                $o['technician_nik']=(string)($tech['nik']??'');
+                $o['technician_name']=$base['name'];
+                $o['sto']=(string)($tech['sto']??'MYR');
+                $orders[]=$o;
+            }
+        }
+
+        $counts=[
+            'close'=>0,
+            'open'=>0,
+            'update'=>0,
+            'reject'=>0
+        ];
+
+        foreach($orders as $o){
+            $bucket=web_report_bucket(
+                web_report_status($o)
+            );
+
+            if(isset($counts[$bucket])){
+                $counts[$bucket]++;
+            }
+        }
+
+        $out[]=[
+            'nik'=>(string)($tech['nik']??''),
+            'name'=>$base['name'],
+            'sto'=>strtoupper(
+                trim((string)($tech['sto']??'MYR'))
+            ),
+            'telegram_id'=>(int)($tech['telegram_id']??0),
+            'total'=>count($orders),
+            'close'=>$counts['close'],
+            'open'=>$counts['open'],
+            'update'=>$counts['update'],
+            'menolak'=>$counts['reject'],
+            'progress'=>count($orders)
+                ? round($counts['close']*100/count($orders),1)
+                : 0
+        ];
+    }
+
+    usort(
+        $out,
+        fn($a,$b)=>
+            ((int)$b['total']<=>(int)$a['total'])
+            ?:strcmp($a['name'],$b['name'])
+    );
+
+    return $out;
 }
+
 function web_report_selected(int $viewerTelegramId,string $nik,string $area,string $period): array {
     $viewer=technician_by_telegram($viewerTelegramId);if(!$viewer||!report_is_supervisor($viewer))return['ok'=>false,'error'=>'forbidden','message'=>'Laporan teknisi lain hanya untuk supervisor/admin.'];$tech=report_target_by_nik($nik);if(!$tech)return['ok'=>false,'error'=>'technician_not_found','message'=>'Teknisi tidak ditemukan.'];if(!web_report_area_match((string)$tech['sto'],$area))return['ok'=>false,'error'=>'area_mismatch','message'=>'Teknisi tidak termasuk area filter.'];$tid=(int)($tech['telegram_id']??0);if($tid<=0)return['ok'=>false,'error'=>'technician_not_linked','message'=>'Teknisi belum terhubung ke akun Telegram.'];
     try{$orders=web_replacement_orders_for_tech($tech,$area,$period);}catch(Throwable $e){return['ok'=>false,'error'=>'replacement_source_error','message'=>$e->getMessage()];}$counts=['close'=>0,'open'=>0,'update'=>0,'reject'=>0];
