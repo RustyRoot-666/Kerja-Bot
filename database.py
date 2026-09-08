@@ -113,12 +113,36 @@ class Database:
                         FOREIGN KEY (technician_id) REFERENCES technicians(id) ON DELETE CASCADE
                     );
 
+                    CREATE TABLE IF NOT EXISTS payroll_records (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        technician_id INTEGER,
+                        nik TEXT NOT NULL,
+                        technician_name TEXT NOT NULL DEFAULT '',
+                        validasi_tactical TEXT NOT NULL DEFAULT '',
+                        validasi_parameter TEXT NOT NULL DEFAULT '',
+                        hss TEXT NOT NULL DEFAULT '',
+                        batch TEXT NOT NULL DEFAULT '',
+                        status_rapel TEXT NOT NULL DEFAULT '',
+                        submission_date TEXT NOT NULL DEFAULT '',
+                        task_payment TEXT NOT NULL DEFAULT '',
+                        status_payment TEXT NOT NULL DEFAULT '',
+                        paid_to TEXT NOT NULL DEFAULT '',
+                        payment_information TEXT NOT NULL DEFAULT '',
+                        source_row_hash TEXT NOT NULL UNIQUE,
+                        source TEXT NOT NULL DEFAULT 'Google Sheets - REKON | VALIDASI',
+                        synced_at TEXT NOT NULL,
+                        FOREIGN KEY (technician_id) REFERENCES technicians(id) ON DELETE SET NULL
+                    );
+
                     CREATE INDEX IF NOT EXISTS idx_histories_telegram ON histories(telegram_id);
                     CREATE INDEX IF NOT EXISTS idx_histories_ticket ON histories(ticket_id);
                     CREATE INDEX IF NOT EXISTS idx_histories_service ON histories(service_number);
                     CREATE INDEX IF NOT EXISTS idx_histories_sn ON histories(old_sn, new_sn);
                     CREATE INDEX IF NOT EXISTS idx_web_link_requests_telegram ON web_link_requests(telegram_id, status);
                     CREATE INDEX IF NOT EXISTS idx_web_sessions_technician ON web_sessions(technician_id);
+                    CREATE INDEX IF NOT EXISTS idx_payroll_nik ON payroll_records(nik);
+                    CREATE INDEX IF NOT EXISTS idx_payroll_technician ON payroll_records(technician_id);
+                    CREATE INDEX IF NOT EXISTS idx_payroll_payment_status ON payroll_records(status_payment);
                     """
                 )
 
@@ -242,4 +266,5 @@ class Database:
                 users = conn.execute("SELECT COUNT(*) AS total FROM technicians").fetchone()["total"]
                 histories = conn.execute("SELECT COUNT(*) AS total FROM histories").fetchone()["total"]
                 ocr_failures = conn.execute("SELECT COUNT(*) AS total FROM ocr_logs WHERE status != 'success'").fetchone()["total"]
-        return {"users": users, "histories": histories, "ocr_failures": ocr_failures}
+                payroll = conn.execute("SELECT COUNT(*) AS total FROM payroll_records").fetchone()["total"]
+        return {"users": users, "histories": histories, "ocr_failures": ocr_failures, "payroll_records": payroll}
