@@ -88,8 +88,33 @@ function web_replacement_rows(): array {
         if(isset($report[$inet])){$status='CLOSE';$rca='DONE';}
         else foreach(($updates[$inet]??[]) as $u){
             $s=(string)$u['status'];
-            if(str_contains($s,'MENOLAK')||str_contains($s,'REJECT')||$s==='DITOLAK')$latestUpdate=['status'=>'MENOLAK','rca'=>(string)$u['rca'],'id'=>(int)$u['id']];
-            elseif($s==='UPDATE'||str_contains($s,'UPDATE')||str_contains($s,'PROGRESS'))$latestUpdate=['status'=>'UPDATE','rca'=>(string)$u['rca'],'id'=>(int)$u['id']];
+            $r=(string)$u['rca'];
+
+            if(
+                str_contains($s,'MENOLAK') ||
+                str_contains($s,'REJECT') ||
+                $s==='DITOLAK' ||
+                str_contains($r,'MENOLAK') ||
+                str_contains($r,'REJECT') ||
+                $r==='DITOLAK'
+            ){
+                $latestUpdate=[
+                    'status'=>'MENOLAK',
+                    'rca'=>$r,
+                    'id'=>(int)$u['id']
+                ];
+            }
+            elseif(
+                $s==='UPDATE' ||
+                str_contains($s,'UPDATE') ||
+                str_contains($s,'PROGRESS')
+            ){
+                $latestUpdate=[
+                    'status'=>'UPDATE',
+                    'rca'=>$r,
+                    'id'=>(int)$u['id']
+                ];
+            }
         }
         if($latestUpdate){$status=$latestUpdate['status'];$rca=$latestUpdate['rca'];}
         $out[]=['service_number'=>$inet,'status'=>$status,'result'=>$status,'rca'=>$rca,'sheet_rca'=>norm($row[$rcaSheetCol]??''),'technician_name'=>trim((string)($row[$nameCol]??'')),'date'=>trim((string)($row[$dateCol]??'')),'raw_day'=>substr(trim((string)($row[$dateCol]??'')),0,10),'ticket_id'=>trim((string)($row[$ticketCol]??'')),'address'=>trim((string)($row[$addressCol]??'')),'customer_name'=>trim((string)($row[$customerCol]??'')),'customer_phone'=>trim((string)($row[$phoneCol]??'')),'source'=>'replacement_sheet'];
