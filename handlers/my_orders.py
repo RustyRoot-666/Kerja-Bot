@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from datetime import datetime
 from html import escape
-from urllib.parse import quote_plus
+from urllib.parse import quote, quote_plus
+from zoneinfo import ZoneInfo
 
 from telegram import (
     InlineKeyboardButton,
@@ -19,6 +21,7 @@ from telegram.ext import (
     filters,
 )
 
+from handlers.customer_format import build_customer_whatsapp_text
 from services.auth import require_technician
 from services.google_sheet_reference import (
     ReferenceStatus,
@@ -122,7 +125,53 @@ def orderanku_menu() -> ReplyKeyboardMarkup:
     )
 
 
-def copy_buttons(service: str, phone: str, address: str = "") -> InlineKeyboardMarkup:
+def normalize_whatsapp_phone(phone: str) -> str:
+    normalized = re.sub(r"[^0-9]", "", str(phone or ""))
+    if normalized.startswith("0"):
+        normalized = "62" + normalized[1:]
+    return normalized
+
+
+def whatsapp_customer_url(
+    *,
+    technician_name: str,
+    customer_name: str,
+    inet: str,
+    address: str,
+    phone: str,
+    timezone_name: str = "Asia/Jakarta",
+) -> str | None:
+    normalized_phone = normalize_whatsapp_phone(phone)
+    if not normalized_phone or normalized_phone in {"0", "62"} or len(normalized_phone) < 8:
+        return None
+
+    hour = datetime.now(ZoneInfo(timezone_name)).hour
+    if hour < 11:
+        greeting = "Selamat pagi"
+    elif hour < 15:
+        greeting = "Selamat siang"
+    elif hour < 18:
+        greeting = "Selamat sore"
+    else:
+        greeting = "Selamat malam"
+
+    message = build_customer_whatsapp_text(
+        greeting=greeting,
+        technician_name=str(technician_name or "Teknisi").strip() or "Teknisi",
+        customer_name=str(customer_name or "Bapak/Ibu").strip() or "Bapak/Ibu",
+        inet=str(inet or "-").strip() or "-",
+        address=str(address or "-").strip() or "-",
+        phone=str(phone or "-").strip() or "-",
+    )
+    return f"https://wa.me/{normalized_phone}?text={quote(message)}"
+
+
+def copy_buttons(
+    service: str,
+    phone: str,
+    address: str = "",
+    whatsapp_url: str | None = None,
+) -> InlineKeyboardMarkup:
     buttons = [
         InlineKeyboardButton("📋 Salin INET", callback_data=f"copy_inet:{service}"),
         InlineKeyboardButton("📋 Salin CP", callback_data=f"copy_cp:{phone}"),
@@ -131,6 +180,8 @@ def copy_buttons(service: str, phone: str, address: str = "") -> InlineKeyboardM
     rows = [buttons]
     if maps:
         rows.append([InlineKeyboardButton("📍 Buka Google Maps", url=maps)])
+    if whatsapp_url:
+        rows.append([InlineKeyboardButton("📲 KIRIM PESAN", url=whatsapp_url)])
     return InlineKeyboardMarkup(rows)
 
 
@@ -387,10 +438,17 @@ async def show_area_open(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     for index, reference in enumerate(open_orders[:50], start=1):
         service = reference.service_number.strip() or "-"
         phone = reference.customer_phone.strip() or "-"
+        whatsapp_url = whatsapp_customer_url(
+            technician_name=technician.name,
+            customer_name=reference.customer_name,
+            inet=service,
+            address=reference.address,
+            phone=phone,
+        )
         await query.message.reply_text(
             format_reference_open(reference, index),
             parse_mode="HTML",
-            reply_markup=copy_buttons(service, phone, reference.address),
+            reply_markup=copy_buttons(service, phone, reference.address, whatsapp_url),
         )
     if len(open_orders) > 50:
         await query.message.reply_text(
@@ -584,10 +642,18 @@ async def orderanku(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             service = displayed_service(order, reference)
             phone = displayed_value(order.customer_phone, reference.customer_phone if reference else "")
             address = displayed_value(order.address, reference.address if reference else "")
+            customer_name = displayed_value(order.customer_name, reference.customer_name if reference else "")
+            whatsapp_url = whatsapp_customer_url(
+                technician_name=technician.name,
+                customer_name=customer_name,
+                inet=service,
+                address=address,
+                phone=phone,
+            )
             await update.effective_message.reply_text(
                 format_order(order, index, reference, status),
                 parse_mode="HTML",
-                reply_markup=copy_buttons(service, phone, address),
+                reply_markup=copy_buttons(service, phone, address, whatsapp_url),
             )
     else:
         chunks: list[str] = []
