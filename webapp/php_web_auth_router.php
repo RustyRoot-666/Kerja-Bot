@@ -38,6 +38,21 @@ if($path==='/api/auth/login'&&$method==='POST'){$p=web_auth_input();$result=auth
 if($path==='/api/auth/me'&&$method==='GET'){$tech=auth_current();if(!$tech)web_auth_respond(['ok'=>false,'error'=>'unauthorized'],401);web_auth_respond(['ok'=>true,'technician'=>['id'=>(int)$tech['id'],'telegram_id'=>(int)$tech['telegram_id'],'nik'=>$tech['nik'],'name'=>$tech['name'],'sto'=>$tech['sto'],'role'=>$tech['role'],'has_password'=>!empty($tech['password_hash'])]]);}
 if($path==='/api/auth/password'&&$method==='POST'){$tech=auth_require();$p=web_auth_input();$current=(string)($p['current_password']??'');$new=(string)($p['new_password']??'');$confirm=(string)($p['confirm_password']??'');if(empty($tech['password_hash']))web_auth_respond(['ok'=>false,'error'=>'password_not_set','message'=>'Password awal harus dibuat oleh Bot Telegram.'],400);if(strlen($new)<8)web_auth_respond(['ok'=>false,'error'=>'password_too_short','message'=>'Password baru minimal 8 karakter.'],400);if(strlen($new)>128)web_auth_respond(['ok'=>false,'error'=>'password_too_long','message'=>'Password baru maksimal 128 karakter.'],400);if($new!==$confirm)web_auth_respond(['ok'=>false,'error'=>'password_mismatch','message'=>'Konfirmasi password tidak sama.'],400);if(!auth_password_verify($current,(string)$tech['password_hash']))web_auth_respond(['ok'=>false,'error'=>'current_password_invalid','message'=>'Password saat ini salah.'],400);db()->prepare('UPDATE technicians SET password_hash=? WHERE id=? AND is_active=1')->execute([auth_password_hash($new),(int)$tech['id']]);web_auth_respond(['ok'=>true,'message'=>'Password berhasil diubah.']);}
 if($path==='/api/auth/logout'&&$method==='POST'){auth_logout();web_auth_respond(['ok'=>true]);}
+if($path==='/api/whatsapp-check'&&$method==='GET'){
+    require_once __DIR__.'/php_whatsapp_validation.php';
+    $raw=trim((string)($_GET['telegram_id']??''));
+    $phone=trim((string)($_GET['phone']??''));
+    if(!ctype_digit($raw))web_auth_respond(['ok'=>false,'error'=>'telegram_id_required'],400);
+    $tech=auth_technician_by_telegram((int)$raw);
+    if(!$tech||!(int)$tech['is_active'])web_auth_respond(['ok'=>false,'error'=>'forbidden'],403);
+    try{
+        $result=whatsapp_check_phone($phone);
+        web_auth_respond($result,($result['ok']??false)?200:400);
+    }catch(Throwable $e){
+        error_log('[miniapp-php] whatsapp check: '.$e->getMessage());
+        web_auth_respond(['ok'=>false,'error'=>'internal_error','message'=>'Validasi WhatsApp gagal.'],500);
+    }
+}
 if($path==='/api/my-open-orders'&&$method==='GET'){$raw=trim((string)($_GET['telegram_id']??''));if(!ctype_digit($raw))web_auth_respond(['ok'=>false,'error'=>'telegram_id_required'],400);try{$result=load_my_open_orders_fixed((int)$raw,((string)($_GET['force']??'0'))==='1');$status=($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:404);web_auth_respond($result,$status);}catch(Throwable $e){error_log('[miniapp-php] my-open-orders: '.$e->getMessage());web_auth_respond(['ok'=>false,'error'=>'internal_error','message'=>'Orderanku gagal membaca data.'],500);}}
 if($path==='/api/my-report'&&$method==='GET'){$raw=trim((string)($_GET['telegram_id']??''));if(!ctype_digit($raw))web_auth_respond(['ok'=>false,'error'=>'telegram_id_required'],400);try{$result=load_report_for_viewer_php((int)$raw,(string)($_GET['target_nik']??''));$status=($result['ok']??false)?200:(($result['error']??'')==='forbidden'?403:404);web_auth_respond($result,$status);}catch(Throwable $e){web_auth_respond(['ok'=>false,'error'=>'internal_error','message'=>'Laporan Orderanku gagal dimuat.'],500);}}
 if($path==='/api/web/my-report'&&$method==='GET'){$tech=auth_require(['technician','admin','superadmin']);web_auth_respond(load_report_for_viewer_php((int)$tech['telegram_id'],''));}
