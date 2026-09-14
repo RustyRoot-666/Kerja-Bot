@@ -23,6 +23,7 @@ from telegram.ext import (
 
 from handlers.customer_format import build_customer_whatsapp_text
 from services.auth import require_technician
+from services.whatsapp_validation import check_whatsapp, get_whatsapp_check, normalize_whatsapp_phone
 from services.google_sheet_reference import (
     ReferenceStatus,
     get_reference_statuses,
@@ -41,6 +42,7 @@ UPDATE_STATUSES = {"UPDATE", "UPDATED", "PROGRESS", "ON PROGRESS", "PENDING"}
 SEPARATOR = "━━━━━━━━━━━━━━━"
 BACK_TO_MAIN = "⬅️ Kembali ke Menu Utama"
 COPY_CALLBACK_PATTERN = r"^copy_(inet|cp):"
+WA_CHECK_CALLBACK_PATTERN = r"^check_wa:"
 AREA_CALLBACK_PATTERN = r"^myarea:"
 
 AREA_ALIASES: dict[str, tuple[str, ...]] = {
@@ -125,11 +127,20 @@ def orderanku_menu() -> ReplyKeyboardMarkup:
     )
 
 
-def normalize_whatsapp_phone(phone: str) -> str:
-    normalized = re.sub(r"[^0-9]", "", str(phone or ""))
-    if normalized.startswith("0"):
-        normalized = "62" + normalized[1:]
-    return normalized
+def _wa_status_text(phone: str) -> str:
+    result = get_whatsapp_check(phone)
+    if result is None:
+        return "⚪ WA BELUM DICEK"
+    return "🟢 WA VALID" if result["exists_whatsapp"] else "🔴 WA TIDAK TERDAFTAR"
+
+
+def _wa_check_button(phone: str) -> InlineKeyboardButton | None:
+    normalized = normalize_whatsapp_phone(phone)
+    if not normalized or normalized in {"0", "62"} or len(normalized) < 8:
+        return None
+    if get_whatsapp_check(normalized) is not None:
+        return None
+    return InlineKeyboardButton("🔍 CEK WA", callback_data=f"check_wa:{normalized}")
 
 
 def whatsapp_customer_url(
@@ -182,6 +193,11 @@ def copy_buttons(
         rows.append([InlineKeyboardButton("📍 Buka Google Maps", url=maps)])
     if whatsapp_url:
         rows.append([InlineKeyboardButton("📲 KIRIM PESAN", url=whatsapp_url)])
+    wa_check = _wa_check_button(phone)
+    if wa_check:
+        rows.append([wa_check])
+    else:
+        rows.append([InlineKeyboardButton(_wa_status_text(phone))])
     return InlineKeyboardMarkup(rows)
 
 
@@ -385,6 +401,26 @@ async def copy_order_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
     await query.answer("Nomor dikirim. Tekan lama pada pesan untuk menyalin.")
     await query.message.reply_text(value, reply_to_message_id=query.message.message_id)
+
+
+async def check_whatsapp_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    technician = await require_technician(update, context)
+    if query is None or query.message is None or technician is None:
+        return
+    phone = normalize_whatsapp_phone((query.data or "").split(":", 1)[-1])
+    await query.answer("Mengecek nomor WhatsApp...")
+    result = check_whatsapp(phone)
+    if not result.get("ok"):
+        message = {
+            "invalid_phone": "❌ Nomor CP tidak valid.",
+            "green_api_not_configured": "❌ Green-API belum dikonfigurasi.",
+        }.get(result.get("error"), "❌ Gagal mengecek nomor WhatsApp.")
+        await query.message.reply_text(message)
+        return
+    status = "🟢 WA VALID — nomor terdaftar dan dapat digunakan untuk chat." if result["exists_whatsapp"] else "🔴 WA TIDAK TERDAFTAR di WhatsApp."
+    cached = " (hasil tersimpan)" if result.get("cached") else " (hasil baru)"
+    await query.message.reply_text(f"{status}{cached}")
 
 
 async def show_area_open(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -681,6 +717,7 @@ def build_my_orders_handlers() -> list:
         CommandHandler("orderanku", orderanku),
         CommandHandler("refreshsheet", refresh_sheet),
         CallbackQueryHandler(show_area_open, pattern=AREA_CALLBACK_PATTERN),
+        CallbackQueryHandler(check_whatsapp_callback, pattern=WA_CHECK_CALLBACK_PATTERN),
         CallbackQueryHandler(copy_order_value, pattern=COPY_CALLBACK_PATTERN),
         MessageHandler(filters.Regex(f"^{re.escape(BACK_TO_MAIN)}$"), back_to_main_menu),
     ]
