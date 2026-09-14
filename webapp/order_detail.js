@@ -29,6 +29,41 @@ function orderankuWaUrl(order) {
   return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 }
 
+async function checkOrderankuWhatsapp(order, target) {
+  const phone = orderankuWaPhone(order?.customer_phone);
+  if (!phone) {
+    showToast('Nomor WhatsApp pelanggan tidak tersedia');
+    return;
+  }
+  const user = typeof telegramUser === 'function' ? telegramUser() : (window.Telegram?.WebApp?.initDataUnsafe?.user || null);
+  if (!user?.id) {
+    showToast('Mini App harus dibuka dari Telegram');
+    return;
+  }
+  target.textContent = '⏳ Mengecek WhatsApp...';
+  target.disabled = true;
+  try {
+    const qs = new URLSearchParams({ telegram_id: String(user.id), phone });
+    const r = await fetch('/api/whatsapp-check?' + qs.toString(), { cache: 'no-store' });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.message || d.error || 'Validasi gagal');
+    target.disabled = false;
+    if (d.exists_whatsapp) {
+      target.textContent = '🟢 WA VALID — TERDAFTAR';
+      target.dataset.valid = '1';
+      showToast('Nomor WhatsApp valid dan terdaftar');
+    } else {
+      target.textContent = '🔴 WA TIDAK TERDAFTAR';
+      target.dataset.valid = '0';
+      showToast('Nomor tidak terdaftar di WhatsApp');
+    }
+  } catch (e) {
+    target.disabled = false;
+    target.textContent = '🔍 CEK WA';
+    showToast('Gagal cek WA: ' + e.message);
+  }
+}
+
 function openOrderankuWhatsapp(order) {
   const url = orderankuWaUrl(order);
   if (!url) {
@@ -127,11 +162,14 @@ function renderMyOrderDetail(area, order, index) {
     </div>
     <button class="tool-action" id="orderCopyWa" type="button"><b>💬 SALIN FORMAT WA</b><span>Salin ›</span></button>
     <button class="tool-action" id="orderSendWa" type="button"><b>📲 KIRIM PESAN</b><span>WhatsApp ›</span></button>
+    <button class="tool-action" id="orderCheckWa" type="button"><b>🔍 CEK WA</b><span>Validasi ›</span></button>
     <button class="tool-action" id="orderStartInput" type="button"><b>＋ KERJAKAN ORDER INI</b><span>Input ›</span></button>`;
   list.appendChild(card);
 
   card.querySelector('#orderCopyWa')?.addEventListener('click', () => copyText(orderankuWaText(order), 'Format WhatsApp pelanggan tersalin'));
   card.querySelector('#orderSendWa')?.addEventListener('click', () => openOrderankuWhatsapp(order));
+  const checkWa = card.querySelector('#orderCheckWa');
+  checkWa?.addEventListener('click', () => checkOrderankuWhatsapp(order, checkWa));
   card.querySelector('#orderStartInput')?.addEventListener('click', () => {
     const selected = { ...order, area: area.area };
     openPage('inputPage');
