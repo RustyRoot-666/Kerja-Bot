@@ -235,6 +235,7 @@ function whatsappHelperMarkup(order) {
     <strong>💬 FORMAT WHATSAPP PELANGGAN</strong>
     <small>Data nama, INET, alamat, nomor HP, dan nama teknisi diambil otomatis dari order/akun teknisi.</small>
     <button class="tool-action" type="button" id="wfCopyWhatsapp"><b>💬 SALIN FORMAT WA</b><span>Salin ›</span></button>
+    <button class="tool-action" type="button" id="wfSendWhatsapp"><b>📲 KIRIM PESAN</b><span>WhatsApp ›</span></button>
   </div>`;
 }
 
@@ -250,6 +251,21 @@ function bindTicketHelpers(action, order) {
   });
   document.querySelector('#wfCopyWhatsapp')?.addEventListener('click', async () => {
     await copyText(whatsappCustomerText(order), 'Format WhatsApp pelanggan tersalin');
+  });
+  document.querySelector('#wfSendWhatsapp')?.addEventListener('click', () => {
+    const phone = String(order?.customer_phone || '').trim().replace(/[^0-9]/g, '');
+    if (!phone) {
+      showToast('Nomor WhatsApp pelanggan tidak tersedia');
+      return;
+    }
+    const normalized = phone.startsWith('0') ? '62' + phone.slice(1) : phone;
+    const message = whatsappCustomerText(order);
+    const url = `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`;
+    if (window.Telegram?.WebApp?.openLink) {
+      window.Telegram.WebApp.openLink(url);
+    } else {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
   });
 }
 
