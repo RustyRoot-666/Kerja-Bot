@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from database import Database
@@ -102,4 +102,17 @@ async def format_customer_command(update: Update, context: ContextTypes.DEFAULT_
         phone=_dash(order.customer_phone),
     )
 
-    await message.reply_text(text)
+    phone = str(order.customer_phone or "").strip()
+    normalized_phone = "".join(ch for ch in phone if ch.isdigit())
+    if normalized_phone.startswith("0"):
+        normalized_phone = "62" + normalized_phone[1:]
+    if normalized_phone and len(normalized_phone) >= 8:
+        from urllib.parse import quote
+        wa_url = f"https://wa.me/{normalized_phone}?text={quote(text)}"
+        markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📲 KIRIM PESAN", url=wa_url)],
+        ])
+    else:
+        markup = None
+
+    await message.reply_text(text, reply_markup=markup)
