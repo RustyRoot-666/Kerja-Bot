@@ -15,6 +15,33 @@ function orderankuWaText(order) {
   return `${greeting} Bapak/Ibu ${customer}.\n\nPerkenalkan, saya ${technician}, teknisi resmi IndiHome.\n\nMohon maaf mengganggu waktunya. Saya mendapat penugasan dari pihak Telkom untuk melakukan penggantian ONT/Modem pada layanan Bapak/Ibu sebagai bagian dari pembaruan perangkat jaringan.\n\nNo. Internet: ${inet}\nAlamat: ${address}\nNo. HP: ${phone}\n\nDengan penggantian perangkat ini, Bapak/Ibu akan mendapatkan beberapa benefit:\n• Jaringan lebih stabil\n• Perangkat kompatibel dengan jaringan WiFi 5 GHz\n• Biaya langganan tetap, tidak berubah\n• Tidak ada biaya pemasangan / GRATIS\n\nPekerjaan penggantian perangkat akan dilakukan oleh teknisi resmi IndiHome/Telkom yang mendapat penugasan.\n\nApabila Bapak/Ibu berkenan, mohon konfirmasi waktu yang sesuai agar saya dapat melakukan kunjungan.\n\nJika terdapat kendala atau membutuhkan konfirmasi terkait layanan, Bapak/Ibu dapat menghubungi layanan resmi Telkom melalui 188.\n\nTerima kasih atas perhatian dan kerja sama Bapak/Ibu. 🙏🏼`;
 }
 
+function orderankuWaPhone(phone) {
+  let p = String(phone || '').trim().replace(/[^0-9]/g, '');
+  if (!p) return '';
+  if (p.startsWith('0')) p = '62' + p.slice(1);
+  return p;
+}
+
+function orderankuWaUrl(order) {
+  const phone = orderankuWaPhone(order?.customer_phone);
+  if (!phone) return '';
+  const message = orderankuWaText(order);
+  return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+}
+
+function openOrderankuWhatsapp(order) {
+  const url = orderankuWaUrl(order);
+  if (!url) {
+    showToast('Nomor WhatsApp pelanggan tidak tersedia');
+    return;
+  }
+  if (window.Telegram?.WebApp?.openLink) {
+    window.Telegram.WebApp.openLink(url);
+  } else {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+}
+
 function jagirSubarea(order) {
   const address = String(order?.address || '').toUpperCase();
   if (address.includes('RUNGKUT')) return 'RUNGKUT';
@@ -99,10 +126,12 @@ function renderMyOrderDetail(area, order, index) {
       </div>
     </div>
     <button class="tool-action" id="orderCopyWa" type="button"><b>💬 SALIN FORMAT WA</b><span>Salin ›</span></button>
+    <button class="tool-action" id="orderSendWa" type="button"><b>📲 KIRIM PESAN</b><span>WhatsApp ›</span></button>
     <button class="tool-action" id="orderStartInput" type="button"><b>＋ KERJAKAN ORDER INI</b><span>Input ›</span></button>`;
   list.appendChild(card);
 
   card.querySelector('#orderCopyWa')?.addEventListener('click', () => copyText(orderankuWaText(order), 'Format WhatsApp pelanggan tersalin'));
+  card.querySelector('#orderSendWa')?.addEventListener('click', () => openOrderankuWhatsapp(order));
   card.querySelector('#orderStartInput')?.addEventListener('click', () => {
     const selected = { ...order, area: area.area };
     openPage('inputPage');
