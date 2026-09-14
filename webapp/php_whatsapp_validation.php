@@ -41,20 +41,23 @@ function whatsapp_check_phone(string $phone): array {
     }
 
     $url = $base . '/waInstance' . rawurlencode($instance) . '/checkWhatsapp/' . rawurlencode($token);
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_POST=>true,
-        CURLOPT_RETURNTRANSFER=>true,
-        CURLOPT_CONNECTTIMEOUT=>5,
-        CURLOPT_TIMEOUT=>20,
-        CURLOPT_HTTPHEADER=>['Content-Type: application/json'],
-        CURLOPT_POSTFIELDS=>json_encode(['phoneNumber'=>(int)$phone], JSON_UNESCAPED_SLASHES),
-    ]);
-    $raw = curl_exec($ch);
-    $errno = curl_errno($ch);
-    $error = curl_error($ch);
-    $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
+    $payload = json_encode(['phoneNumber'=>(int)$phone], JSON_UNESCAPED_SLASHES);
+    $ctx = stream_context_create(['http'=>[
+        'method'=>'POST',
+        'header'=>"Content-Type: application/json\r\nUser-Agent: Kerja-Bot-MiniApp/1.0\r\n",
+        'content'=>$payload,
+        'timeout'=>20,
+        'ignore_errors'=>true
+    ]]);
+    $raw = @file_get_contents($url, false, $ctx);
+    $status = 0;
+    foreach (($http_response_header ?? []) as $header) {
+        if (preg_match('/^HTTP\/\S+\s+(\d+)/', $header, $m)) { $status=(int)$m[1]; break; }
+    }
+
+    if ($raw === false || $status < 200 || $status >= 300) {
+        return ['ok'=>false,'error'=>'green_api_request_failed','message'=>$status ? ('HTTP ' . $status) : 'HTTP request failed'];
+    }
 
     if ($errno || $raw === false || $status < 200 || $status >= 300) {
         return ['ok'=>false,'error'=>'green_api_request_failed','message'=>$error ?: ('HTTP ' . $status)];
