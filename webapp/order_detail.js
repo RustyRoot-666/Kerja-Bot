@@ -9,6 +9,20 @@ function orderankuWaStatusKey(order) {
 }
 
 function orderankuWaStatusHtml(order) {
+  const raw = String(
+    order?.whatsapp_status ??
+    order?.wa_status ??
+    order?.whatsapp_valid ??
+    ''
+  ).trim().toUpperCase();
+
+  if (raw === 'VALID' || raw === 'TRUE' || raw === '1' || raw === 'TERDAFTAR') {
+    return '🟢 WA VALID — TERDAFTAR';
+  }
+  if (raw === 'TIDAK VALID' || raw === 'INVALID' || raw === 'FALSE' || raw === '0' || raw === 'TIDAK TERDAFTAR') {
+    return '🔴 WA TIDAK TERDAFTAR';
+  }
+
   const key = orderankuWaStatusKey(order);
   const status = orderankuWhatsappStatus.get(key);
   if (status?.exists === true) return '🟢 WA VALID — TERDAFTAR';
@@ -159,7 +173,7 @@ function orderCard(area, order, index) {
   button.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
     <div style="min-width:0;flex:1">
       <strong>${index + 1}. ${esc(order.customer_name || '-')}</strong>
-      <small style="line-height:1.65">🏷 ${esc(source)} • ${esc(order.sto || (source === 'WO JAGIR' ? 'JGR' : 'MYR'))}<br>🎫 ${esc(order.ticket_id || 'MANUAL')}<br>🌐 ${esc(order.service_number || '-')}<br>📞 ${esc(order.customer_phone || '-')}<br>⚡ ${esc(order.package || '-')}<br>📡 ONU RX: ${esc(order.onu_rx || '-')}<br>📝 RCA: ${esc(order.rca || '-')}<br>🏠 ${esc(order.address || '-')}</small>
+      <small style="line-height:1.65">🏷 ${esc(source)} • ${esc(order.sto || (source === 'WO JAGIR' ? 'JGR' : 'MYR'))}<br>🎫 ${esc(order.ticket_id || 'MANUAL')}<br>🌐 ${esc(order.service_number || '-')}<br>📞 ${esc(order.customer_phone || '-')}<br>📲 ${orderankuWaStatusHtml(order)}<br>⚡ ${esc(order.package || '-')}<br>📡 ONU RX: ${esc(order.onu_rx || '-')}<br>📝 RCA: ${esc(order.rca || '-')}<br>🏠 ${esc(order.address || '-')}</small>
     </div>
     <span style="font-size:22px;color:#55d9ff;line-height:1">›</span>
   </div>`;
@@ -212,7 +226,8 @@ function renderMyOrderDetail(area, order, index) {
   card.querySelector('#orderSendWa')?.addEventListener('click', () => openOrderankuWhatsapp(order));
   const waStatus = card.querySelector('#orderWaStatus');
   const checkWa = card.querySelector('#orderCheckWa');
-  restoreOrderankuWhatsappStatus(order, waStatus);
+  // Status WA pada card hanya membaca hasil yang sudah tersimpan di order/session.
+  // Tidak melakukan pengecekan otomatis saat detail dibuka.
   checkWa?.addEventListener('click', () => checkOrderankuWhatsapp(order, checkWa, waStatus));
   card.querySelector('#orderStartInput')?.addEventListener('click', () => {
     const selected = { ...order, area: area.area };
