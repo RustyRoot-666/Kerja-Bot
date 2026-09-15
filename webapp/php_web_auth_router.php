@@ -46,7 +46,8 @@ if($path==='/api/whatsapp-check'&&$method==='GET'){
     $tech=auth_technician_by_telegram((int)$raw);
     if(!$tech||!(int)$tech['is_active'])web_auth_respond(['ok'=>false,'error'=>'forbidden'],403);
     try{
-        $result=whatsapp_check_phone($phone);
+        $cachedOnly=((string)($_GET['cached_only']??'0'))==='1';
+        $result=whatsapp_check_phone($phone,$cachedOnly);
         web_auth_respond($result,($result['ok']??false)?200:400);
     }catch(Throwable $e){
         error_log('[miniapp-php] whatsapp check: '.$e->getMessage());
