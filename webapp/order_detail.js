@@ -2,6 +2,46 @@
 // Orderanku merges MYR Sheet orders and JGR Work Order JAGIR while preserving ownership.
 
 const orderankuFilter = { sto: 'ALL', jagirArea: 'ALL' };
+const orderankuWhatsappStatus = new Map();
+
+function orderankuWaStatusKey(order) {
+  return orderankuWaPhone(order?.customer_phone);
+}
+
+function orderankuWaStatusHtml(order) {
+  const key = orderankuWaStatusKey(order);
+  const status = orderankuWhatsappStatus.get(key);
+  if (status?.exists === true) return '🟢 WA VALID — TERDAFTAR';
+  if (status?.exists === false) return '🔴 WA TIDAK TERDAFTAR';
+  return '⚪ WA: BELUM DICEK';
+}
+
+function setOrderankuWaStatus(order, exists, checkedAt = '') {
+  const key = orderankuWaStatusKey(order);
+  if (!key) return;
+  orderankuWhatsappStatus.set(key, {
+    exists: exists === true ? true : exists === false ? false : null,
+    checkedAt: checkedAt || ''
+  });
+}
+
+async function restoreOrderankuWhatsappStatus(order, target) {
+  const phone = orderankuWaPhone(order?.customer_phone);
+  const user = typeof telegramUser === 'function' ? telegramUser() : (window.Telegram?.WebApp?.initDataUnsafe?.user || null);
+  if (!phone || !user?.id || !target) return;
+  try {
+    const qs = new URLSearchParams({ telegram_id: String(user.id), phone, cached_only: '1' });
+    const r = await fetch('/api/whatsapp-check?' + qs.toString(), { cache: 'no-store' });
+    const d = await r.json();
+    if (!r.ok || !d.ok) return;
+    if (d.exists_whatsapp === true || d.exists_whatsapp === false) {
+      setOrderankuWaStatus(order, d.exists_whatsapp, d.checked_at);
+      target.textContent = orderankuWaStatusHtml(order);
+    }
+  } catch (_) {
+    // Keep the explicit "belum dicek" state when no cached result is available.
+  }
+}
 
 function orderankuWaText(order) {
   if (typeof whatsappCustomerText === 'function') return whatsappCustomerText(order);
@@ -29,7 +69,7 @@ function orderankuWaUrl(order) {
   return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 }
 
-async function checkOrderankuWhatsapp(order, target) {
+async function checkOrderankuWhatsapp(order, target, statusTarget) {
   const phone = orderankuWaPhone(order?.customer_phone);
   if (!phone) {
     showToast('Nomor WhatsApp pelanggan tidak tersedia');
@@ -40,7 +80,7 @@ async function checkOrderankuWhatsapp(order, target) {
     showToast('Mini App harus dibuka dari Telegram');
     return;
   }
-  target.textContent = '⏳ Mengecek WhatsApp...';
+  target.innerHTML = '<b>⏳ MENGECEK WHATSAPP...</b><span>Mohon tunggu</span>';
   target.disabled = true;
   try {
     const qs = new URLSearchParams({ telegram_id: String(user.id), phone });
@@ -48,18 +88,19 @@ async function checkOrderankuWhatsapp(order, target) {
     const d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.message || d.error || 'Validasi gagal');
     target.disabled = false;
+    target.innerHTML = '<b>🔍 CEK WA</b><span>Validasi ›</span>';
+    setOrderankuWaStatus(order, d.exists_whatsapp, d.checked_at);
+    if (statusTarget) statusTarget.textContent = orderankuWaStatusHtml(order);
     if (d.exists_whatsapp) {
-      target.textContent = '🟢 WA VALID — TERDAFTAR';
       target.dataset.valid = '1';
       showToast('Nomor WhatsApp valid dan terdaftar');
     } else {
-      target.textContent = '🔴 WA TIDAK TERDAFTAR';
       target.dataset.valid = '0';
       showToast('Nomor tidak terdaftar di WhatsApp');
     }
   } catch (e) {
     target.disabled = false;
-    target.textContent = '🔍 CEK WA';
+    target.innerHTML = '<b>🔍 CEK WA</b><span>Validasi ›</span>';
     showToast('Gagal cek WA: ' + e.message);
   }
 }
@@ -162,14 +203,17 @@ function renderMyOrderDetail(area, order, index) {
     </div>
     <button class="tool-action" id="orderCopyWa" type="button"><b>💬 SALIN FORMAT WA</b><span>Salin ›</span></button>
     <button class="tool-action" id="orderSendWa" type="button"><b>📲 KIRIM PESAN</b><span>WhatsApp ›</span></button>
+    <div id="orderWaStatus" style="margin:10px 0 2px;padding:11px 13px;border:1px solid #294562;border-radius:12px;background:#0a1929;color:#dff8ff;font-size:12px;font-weight:800;text-align:center">${orderankuWaStatusHtml(order)}</div>
     <button class="tool-action" id="orderCheckWa" type="button"><b>🔍 CEK WA</b><span>Validasi ›</span></button>
     <button class="tool-action" id="orderStartInput" type="button"><b>＋ KERJAKAN ORDER INI</b><span>Input ›</span></button>`;
   list.appendChild(card);
 
   card.querySelector('#orderCopyWa')?.addEventListener('click', () => copyText(orderankuWaText(order), 'Format WhatsApp pelanggan tersalin'));
   card.querySelector('#orderSendWa')?.addEventListener('click', () => openOrderankuWhatsapp(order));
+  const waStatus = card.querySelector('#orderWaStatus');
   const checkWa = card.querySelector('#orderCheckWa');
-  checkWa?.addEventListener('click', () => checkOrderankuWhatsapp(order, checkWa));
+  restoreOrderankuWhatsappStatus(order, waStatus);
+  checkWa?.addEventListener('click', () => checkOrderankuWhatsapp(order, checkWa, waStatus));
   card.querySelector('#orderStartInput')?.addEventListener('click', () => {
     const selected = { ...order, area: area.area };
     openPage('inputPage');
