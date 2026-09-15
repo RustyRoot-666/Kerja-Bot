@@ -7,7 +7,7 @@ function whatsapp_normalize_phone(mixed $phone): string {
     return $value;
 }
 
-function whatsapp_check_phone(string $phone): array {
+function whatsapp_check_phone(string $phone, bool $cachedOnly = false): array {
     $phone = whatsapp_normalize_phone($phone);
     if ($phone === '' || $phone === '62' || strlen($phone) < 8) {
         return ['ok'=>false,'error'=>'invalid_phone','phone_number'=>$phone];
@@ -30,6 +30,17 @@ function whatsapp_check_phone(string $phone): array {
             'exists_whatsapp'=>(bool)$cached['exists_whatsapp'],
             'checked_at'=>$cached['checked_at'],
             'cached'=>true
+        ];
+    }
+
+    if ($cachedOnly) {
+        return [
+            'ok'=>true,
+            'phone_number'=>$phone,
+            'exists_whatsapp'=>null,
+            'checked_at'=>null,
+            'cached'=>false,
+            'not_checked'=>true
         ];
     }
 
@@ -57,10 +68,6 @@ function whatsapp_check_phone(string $phone): array {
 
     if ($raw === false || $status < 200 || $status >= 300) {
         return ['ok'=>false,'error'=>'green_api_request_failed','message'=>$status ? ('HTTP ' . $status) : 'HTTP request failed'];
-    }
-
-    if ($errno || $raw === false || $status < 200 || $status >= 300) {
-        return ['ok'=>false,'error'=>'green_api_request_failed','message'=>$error ?: ('HTTP ' . $status)];
     }
 
     $payload = json_decode((string)$raw, true);
